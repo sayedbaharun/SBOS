@@ -60,7 +60,7 @@ const aiRateLimiter = rateLimit({
     return req.ip || "anonymous";
   },
   // Skip validation for keyGenerator since we handle it properly
-  validate: { xForwardedForHeader: false },
+  validate: { xForwardedForHeader: false, keyGeneratorIpFallback: false },
 });
 
 // Helper to ensure default user exists for chat operations

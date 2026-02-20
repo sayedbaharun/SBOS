@@ -27,7 +27,7 @@ const aiRateLimiter = rateLimit({
     const session = (req as any).session;
     return session?.userId || req.ip || "anonymous";
   },
-  validate: { xForwardedForHeader: false },
+  validate: { xForwardedForHeader: false, keyGeneratorIpFallback: false },
 });
 
 // Domain labels for context
