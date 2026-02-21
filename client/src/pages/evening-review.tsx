@@ -10,19 +10,11 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Moon,
   CheckCircle2,
   Circle,
   Target,
   Rocket,
-  ListTodo,
   ChevronRight,
   ChevronLeft,
   Trophy,
@@ -70,7 +62,6 @@ interface Day {
   eveningRituals: {
     reviewCompleted?: boolean;
     journalEntry?: string;
-    tomorrowPriorities?: string[];
     fastingHours?: number;
     fastingCompleted?: boolean;
     deepWorkHours?: number;
@@ -120,7 +111,6 @@ export default function EveningReview() {
 
   const [review, setReview] = useState({
     reflectionPm: "",
-    tomorrowPriorities: ["", "", ""],
     reviewCompleted: false,
     fastingHours: 0,
     deepWorkHours: 0,
@@ -159,29 +149,12 @@ export default function EveningReview() {
     },
   });
 
-  // Fetch all outstanding P0/P1 tasks for priority picker
-  const { data: allTasks = [] } = useQuery<Task[]>({
-    queryKey: ["/api/tasks", { status: "outstanding" }],
-    queryFn: async () => {
-      const res = await fetch(`/api/tasks?status=todo`, { credentials: "include" });
-      const tasks = await res.json();
-      // Filter for P0/P1 tasks only
-      return Array.isArray(tasks)
-        ? tasks.filter((t: Task) => (t.priority === "P0" || t.priority === "P1") && t.status !== "completed" && t.status !== "on_hold")
-        : [];
-    },
-  });
-
-  // P0/P1 tasks available for all priority slots
-  const priorityTasks = Array.isArray(allTasks) ? allTasks : [];
-
   const todayHealth = Array.isArray(healthEntries) ? healthEntries[0] : null;
 
   // Reset state when navigating to a different date
   useEffect(() => {
     setReview({
       reflectionPm: "",
-      tomorrowPriorities: ["", "", ""],
       reviewCompleted: false,
       fastingHours: 0,
       deepWorkHours: 0,
@@ -192,11 +165,8 @@ export default function EveningReview() {
   // Load existing data when day data arrives
   useEffect(() => {
     if (dayData) {
-      const prioritiesData = dayData.eveningRituals?.tomorrowPriorities;
-
       setReview({
         reflectionPm: dayData.reflectionPm || "",
-        tomorrowPriorities: Array.isArray(prioritiesData) ? prioritiesData : ["", "", ""],
         reviewCompleted: dayData.eveningRituals?.reviewCompleted || false,
         fastingHours: dayData.eveningRituals?.fastingHours || 0,
         deepWorkHours: dayData.eveningRituals?.deepWorkHours || 0,
@@ -226,7 +196,6 @@ export default function EveningReview() {
       const eveningRituals = {
         reviewCompleted: true,
         journalEntry: review.reflectionPm,
-        tomorrowPriorities: review.tomorrowPriorities.filter(p => p.trim()),
         fastingHours: review.fastingHours || undefined,
         fastingCompleted: review.fastingHours >= 16,
         deepWorkHours: review.deepWorkHours || undefined,
@@ -268,12 +237,6 @@ export default function EveningReview() {
 
   const handleSave = () => {
     saveMutation.mutate();
-  };
-
-  const updatePriority = (index: number, value: string) => {
-    const newPriorities = [...review.tomorrowPriorities];
-    newPriorities[index] = value;
-    setReview({ ...review, tomorrowPriorities: newPriorities });
   };
 
   const toggleOutcomeCompleted = (index: number) => {
@@ -551,97 +514,7 @@ export default function EveningReview() {
         </CardContent>
       </Card>
 
-      {/* 3. Tomorrow's Priorities */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ListTodo className="h-5 w-5 text-emerald-500" />
-            Tomorrow's Top 3 Priorities
-          </CardTitle>
-          <CardDescription>
-            Pick from your P0/P1 tasks. Priority #1 becomes tomorrow's "One Thing to Ship"
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {[0, 1, 2].map((index) => (
-            <div key={index} className="space-y-2">
-              <div className="flex items-center gap-3">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
-                  index === 0 ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400" :
-                  index === 1 ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
-                  "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400"
-                }`}>
-                  #{index + 1}
-                </div>
-                <div className="flex-1 space-y-2">
-                  {index === 0 && (
-                    <div className="flex items-center gap-2 text-xs text-purple-600 dark:text-purple-400 font-medium">
-                      <Rocket className="h-3 w-3" />
-                      This becomes tomorrow's "One Thing to Ship"
-                    </div>
-                  )}
-                  {priorityTasks.length > 0 && (
-                    <Select
-                      value={
-                        priorityTasks.find(t => t.title === review.tomorrowPriorities[index])?.id || ""
-                      }
-                      onValueChange={(taskId) => {
-                        const task = priorityTasks.find(t => t.id === taskId);
-                        if (task) {
-                          updatePriority(index, task.title);
-                        }
-                      }}
-                    >
-                      <SelectTrigger className={`w-full ${index === 0 ? "border-purple-300 dark:border-purple-700" : ""}`}>
-                        <SelectValue placeholder="Pick a P0/P1 task..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {priorityTasks.map((task) => (
-                          <SelectItem key={task.id} value={task.id}>
-                            <span className="flex items-center gap-2">
-                              <Badge
-                                variant="outline"
-                                className={
-                                  task.priority === "P0"
-                                    ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-300 text-xs"
-                                    : "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border-orange-300 text-xs"
-                                }
-                              >
-                                {task.priority}
-                              </Badge>
-                              {task.title}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  <input
-                    type="text"
-                    placeholder={
-                      priorityTasks.length > 0
-                        ? "Or type a custom priority..."
-                        : "No P0/P1 tasks - type a custom priority..."
-                    }
-                    value={review.tomorrowPriorities[index] || ""}
-                    onChange={(e) => updatePriority(index, e.target.value)}
-                    className={`w-full bg-transparent border-b focus:border-primary outline-none py-2 ${
-                      index === 0 ? "border-purple-300 dark:border-purple-700" : "border-muted-foreground/20"
-                    }`}
-                  />
-                </div>
-              </div>
-            </div>
-          ))}
-          {priorityTasks.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-2">
-              No outstanding P0/P1 tasks. Type custom priorities above.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* 4. Evening Reflection (full-width) */}
+      {/* 3. Evening Reflection (full-width) */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -662,7 +535,7 @@ export default function EveningReview() {
         </CardContent>
       </Card>
 
-      {/* 5. Quick Actions */}
+      {/* 4. Quick Actions */}
       <div className="flex flex-wrap gap-3">
         <Button variant="outline" asChild>
           <Link href="/dashboard">

@@ -175,20 +175,6 @@ export default function MorningRitual() {
       task.status !== "on_hold"
   );
 
-  // Fetch yesterday for syncing priorities
-  const dayBeforeSelected = format(subDays(currentDate, 1), "yyyy-MM-dd");
-  const { data: yesterdayData } = useQuery<Day & {
-    eveningRituals?: { tomorrowPriorities?: string[] } | null;
-  }>({
-    queryKey: ["/api/days", dayBeforeSelected],
-    queryFn: async () => {
-      const res = await fetch(`/api/days/${dayBeforeSelected}`, { credentials: "include" });
-      if (res.status === 404) return null;
-      if (!res.ok) throw new Error("Failed to fetch previous day");
-      return await res.json();
-    },
-  });
-
   // Reset rituals when navigating to a different date
   useEffect(() => {
     if (enabledHabits.length > 0) {
@@ -251,8 +237,6 @@ export default function MorningRitual() {
   // Load plan data
   useEffect(() => {
     if (dayData) {
-      const tomorrowPriorities = yesterdayData?.eveningRituals?.tomorrowPriorities;
-
       if (Array.isArray(dayData.top3Outcomes)) {
         setTop3Outcomes(dayData.top3Outcomes as Top3Outcome[]);
       } else if (typeof dayData.top3Outcomes === "string" && dayData.top3Outcomes) {
@@ -263,43 +247,15 @@ export default function MorningRitual() {
         }));
         while (outcomes.length < 3) outcomes.push({ text: "", completed: false });
         setTop3Outcomes(outcomes.slice(0, 3));
-      } else if (Array.isArray(tomorrowPriorities)) {
-        const outcomes = tomorrowPriorities.map(p => ({ text: p || "", completed: false }));
-        while (outcomes.length < 3) outcomes.push({ text: "", completed: false });
-        setTop3Outcomes(outcomes.slice(0, 3));
-      }
-
-      let oneThingToShip = dayData.oneThingToShip || "";
-      if (!oneThingToShip && Array.isArray(tomorrowPriorities) && tomorrowPriorities[0]?.trim()) {
-        oneThingToShip = tomorrowPriorities[0];
       }
 
       setPlanning({
-        oneThingToShip,
+        oneThingToShip: dayData.oneThingToShip || "",
         reflectionAm: dayData.reflectionAm || "",
         primaryVentureFocus: dayData.primaryVentureFocus || "",
       });
     }
-  }, [dayData, yesterdayData]);
-
-  // Sync from yesterday if no day data
-  useEffect(() => {
-    const tomorrowPriorities = yesterdayData?.eveningRituals?.tomorrowPriorities;
-    if (!dayData && Array.isArray(tomorrowPriorities)) {
-      const priorities = tomorrowPriorities.filter(p => p.trim());
-      if (priorities.length > 0) {
-        const hasOutcomes = top3Outcomes.some(o => o.text.trim());
-        if (!hasOutcomes) {
-          const outcomes = priorities.map(p => ({ text: p, completed: false }));
-          while (outcomes.length < 3) outcomes.push({ text: "", completed: false });
-          setTop3Outcomes(outcomes.slice(0, 3));
-        }
-        if (!planning.oneThingToShip && priorities[0]) {
-          setPlanning(prev => ({ ...prev, oneThingToShip: priorities[0] }));
-        }
-      }
-    }
-  }, [dayData, yesterdayData]);
+  }, [dayData]);
 
   // Save mutation — habits + planning fields
   const saveMutation = useMutation({
@@ -541,13 +497,6 @@ export default function MorningRitual() {
                 <Target className="h-5 w-5 text-blue-500" />
                 Plan Your Day
                 <ChevronDown className={`h-4 w-4 ml-auto transition-transform ${planOpen ? "rotate-180" : ""}`} />
-                {Array.isArray(yesterdayData?.eveningRituals?.tomorrowPriorities) &&
-                  (yesterdayData?.eveningRituals?.tomorrowPriorities ?? []).filter(p => p.trim()).length > 0 &&
-                  !dayData?.top3Outcomes && (
-                    <Badge variant="secondary" className="text-xs ml-2">
-                      Synced from last night
-                    </Badge>
-                  )}
               </CardTitle>
             </CardHeader>
           </CollapsibleTrigger>
