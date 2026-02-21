@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +29,9 @@ import {
   Zap,
   ChevronDown,
   CircleDot,
+  RefreshCw,
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -430,6 +432,28 @@ export default function AgentsPage() {
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"grid" | "tree">("grid");
   const [roleFilter, setRoleFilter] = useState<string>("all");
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const seedMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/agents/admin/seed", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) throw new Error("Seed failed");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents/admin/schedules"] });
+      toast({ title: "Agents seeded", description: `${data.seeded ?? ""} agents updated from templates.` });
+    },
+    onError: () => {
+      toast({ title: "Seed failed", description: "Could not seed agents. Check console.", variant: "destructive" });
+    },
+  });
 
   const { data: agents = [], isLoading } = useQuery<Agent[]>({
     queryKey: ["/api/agents"],
@@ -494,20 +518,32 @@ export default function AgentsPage() {
             Manage your AI agent team and delegation workflows
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => navigate("/agents/delegation-log")}
-          className="gap-2 text-[13px]"
-        >
-          <FileText className="h-3.5 w-3.5" />
-          Delegation Log
-          {activeDelegations > 0 && (
-            <span className="ml-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/10 px-1.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
-              {activeDelegations}
-            </span>
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => seedMutation.mutate()}
+            disabled={seedMutation.isPending}
+            className="gap-2 text-[13px]"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${seedMutation.isPending ? "animate-spin" : ""}`} />
+            Seed Agents
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate("/agents/delegation-log")}
+            className="gap-2 text-[13px]"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            Delegation Log
+            {activeDelegations > 0 && (
+              <span className="ml-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/10 px-1.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+                {activeDelegations}
+              </span>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* ── Quick Stats ── */}
