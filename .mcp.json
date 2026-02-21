@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "sbos": {
+      "command": "npx",
+      "args": ["tsx", "server/mcp-server.ts"],
+      "cwd": "/Users/sayedbaharun/Documents/GitHub/aura",
+      "env": {}
+    }
+  }
+}

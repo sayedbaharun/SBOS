@@ -1204,8 +1204,15 @@ Required environment variables (`.env`):
 Optional:
 | Variable | Description |
 |----------|-------------|
-| `OPENROUTER_API_KEY` | OpenRouter API key for AI features |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token |
+| `OPENROUTER_API_KEY` | OpenRouter API key for AI features + agent system |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token (@SBNexusBot) |
+| `AUTHORIZED_TELEGRAM_CHAT_IDS` | Comma-separated authorized Telegram chat IDs |
+| `TELEGRAM_WEBHOOK_URL` | Webhook URL for production Telegram mode |
+| `TELEGRAM_WEBHOOK_SECRET` | Webhook secret for validation |
+| `BRAVE_SEARCH_API_KEY` | For agent web_search tool (falls back to LLM knowledge) |
+| `VERCEL_TOKEN` | For agent deploy tool — Vercel deployments |
+| `VERCEL_TEAM_ID` | For agent deploy tool — Vercel team scope |
+| `RAILWAY_TOKEN` | For agent deploy tool — Railway deployments |
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
 | `TICKTICK_ACCESS_TOKEN` | TickTick OAuth access token for mobile capture |
@@ -1337,10 +1344,73 @@ Components appear in `client/src/components/ui/`.
 
 ## Deployment
 
-The app can be deployed to:
-- **Railway** (recommended for PostgreSQL + web hosting)
+### Railway (Production)
+
+SB-OS is deployed on **Railway** with auto-deploy from `sayedbaharun/aura` on push to `main`.
+
+- **Live URL**: `https://sbaura.up.railway.app`
+- **Builder**: Docker (`Dockerfile` in project root — bypasses Railpack caching issues)
+- **Port**: 8080 (set via `ENV PORT=8080` in Dockerfile)
+- **Database**: Railway-managed PostgreSQL
+
+```bash
+# Deploy (push triggers auto-deploy)
+git push origin main
+
+# Check status / logs
+railway status
+railway logs
+```
+
+**Important**: Do NOT use `railway up` for this project — it hangs on large codebases. Always deploy via `git push`.
+
+### Agent Operating System
+
+The hierarchical multi-agent system is documented in `AGENT-SYSTEM.md`. Key points:
+- 10 agent templates seeded from `server/agents/templates/`
+- Agent API at `/api/agents` (22 endpoints)
+- Agent UI pages: `/agents`, `/agents/:slug`, `/agents/delegation-log`
+- Requires `OPENROUTER_API_KEY` for LLM calls
+- Seed agents via `POST /api/agents/admin/seed`
+
+### Other Platforms
 - **Vercel** (with external database)
 - Any Node.js hosting platform
+
+---
+
+## Claude Code Persistent Memory (MCP Tools)
+
+Claude Code has 3 MCP tools for persistent memory, reusing the existing `agent_memory` table:
+
+| Tool | Purpose |
+|------|---------|
+| `store_claude_memory` | Store a learning, preference, decision, or context. Supports `scope: "shared"` to make it visible to all agents. |
+| `search_claude_memory` | Hybrid semantic + keyword search across Claude Code and shared memories. |
+| `get_claude_session_context` | Load accumulated memory context at the start of complex work. Optionally focus by topic. |
+
+**Usage conventions:**
+- Call `get_claude_session_context` at the start of complex or multi-session work
+- Call `store_claude_memory` when discovering project constraints, patterns, deployment gotchas, or user preferences
+- Use `scope: "shared"` for knowledge that agents should also benefit from (e.g., architectural decisions)
+- Memories are automatically included in nightly consolidation (merge duplicates, decay stale entries)
+
+**Sentinel:** `CLAUDE_CODE_AGENT_ID = "11111111-1111-1111-1111-111111111111"` (inactive agent row, slug: `_claude-code`)
+
+## Mobile Access
+
+### What works now
+- **PWA**: Safari → Share → "Add to Home Screen" at `https://sbaura.up.railway.app`
+- **Telegram bot** (`@SBNexusBot`): Agent chat via `@cmo`, `@cto`, plain text → Chief of Staff
+- **Telegram commands**: `/briefing`, `/capture <text>`, `/today`, `/tasks`, `/done <number>`
+
+### Telegram quick commands
+| Command | What it does |
+|---------|-------------|
+| `/capture <text>` | Creates a capture item directly → inbox |
+| `/today` | Top 3 outcomes + urgent tasks + inbox count |
+| `/tasks` | Lists in_progress and next tasks (numbered, max 10) |
+| `/done <number>` | Marks a task as done by number from `/tasks` |
 
 ---
 

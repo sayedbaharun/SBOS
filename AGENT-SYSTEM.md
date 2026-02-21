@@ -40,15 +40,16 @@ SB-OS has been extended from a personal productivity tool into an **AI-powered e
 
 | Metric | Value |
 |--------|-------|
-| Total agent system files | 31 |
-| Total lines of code | ~7,800 |
+| Total agent system files | 35 |
+| Total lines of code | ~10,500 |
 | Agent templates | 10 |
 | Core tools | 17 |
+| MCP tools | 16 |
 | API endpoints | 22 |
 | UI pages | 3 |
 | Database tables | 4 new |
 | Channel adapters | 1 (Telegram) |
-| Scheduled job types | 7 |
+| Scheduled job types | 8 |
 
 ---
 
@@ -210,26 +211,39 @@ Inter-agent task delegation with audit trail.
 
 ### 3.4. `agent_memory` Table
 
-Per-agent persistent memory with importance scoring and TTL.
+Per-agent persistent memory with importance scoring, TTL, and learning pipeline support. Supports shared cross-agent memories via `SHARED_MEMORY_AGENT_ID` sentinel and semantic search via embeddings.
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | uuid (PK) | |
-| `agent_id` | uuid (FK → agents, CASCADE) | |
-| `memory_type` | enum | `learning`, `preference`, `context`, `relationship` |
+| `agent_id` | uuid (FK → agents, CASCADE) | Owner agent (or `SHARED_MEMORY_AGENT_ID` for shared) |
+| `memory_type` | enum | `learning`, `preference`, `context`, `relationship`, `decision` |
 | `content` | text | Memory content |
 | `importance` | real | 0.0–1.0 (higher = more important) |
 | `created_at` | timestamp | |
 | `expires_at` | timestamp | Optional TTL |
+| `scope` | text | `agent` (private), `shared` (cross-agent), `venture` (venture-scoped) |
+| `venture_id` | uuid (FK → ventures, SET NULL) | Venture scope for `venture`-scoped memories |
+| `tags` | jsonb string[] | Semantic tags for categorization |
+| `embedding` | text | JSON-serialized float[] for semantic search |
+| `embedding_model` | text | Model used to generate embedding |
+| `source_conversation_id` | uuid | Conversation that generated this memory |
+| `last_accessed_at` | timestamp | Last time this memory was retrieved |
+| `access_count` | integer | Number of times this memory was accessed |
 
-**Indexes:** `agent_memory_agent_idx` on `agent_id`
+**Indexes:**
+- `idx_agent_memory_agent_id` on `agent_id`
+- `idx_agent_memory_type` on `memory_type`
+- `idx_agent_memory_importance` on `importance`
+- `idx_agent_memory_scope` on `scope`
+- `idx_agent_memory_venture_id` on `venture_id`
 
 ### Enums Added
 
 ```sql
 agent_role: executive | manager | specialist | worker
 agent_task_status: pending | in_progress | delegated | completed | failed | needs_review
-agent_memory_type: learning | preference | context | relationship
+agent_memory_type: learning | preference | context | relationship | decision
 ```
 
 ---
@@ -334,17 +348,48 @@ Threading, delegation context, conversation analytics.
 - `getConversationStats(agentId)` — message counts by role
 - `getAllAgentActivity(sinceHours)` — system-wide activity summary
 
-### 5.6. Agent Memory Manager (`server/agents/agent-memory-manager.ts`, 250 lines)
+### 5.6. Agent Memory Manager (`server/agents/agent-memory-manager.ts`, 435 lines)
 
-Per-agent persistent memory with importance scoring and TTL.
+Per-agent persistent memory with shared memories, semantic search, and relevant context recall.
 
-- `storeMemory(params)` — create memory entry
+- `storeMemory(params)` — create memory entry with optional scope, tags, venture; auto-generates embedding
 - `getMemories(agentId, options)` — query by type, importance, limit
-- `searchMemories(agentId, query)` — keyword search
-- `buildMemoryContext(agentId, maxTokens)` — structured context for system prompt
+- `searchMemories(agentId, query)` — **hybrid semantic + keyword search** (cosine similarity on embeddings with keyword fallback); includes shared memories; updates access tracking
+- `buildMemoryContext(agentId, maxTokens)` — structured context for system prompt with 3 sections: agent-specific (60% budget), shared organization-wide (30%), and venture-specific (10%)
+- `buildRelevantMemoryContext(agentId, currentMessage, maxTokens)` — semantic search against current message to surface contextually relevant past memories
 - `updateImportance(memoryId, importance)` — boost/decay
+- `deleteMemory(memoryId)` — remove single memory
+- `clearMemories(agentId, memoryType?)` — bulk remove memories
 - `cleanupExpiredMemories()` — remove TTL-expired entries
 - `getMemoryStats(agentId)` — total, byType, avgImportance
+
+### 5.7. Learning Pipeline (`server/agents/learning-extractor.ts`, 415 lines)
+
+Automatic knowledge extraction and memory lifecycle management. Runs async (fire-and-forget) after every agent conversation.
+
+- `extractConversationLearnings(params)` — auto-extracts structured learnings after every chat using a cheap LLM (GPT-4o-mini). Classifies each extraction by type, importance, scope, and tags. Stores shared/venture memories under `SHARED_MEMORY_AGENT_ID`.
+- `consolidateAgentMemories(agentId)` — nightly duplicate merging using Jaccard text similarity (threshold 0.8). Keeps higher-importance memory, boosts by +0.1, deletes duplicate. Also triggers decay.
+- `decayOldMemories(agentId)` — importance decay for stale memories. Deletes memories >90 days old with importance <0.3. Reduces importance by 0.05 for memories >30 days old with importance <0.5.
+- `storeTaskOutcomeLearning(params)` — records task success/failure as learnings (failures weighted slightly higher at 0.7 vs 0.6 importance).
+- `SHARED_MEMORY_AGENT_ID` — sentinel UUID (`00000000-...`) for cross-agent memories. Auto-creates inactive sentinel agent row on first use.
+
+**Learning Loop Architecture:**
+```
+Agent Chat (agent-runtime.ts)
+  │
+  ├── extractConversationLearnings()  ← fire-and-forget after every chat
+  │     ├── LLM extracts structured learnings
+  │     ├── Stores to agent_memory (agent-scoped or shared)
+  │     └── generateEmbeddingsForRecentMemories()  ← async background
+  │
+  ├── storeTaskOutcomeLearning()      ← after delegation completes/fails
+  │
+  └── Nightly cron (memory_consolidation)
+        ├── consolidateAgentMemories() per agent
+        │     ├── Merge duplicate memories (Jaccard > 0.8)
+        │     └── decayOldMemories() — prune stale entries
+        └── Consolidate shared memory pool
+```
 
 ---
 
@@ -389,8 +434,10 @@ Per-agent persistent memory with importance scoring and TTL.
 
 | Tool | File | Description |
 |------|------|-------------|
-| `remember` | `agent-memory-manager.ts` | Store persistent memory (learning, preference, context, relationship) |
-| `search_memory` | `agent-memory-manager.ts` | Search agent's persistent memory by keyword |
+| `remember` | `agent-memory-manager.ts` | Store persistent memory (learning, preference, context, relationship, decision) with optional scope and tags |
+| `search_memory` | `agent-memory-manager.ts` | Hybrid semantic + keyword search across agent's private and shared memories |
+
+> **Note:** In addition to manual `remember` calls, the Learning Pipeline (`learning-extractor.ts`) automatically extracts and stores learnings after every conversation. Manual `remember` is for explicit user/agent-initiated memories; the pipeline captures implicit knowledge.
 
 ---
 
@@ -461,6 +508,7 @@ scheduled-jobs.ts           ← Job handler registry with built-in handlers
 | `tech_review` | cto | `0 10 * * 3` (Wed 10am) | Technical project review |
 | `venture_status_report` | any | (manual) | Venture-scoped status report |
 | `memory_cleanup` | any | (manual) | Clean up expired agent memories |
+| `memory_consolidation` | any | (nightly) | Merge duplicate memories, decay stale ones, consolidate shared pool |
 | `inbox_triage` | any | (manual) | Process unclarified capture items |
 
 **Fallback:** Unknown job names execute as agent chat prompts.
@@ -550,9 +598,10 @@ All prefixed with `/api/agents`.
 | `delegation-engine.ts` | 355 | Task delegation with privilege attenuation |
 | `message-bus.ts` | 241 | Inter-agent EventEmitter communication |
 | `conversation-manager.ts` | 351 | Threading, windowing, analytics |
-| `agent-memory-manager.ts` | 250 | Per-agent memory CRUD, context builder |
+| `agent-memory-manager.ts` | 435 | Per-agent memory CRUD, hybrid semantic search, shared memory context builder |
+| `learning-extractor.ts` | 415 | Auto-extraction of conversation learnings, nightly consolidation, memory decay, task outcome learning |
 | `agent-scheduler.ts` | 270 | Cron-based proactive execution |
-| `scheduled-jobs.ts` | 223 | Built-in job handlers (briefing, reports) |
+| `scheduled-jobs.ts` | 267 | Built-in job handlers (briefing, reports, memory consolidation) |
 
 ### Specialized Tools (`server/agents/tools/`)
 
@@ -764,7 +813,7 @@ If you need to update `AUTHORIZED_TELEGRAM_CHAT_IDS`:
 | **Audit trail** | Every delegation, tool call, message logged to DB |
 | **Tool sandboxing** | Code generator writes to `$TMPDIR/sbos-generated-projects/` only; deployer only deploys from that directory |
 | **Deploy approval** | Preview/staging auto-deploy; production returns `pending_approval` requiring explicit user action |
-| **Memory isolation** | Each agent has its own memory namespace |
+| **Memory isolation** | Each agent has its own memory namespace; shared memories use a sentinel agent ID with explicit `scope` control |
 | **Channel access control** | Telegram whitelist via `AUTHORIZED_TELEGRAM_CHAT_IDS` |
 | **Rate limiting** | 10 messages/minute per Telegram chat |
 | **Input sanitization** | Channel messages normalized before agent processing |
@@ -781,10 +830,174 @@ All 6 planned phases are **COMPLETE**. The following are optional enhancements:
 |-------------|-------------|
 | WhatsApp adapter | Baileys-based WhatsApp integration |
 | Browser automation tool | Playwright-based browser tool for agents |
-| Semantic memory search | Replace keyword search with Qdrant vector search |
 | Agent performance metrics | Track response quality, task success rate |
 | Multi-venture agent scoping | Agents that work across specific ventures only |
+| External vector DB | Replace in-memory embedding search with Qdrant/Pinecone for scale |
 
 ---
 
-**Total system: ~7,800 lines of TypeScript across 31 files, 10 agent templates, 17 tools, 22 API endpoints, 3 UI pages, 1 channel adapter, 7 scheduled job types. All 6 phases complete.**
+## 15. Deployment
+
+### Railway Configuration
+
+SB-OS is deployed on **Railway** with automatic deployments from GitHub.
+
+| Setting | Value |
+|---------|-------|
+| **Service** | aura |
+| **GitHub Repo** | `sayedbaharun/aura` (auto-deploy on push to main) |
+| **Builder** | Docker (via `Dockerfile`) |
+| **Runtime Port** | 8080 (`ENV PORT=8080`) |
+| **Database** | PostgreSQL (Railway-managed) |
+| **Live URL** | `https://sbaura.up.railway.app` |
+
+### Dockerfile
+
+The project uses a custom `Dockerfile` (bypasses Railway's Railpack builder to avoid aggressive caching issues):
+
+```dockerfile
+FROM node:20-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+EXPOSE 8080
+ENV PORT=8080
+CMD ["npm", "run", "start"]
+```
+
+### Required Environment Variables (Railway)
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string (auto-set by Railway) |
+| `SESSION_SECRET` | Express session encryption key |
+| `OPENROUTER_API_KEY` | OpenRouter API key for agent LLM calls |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token for @SBNexusBot |
+| `AUTHORIZED_TELEGRAM_CHAT_IDS` | Comma-separated authorized Telegram chat IDs |
+| `PORT` | Server port (Railway sets to 8080) |
+| `NODE_ENV` | Set to `production` |
+
+### Deployment Commands
+
+```bash
+# Deploy via git push (recommended — triggers auto-deploy)
+git push origin main
+
+# Check deployment status
+railway status
+
+# View logs
+railway logs
+
+# Redeploy current commit
+railway redeploy -y
+```
+
+### Known Deployment Issues & Solutions
+
+| Issue | Solution |
+|-------|----------|
+| Railpack build cache reusing old images | Use Dockerfile instead of Railpack (add `Dockerfile` to project root) |
+| `npm ci` lockfile sync errors | Ensure `package-lock.json` is regenerated with same Node/npm version as Dockerfile (`node:20-slim`) |
+| `ERR_ERL_KEY_GEN_IPV6` from express-rate-limit | Add `validate: { keyGeneratorIpFallback: false }` to rate limiter config |
+| `railway up` hanging on "Indexing..." | Use `git push` to trigger auto-deploy instead of `railway up` for large projects |
+
+### Post-Deployment Verification
+
+After deployment, the server automatically:
+1. Runs `ensureSchema()` for DB migration
+2. Seeds default categories
+3. Configures Telegram webhook (if `RAILWAY_PUBLIC_DOMAIN` is set)
+4. Initializes agent scheduler (loads all agent schedules from DB)
+5. Starts channel adapters (Telegram)
+6. Starts automations (daily day creation, reminders, RAG embeddings)
+
+Check logs for: `✓ SB-OS automations initialized` and `Agent scheduler initialized: X jobs for Y agents`.
+
+---
+
+## 16. Session Fixes Log (2026-02-20)
+
+Issues resolved during initial deployment:
+
+1. **YAML Parser** — `agent-registry.ts` parser couldn't handle nested `schedule:` blocks with indented sub-keys. Rewrote to support nested objects and strip quotes from values.
+
+2. **ESM `__dirname`** — `routes/agents.ts` used `__dirname` which isn't available in ESM. Fixed with `fileURLToPath(import.meta.url)`.
+
+3. **Tailwind CSS v3/v4 mismatch** — Project had Tailwind v4.2.0 installed but used v3 syntax (`@tailwind base/components/utilities`, `tailwind.config.ts`). Downgraded to v3.4.19.
+
+4. **Vite dev asset rate limiting** — Vite HMR serves hundreds of module requests (`/@vite/`, `/node_modules/`, `/src/`) that exhausted the 1000 req/min global rate limit. Added skip conditions for these paths.
+
+5. **express-rate-limit IPv6 validation** — Custom `keyGenerator` using `req.ip` triggered `ERR_ERL_KEY_GEN_IPV6` validation. Fixed with `validate: { xForwardedForHeader: false, keyGeneratorIpFallback: false }`.
+
+6. **npm ci lockfile sync** — `prosemirror-highlight` (from `@blocknote/core`) requires `highlight.js@^11` and `lowlight@^3`. Added as explicit dependencies to fix lockfile resolution.
+
+---
+
+---
+
+## 17. MCP Server Integration
+
+SB-OS exposes its data and agent capabilities to Claude Code, Claude Desktop, and any MCP-compatible AI tool via the **Model Context Protocol**.
+
+### Setup
+
+The MCP server is configured in `.mcp.json` at the project root:
+
+```json
+{
+  "mcpServers": {
+    "sbos": {
+      "command": "npx",
+      "args": ["tsx", "server/mcp-server.ts"],
+      "cwd": "/Users/sayedbaharun/Documents/GitHub/aura"
+    }
+  }
+}
+```
+
+When Claude Code opens the project, the `sbos` MCP server starts automatically, connecting to the same database via `DATABASE_URL` from `.env`.
+
+### Available MCP Tools (16 tools)
+
+**Read Tools:**
+| Tool | Description |
+|------|-------------|
+| `get_dashboard` | Today's overview: day record, tasks, urgent items, inbox count, ventures |
+| `list_ventures` | All business ventures with status and domain |
+| `list_tasks` | Tasks with optional filters (venture, project, status) |
+| `list_projects` | Projects, optionally filtered by venture |
+| `search_docs` | Search knowledge base by keyword |
+| `get_doc` | Get full document content by ID |
+| `list_captures` | Inbox items (unclarified by default) |
+| `get_health_summary` | Last 7 days of health entries |
+| `list_agents` | All active AI agents with roles and capabilities |
+| `get_agent_memories` | Get an agent's memories (supports type filter, includes shared memories) |
+
+**Write Tools:**
+| Tool | Description |
+|------|-------------|
+| `create_task` | Create a task (optionally linked to venture/project) |
+| `update_task` | Update task status, priority, notes, dates |
+| `create_capture` | Add item to inbox |
+| `create_doc` | Create knowledge base document |
+
+**Agent Tools:**
+| Tool | Description |
+|------|-------------|
+| `chat_with_agent` | Send message to any agent, get their response |
+| `delegate_to_agent` | Delegate a task to an agent for autonomous execution |
+
+### Usage
+
+When working in Claude Code within the SB-OS project, you can:
+- Ask "What's on my plate today?" → triggers `get_dashboard`
+- Say "Create a P1 task for the SaaS venture" → triggers `create_task`
+- Say "Ask the CMO to analyze our competitor pricing" → triggers `chat_with_agent`
+- Say "Delegate market research to the Research Analyst" → triggers `delegate_to_agent`
+
+---
+
+**Total system: ~10,500 lines of TypeScript across 35 files, 10 agent templates, 17 agent tools, 16 MCP tools, 22 API endpoints, 3 UI pages, 1 channel adapter, 8 scheduled job types. All 6 phases complete + MCP integration + Learning Pipeline. Deployed to Railway.**

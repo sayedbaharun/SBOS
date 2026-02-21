@@ -39,7 +39,8 @@ import { storage } from "../storage";
 import { quickSearch, deepResearch, structuredExtraction } from "./tools/web-research";
 import { dailyBriefing, weeklySummary, ventureStatus, customReport } from "./tools/report-generator";
 import { marketSizing, competitorAnalysis, swotAnalysis, marketValidation } from "./tools/market-analyzer";
-import { buildMemoryContext, storeMemory, searchMemories } from "./agent-memory-manager";
+import { buildMemoryContext, buildRelevantMemoryContext, storeMemory, searchMemories } from "./agent-memory-manager";
+import { extractConversationLearnings, storeTaskOutcomeLearning } from "./learning-extractor";
 import { generateProject, generateCode, listGeneratedProjects } from "./tools/code-generator";
 import { deploy, getDeploymentHistory, getDeploymentStatus } from "./tools/deployer";
 
@@ -865,6 +866,9 @@ function buildSystemPrompt(agent: Agent, delegationContext?: DelegationContext):
 
   prompt += `\n\nCurrent date/time: ${new Date().toISOString()}`;
 
+  // Proactive recall instruction
+  prompt += `\n\nWhen you see items in "Relevant Past Context", naturally reference them if pertinent. Example: "Based on our earlier discussion about X..." Only reference them when genuinely relevant — do not force connections.`;
+
   return prompt;
 }
 
@@ -901,8 +905,14 @@ export async function executeAgentChat(
     .orderBy(desc(agentConversations.createdAt))
     .limit(10);
 
-  // Get agent memory (using memory manager for structured context)
-  const memoryContext = await buildMemoryContext(agent.id, agent.maxContextTokens || 2000);
+  // Get agent memory — split between static context and relevant context
+  const memoryBudget = agent.maxContextTokens || 2000;
+  const [staticMemory, relevantMemory] = await Promise.all([
+    buildMemoryContext(agent.id, Math.floor(memoryBudget * 0.5)),
+    buildRelevantMemoryContext(agent.id, userMessage, Math.floor(memoryBudget * 0.5)),
+  ]);
+
+  const memoryContext = [staticMemory, relevantMemory].filter(Boolean).join("\n\n");
 
   // Build system prompt
   const systemPrompt = buildSystemPrompt(agent) + (memoryContext ? `\n\n${memoryContext}` : "");
@@ -1018,6 +1028,16 @@ export async function executeAgentChat(
       delegations: delegations.map((d) => d.toAgentSlug),
     },
   });
+
+  // Fire-and-forget: extract learnings from this conversation
+  extractConversationLearnings({
+    agentId: agent.id,
+    agentSlug: agent.slug,
+    userMessage,
+    assistantResponse: finalResponse,
+    ventureId: agent.ventureId || undefined,
+    actions,
+  }).catch(err => logger.debug({ err: err.message }, "Learning extraction failed (non-critical)"));
 
   logger.info(
     {
@@ -1187,6 +1207,16 @@ export async function executeAgentTask(
       model: modelUsed,
     });
 
+    // Store task outcome learning (fire-and-forget)
+    storeTaskOutcomeLearning({
+      agentId: agent.id,
+      agentSlug: agent.slug,
+      taskTitle: task.title,
+      taskDescription: task.description || undefined,
+      outcome: "completed",
+      response: finalResponse,
+    }).catch(err => logger.debug({ err: err.message }, "Task outcome learning failed"));
+
     // Save conversation
     await database.insert(agentConversations).values({
       agentId: agent.id,
@@ -1213,6 +1243,16 @@ export async function executeAgentTask(
       .update(agentTasks)
       .set({ status: "failed", error: error.message, completedAt: new Date() })
       .where(eq(agentTasks.id, taskId));
+
+    // Store failure learning (fire-and-forget)
+    storeTaskOutcomeLearning({
+      agentId: agent.id,
+      agentSlug: agent.slug,
+      taskTitle: task.title,
+      taskDescription: task.description || undefined,
+      outcome: "failed",
+      error: error.message,
+    }).catch(() => {});
 
     return null;
   }

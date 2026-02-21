@@ -15,7 +15,8 @@
     "db:migrate:duration": "tsx scripts/run-migration.ts",
     "db:emergency-fix": "tsx scripts/emergency-fix.ts",
     "reset-password": "tsx scripts/reset-password.ts",
-    "setup:2026-arc": "tsx scripts/setup-2026-arc.ts"
+    "setup:2026-arc": "tsx scripts/setup-2026-arc.ts",
+    "mcp": "tsx server/mcp-server.ts"
   },
   "dependencies": {
     "@blocknote/core": "^0.46.2",
@@ -25,6 +26,7 @@
     "@jridgewell/trace-mapping": "^0.3.31",
     "@mantine/core": "^8.3.15",
     "@mantine/hooks": "^8.3.15",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@neondatabase/serverless": "^1.0.2",
     "@notionhq/client": "^5.9.0",
     "@pinecone-database/pinecone": "^7.0.0",

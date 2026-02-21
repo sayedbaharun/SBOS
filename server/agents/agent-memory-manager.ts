@@ -2,12 +2,14 @@
  * Agent Memory Manager
  *
  * Per-agent persistent memory CRUD with importance scoring and TTL cleanup.
- * Each agent has isolated memory that supplements its conversation history.
+ * Supports shared memories (cross-agent), semantic search via embeddings,
+ * and relevant memory context for proactive recall.
  */
 
-import { eq, desc, lt } from "drizzle-orm";
+import { eq, desc, lt, or } from "drizzle-orm";
 import { logger } from "../logger";
 import { agentMemory, type AgentMemoryEntry } from "@shared/schema";
+import { SHARED_MEMORY_AGENT_ID } from "./learning-extractor";
 
 type AgentMemory = AgentMemoryEntry;
 
@@ -27,10 +29,13 @@ async function getDb() {
 
 export async function storeMemory(params: {
   agentId: string;
-  memoryType: "learning" | "preference" | "context" | "relationship";
+  memoryType: "learning" | "preference" | "context" | "relationship" | "decision";
   content: string;
   importance?: number;
   expiresAt?: Date;
+  scope?: "agent" | "shared" | "venture";
+  ventureId?: string;
+  tags?: string[];
 }): Promise<AgentMemory> {
   const database = await getDb();
 
@@ -42,12 +47,20 @@ export async function storeMemory(params: {
       content: params.content,
       importance: params.importance ?? 0.5,
       expiresAt: params.expiresAt,
+      scope: params.scope ?? "agent",
+      ventureId: params.ventureId ?? null,
+      tags: params.tags ?? [],
     })
     .returning();
 
   logger.debug(
-    { agentId: params.agentId, type: params.memoryType },
+    { agentId: params.agentId, type: params.memoryType, scope: params.scope },
     "Memory stored"
+  );
+
+  // Generate embedding async (non-blocking)
+  generateAndStoreEmbedding(memory.id, params.content).catch(err =>
+    logger.debug({ err: err.message }, "Embedding generation failed (non-critical)")
   );
 
   return memory;
@@ -136,7 +149,7 @@ export async function clearMemories(
 }
 
 // ============================================================================
-// MEMORY SEARCH
+// MEMORY SEARCH (Hybrid: semantic + keyword fallback)
 // ============================================================================
 
 export async function searchMemories(
@@ -146,62 +159,234 @@ export async function searchMemories(
 ): Promise<AgentMemory[]> {
   const database = await getDb();
 
-  const all = await database
+  // Get agent-specific + shared memories
+  const all: AgentMemory[] = await database
     .select()
     .from(agentMemory)
-    .where(eq(agentMemory.agentId, agentId))
+    .where(
+      or(
+        eq(agentMemory.agentId, agentId),
+        eq(agentMemory.agentId, SHARED_MEMORY_AGENT_ID)
+      )
+    )
     .orderBy(desc(agentMemory.importance));
 
+  // Try semantic search if embeddings available
+  try {
+    const { generateEmbedding, cosineSimilarity, parseEmbedding } = await import("../embeddings");
+    const queryEmbedding = await generateEmbedding(query);
+
+    const memoriesWithEmbeddings = all.filter((m: any) => m.embedding);
+
+    if (memoriesWithEmbeddings.length > 0) {
+      const scored = memoriesWithEmbeddings.map((m: any) => {
+        const memEmbedding = parseEmbedding(m.embedding);
+        if (!memEmbedding) return { memory: m, score: 0 };
+
+        const similarity = cosineSimilarity(queryEmbedding.embedding, memEmbedding);
+        const score = similarity * 0.7 + (m.importance || 0) * 0.3;
+        return { memory: m, score };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+
+      // Update lastAccessedAt for returned memories
+      const results = scored.slice(0, limit).map(s => s.memory);
+      updateAccessTracking(results.map((r: any) => r.id)).catch(() => {});
+      return results;
+    }
+  } catch {
+    // Embedding generation failed, fall back to keyword search
+  }
+
+  // Keyword fallback
   const queryLower = query.toLowerCase();
-  return all
+  const keywordResults = all
     .filter((m: AgentMemory) => m.content.toLowerCase().includes(queryLower))
     .slice(0, limit);
+
+  updateAccessTracking(keywordResults.map(r => r.id)).catch(() => {});
+  return keywordResults;
+}
+
+async function updateAccessTracking(memoryIds: string[]): Promise<void> {
+  if (memoryIds.length === 0) return;
+  const database = await getDb();
+
+  for (const id of memoryIds) {
+    await database
+      .update(agentMemory)
+      .set({
+        lastAccessedAt: new Date(),
+        accessCount: (await database.select().from(agentMemory).where(eq(agentMemory.id, id)))[0]?.accessCount + 1 || 1,
+      })
+      .where(eq(agentMemory.id, id));
+  }
 }
 
 // ============================================================================
-// MEMORY CONTEXT BUILDER
+// MEMORY CONTEXT BUILDER (with shared memories)
 // ============================================================================
 
 export async function buildMemoryContext(
   agentId: string,
   maxTokens: number = 2000
 ): Promise<string> {
-  const memories = await getMemories(agentId, { limit: 30, minImportance: 0.3 });
-
-  if (memories.length === 0) return "";
-
-  const grouped: Record<string, AgentMemory[]> = {};
-  for (const m of memories) {
-    if (!grouped[m.memoryType]) grouped[m.memoryType] = [];
-    grouped[m.memoryType].push(m);
-  }
-
-  const sections: string[] = ["## Your Memory"];
+  const database = await getDb();
   const charBudget = maxTokens * 4;
-  let totalChars = 0;
 
-  const typeLabels: Record<string, string> = {
-    learning: "Lessons Learned",
-    preference: "User Preferences",
-    context: "Contextual Knowledge",
-    relationship: "Relationships & People",
-  };
+  // 60% budget → agent-specific memories
+  const agentBudget = Math.floor(charBudget * 0.6);
+  // 30% budget → shared organization-wide memories
+  const sharedBudget = Math.floor(charBudget * 0.3);
+  // 10% budget → venture-specific shared memories
+  const ventureBudget = Math.floor(charBudget * 0.1);
 
-  for (const [type, mems] of Object.entries(grouped)) {
-    const label = typeLabels[type] || type;
-    sections.push(`\n### ${label}`);
+  // Agent-specific memories
+  const agentMemories = await getMemories(agentId, { limit: 30, minImportance: 0.3 });
 
-    for (const m of mems) {
-      const line = `- ${m.content}`;
-      totalChars += line.length;
-      if (totalChars > charBudget) break;
-      sections.push(line);
+  // Shared memories
+  const sharedMemories: AgentMemory[] = await database
+    .select()
+    .from(agentMemory)
+    .where(eq(agentMemory.agentId, SHARED_MEMORY_AGENT_ID))
+    .orderBy(desc(agentMemory.importance))
+    .limit(15);
+
+  // Filter shared vs venture-specific
+  const orgShared = sharedMemories.filter((m: any) => m.scope === "shared" || !m.ventureId);
+  const ventureShared = sharedMemories.filter((m: any) => m.scope === "venture" && m.ventureId);
+
+  if (agentMemories.length === 0 && orgShared.length === 0) return "";
+
+  const sections: string[] = [];
+
+  // Agent-specific section
+  if (agentMemories.length > 0) {
+    sections.push("## Your Memory");
+    let chars = 0;
+
+    const grouped: Record<string, AgentMemory[]> = {};
+    for (const m of agentMemories) {
+      if (!grouped[m.memoryType]) grouped[m.memoryType] = [];
+      grouped[m.memoryType].push(m);
     }
 
-    if (totalChars > charBudget) break;
+    const typeLabels: Record<string, string> = {
+      learning: "Lessons Learned",
+      preference: "User Preferences",
+      context: "Contextual Knowledge",
+      relationship: "Relationships & People",
+      decision: "Decisions Made",
+    };
+
+    for (const [type, mems] of Object.entries(grouped)) {
+      const label = typeLabels[type] || type;
+      sections.push(`\n### ${label}`);
+
+      for (const m of mems) {
+        const line = `- ${m.content}`;
+        chars += line.length;
+        if (chars > agentBudget) break;
+        sections.push(line);
+      }
+      if (chars > agentBudget) break;
+    }
+  }
+
+  // Shared knowledge section
+  if (orgShared.length > 0) {
+    sections.push("\n## Shared Knowledge (across all agents)");
+    let chars = 0;
+    for (const m of orgShared) {
+      const line = `- ${m.content}`;
+      chars += line.length;
+      if (chars > sharedBudget) break;
+      sections.push(line);
+    }
+  }
+
+  // Venture-specific shared section
+  if (ventureShared.length > 0) {
+    sections.push("\n## Venture Context");
+    let chars = 0;
+    for (const m of ventureShared) {
+      const line = `- ${m.content}`;
+      chars += line.length;
+      if (chars > ventureBudget) break;
+      sections.push(line);
+    }
   }
 
   return sections.join("\n");
+}
+
+// ============================================================================
+// RELEVANT MEMORY CONTEXT (semantic search against current message)
+// ============================================================================
+
+export async function buildRelevantMemoryContext(
+  agentId: string,
+  currentMessage: string,
+  maxTokens: number = 1000
+): Promise<string> {
+  if (!currentMessage || currentMessage.length < 20) return "";
+
+  try {
+    const results = await searchMemories(agentId, currentMessage, 10);
+    if (results.length === 0) return "";
+
+    const charBudget = maxTokens * 4;
+    let chars = 0;
+    const lines: string[] = ["## Relevant Past Context"];
+
+    for (const m of results) {
+      const age = getTimeAgo(m.createdAt);
+      const line = `- (${age}, ${m.memoryType}) ${m.content}`;
+      chars += line.length;
+      if (chars > charBudget) break;
+      lines.push(line);
+    }
+
+    return lines.length > 1 ? lines.join("\n") : "";
+  } catch (error: any) {
+    logger.debug({ error: error.message }, "Failed to build relevant memory context");
+    return "";
+  }
+}
+
+function getTimeAgo(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - new Date(date).getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return "today";
+  if (diffDays === 1) return "yesterday";
+  if (diffDays < 7) return `${diffDays} days ago`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+  return `${Math.floor(diffDays / 30)} months ago`;
+}
+
+// ============================================================================
+// EMBEDDING GENERATION (async after storeMemory)
+// ============================================================================
+
+async function generateAndStoreEmbedding(memoryId: string, content: string): Promise<void> {
+  try {
+    const { generateEmbedding, serializeEmbedding } = await import("../embeddings");
+    const result = await generateEmbedding(content);
+    const database = await getDb();
+
+    await database
+      .update(agentMemory)
+      .set({
+        embedding: serializeEmbedding(result.embedding),
+        embeddingModel: result.model,
+      })
+      .where(eq(agentMemory.id, memoryId));
+  } catch {
+    // Non-critical — memory still works without embeddings
+  }
 }
 
 // ============================================================================

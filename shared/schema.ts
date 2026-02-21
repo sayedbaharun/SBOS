@@ -3137,6 +3137,7 @@ export const agentMemoryTypeEnum = pgEnum('agent_memory_type', [
   'preference',
   'context',
   'relationship',
+  'decision',
 ]);
 
 // Agents — hierarchical AI agent definitions (loaded from soul templates or created via UI)
@@ -3300,7 +3301,7 @@ export const insertAgentTaskSchema = createInsertSchema(agentTasks).omit({
 export type AgentTask = typeof agentTasks.$inferSelect;
 export type InsertAgentTask = z.infer<typeof insertAgentTaskSchema>;
 
-// Agent Memory — per-agent persistent memory (supplements Qdrant vector store)
+// Agent Memory — per-agent persistent memory with learning pipeline support
 export const agentMemory = pgTable(
   "agent_memory",
   {
@@ -3311,11 +3312,23 @@ export const agentMemory = pgTable(
     importance: real("importance").default(0.5),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     expiresAt: timestamp("expires_at"),
+
+    // Learning pipeline columns
+    scope: text("scope").$type<"agent" | "shared" | "venture">().default("agent"),
+    ventureId: uuid("venture_id").references(() => ventures.id, { onDelete: "set null" }),
+    tags: jsonb("tags").$type<string[]>().default([]),
+    embedding: text("embedding"), // JSON-serialized float[] for semantic search
+    embeddingModel: text("embedding_model"),
+    sourceConversationId: uuid("source_conversation_id"),
+    lastAccessedAt: timestamp("last_accessed_at"),
+    accessCount: integer("access_count").default(0),
   },
   (table) => [
     index("idx_agent_memory_agent_id").on(table.agentId),
     index("idx_agent_memory_type").on(table.memoryType),
     index("idx_agent_memory_importance").on(table.importance),
+    index("idx_agent_memory_scope").on(table.scope),
+    index("idx_agent_memory_venture_id").on(table.ventureId),
   ]
 );
 
