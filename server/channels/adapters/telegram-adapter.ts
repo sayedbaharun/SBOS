@@ -75,6 +75,7 @@ class TelegramAdapter implements ChannelAdapter {
   private bot: Telegraf | null = null;
   private connected = false;
   private startedAt: Date | null = null;
+  private lastTasksList = new Map<string, (string | number)[]>();
   private stats = {
     messagesReceived: 0,
     messagesSent: 0,
@@ -134,7 +135,11 @@ class TelegramAdapter implements ChannelAdapter {
         `• @cto <message> — talk to the CTO\n` +
         `• @<agent-slug> <message> — talk to any agent\n` +
         `• /agents — list available agents\n` +
-        `• /briefing — get today's briefing`
+        `• /briefing — get today's briefing\n` +
+        `• /capture <text> — quick capture to inbox\n` +
+        `• /today — today's summary\n` +
+        `• /tasks — list active tasks\n` +
+        `• /done <number> — mark task done`
       );
     });
 
@@ -168,11 +173,155 @@ class TelegramAdapter implements ChannelAdapter {
       }
     });
 
+    // ---- /capture Command ----
+    this.bot.command("capture", async (ctx) => {
+      try {
+        const text = ctx.message.text.replace(/^\/capture\s*/, "").trim();
+        if (!text) {
+          await ctx.reply("Usage: /capture <text>\nExample: /capture Research competitor pricing");
+          return;
+        }
+        const capture = await storage.createCapture({
+          title: text,
+          type: "idea",
+          source: "brain",
+          domain: "work",
+          notes: null,
+          ventureId: null,
+        } as any);
+        await ctx.reply(`Captured: "${capture.title}"`);
+      } catch (error: any) {
+        await ctx.reply("Failed to capture.");
+        this.recordError(error.message);
+      }
+    });
+
+    // ---- /today Command ----
+    this.bot.command("today", async (ctx) => {
+      try {
+        const today = new Date().toISOString().split("T")[0];
+        const [day, todayTasks, urgentTasks, captures] = await Promise.all([
+          storage.getDayOrCreate(today),
+          storage.getTasksForToday(today),
+          storage.getUrgentTasks(today, 5),
+          storage.getCaptures({ clarified: false, limit: 100 }),
+        ]);
+
+        const lines: string[] = [];
+        lines.push(`📅 ${today}`);
+
+        if (day?.top3Outcomes) {
+          lines.push("\n🎯 Top 3 Outcomes:");
+          const outcomes = day.top3Outcomes as any[];
+          if (Array.isArray(outcomes)) {
+            outcomes.forEach((o: any, i: number) => {
+              const check = o.completed ? "✅" : "⬜";
+              lines.push(`${check} ${i + 1}. ${o.text || o}`);
+            });
+          }
+        }
+
+        if (urgentTasks.length > 0) {
+          lines.push("\n🔥 Urgent:");
+          urgentTasks.forEach((t) => lines.push(`- ${t.title} [${t.priority}]`));
+        }
+
+        const activeTasks = todayTasks.filter((t) => t.status !== "completed" && t.status !== "on_hold");
+        if (activeTasks.length > 0) {
+          lines.push(`\n📋 Tasks today: ${activeTasks.length}`);
+          activeTasks.slice(0, 5).forEach((t) => lines.push(`- ${t.title} [${t.status}]`));
+          if (activeTasks.length > 5) lines.push(`  ...and ${activeTasks.length - 5} more`);
+        }
+
+        lines.push(`\n📥 Inbox: ${captures.length} items`);
+
+        await ctx.reply(lines.join("\n"));
+      } catch (error: any) {
+        await ctx.reply("Failed to load today's summary.");
+        this.recordError(error.message);
+      }
+    });
+
+    // ---- /tasks Command ----
+    this.bot.command("tasks", async (ctx) => {
+      try {
+        const tasks = await storage.getTasks({
+          status: undefined,
+          limit: 20,
+        });
+        const active = tasks.filter(
+          (t) => t.status === "in_progress" || t.status === "todo"
+        );
+        const display = active.slice(0, 10);
+
+        if (display.length === 0) {
+          await ctx.reply("No active tasks (in_progress or todo).");
+          return;
+        }
+
+        // Store task mapping for /done command
+        const chatId = ctx.chat.id.toString();
+        const taskMap = display.map((t) => t.id);
+        this.lastTasksList.set(chatId, taskMap);
+
+        const lines = ["📋 Active Tasks:\n"];
+        display.forEach((t, i) => {
+          const status = t.status === "in_progress" ? "🔵" : "⚪";
+          lines.push(`${status} ${i + 1}. ${t.title} [${t.priority}]`);
+        });
+        lines.push("\nUse /done <number> to mark as done.");
+
+        await ctx.reply(lines.join("\n"));
+      } catch (error: any) {
+        await ctx.reply("Failed to load tasks.");
+        this.recordError(error.message);
+      }
+    });
+
+    // ---- /done Command ----
+    this.bot.command("done", async (ctx) => {
+      try {
+        const numStr = ctx.message.text.replace(/^\/done\s*/, "").trim();
+        const num = parseInt(numStr, 10);
+        if (isNaN(num) || num < 1) {
+          await ctx.reply("Usage: /done <number>\nUse /tasks first to see numbered tasks.");
+          return;
+        }
+
+        const chatId = ctx.chat.id.toString();
+        const taskMap = this.lastTasksList.get(chatId);
+        if (!taskMap || num > taskMap.length) {
+          await ctx.reply("Run /tasks first to get a numbered list, then /done <number>.");
+          return;
+        }
+
+        const taskId = taskMap[num - 1];
+        const task = await storage.updateTask(String(taskId), { status: "completed", completedAt: new Date() } as any);
+        if (!task) {
+          await ctx.reply(`Task not found.`);
+          return;
+        }
+        await ctx.reply(`✅ Done: "${task.title}"`);
+      } catch (error: any) {
+        await ctx.reply("Failed to mark task as done.");
+        this.recordError(error.message);
+      }
+    });
+
     // ---- Text Messages ----
     this.bot.on("text", async (ctx) => {
       try {
         this.stats.messagesReceived++;
         this.stats.lastActivity = new Date();
+
+        // NLP intercept: handle natural language logging (rituals, workouts, nutrition)
+        const { detectAndHandleLog } = await import("../telegram-nlp-handler.js");
+        const nlpResult = await detectAndHandleLog(ctx.message.text);
+        if (nlpResult.handled) {
+          await this.sendLongMessage(ctx.chat.id.toString(), nlpResult.response!);
+          this.stats.messagesSent++;
+          return;
+        }
 
         const message = this.normalizeTextMessage(ctx);
         const response = await processIncomingMessage(message);

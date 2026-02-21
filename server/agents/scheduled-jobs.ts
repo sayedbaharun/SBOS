@@ -212,6 +212,105 @@ registerJobHandler("memory_cleanup", async (agentId: string, agentSlug: string) 
 });
 
 /**
+ * Memory Consolidation — Nightly job to merge duplicate memories,
+ * decay stale ones, and boost confirmed patterns.
+ * Runs for each agent + the shared memory pool.
+ */
+registerJobHandler("memory_consolidation", async (_agentId: string, agentSlug: string) => {
+  const { consolidateAgentMemories, SHARED_MEMORY_AGENT_ID } = await import("./learning-extractor");
+  const database = await getDb();
+
+  // Get all active agents
+  const allAgents = await database
+    .select()
+    .from(agents)
+    .where(eq(agents.isActive, true));
+
+  let totalMerged = 0;
+  let totalDecayed = 0;
+
+  // Consolidate each agent's memories
+  for (const agent of allAgents) {
+    try {
+      const result = await consolidateAgentMemories(agent.id);
+      totalMerged += result.merged;
+      totalDecayed += result.decayed;
+    } catch (err: any) {
+      logger.warn({ agentSlug: agent.slug, error: err.message }, "Agent memory consolidation failed");
+    }
+  }
+
+  // Consolidate shared memory pool
+  try {
+    const result = await consolidateAgentMemories(SHARED_MEMORY_AGENT_ID);
+    totalMerged += result.merged;
+    totalDecayed += result.decayed;
+  } catch (err: any) {
+    logger.warn({ error: err.message }, "Shared memory consolidation failed");
+  }
+
+  // Consolidate Claude Code memory pool
+  const CLAUDE_CODE_AGENT_ID = "11111111-1111-1111-1111-111111111111";
+  try {
+    const result = await consolidateAgentMemories(CLAUDE_CODE_AGENT_ID);
+    totalMerged += result.merged;
+    totalDecayed += result.decayed;
+  } catch {
+    // Claude Code agent may not exist yet — skip
+  }
+
+  logger.info(
+    { agentSlug, totalMerged, totalDecayed, agentCount: allAgents.length },
+    "Memory consolidation completed"
+  );
+});
+
+/**
+ * Morning Check-in — Sends a 10am Telegram prompt about morning ritual status.
+ */
+registerJobHandler("morning_checkin", async (_agentId: string, agentSlug: string) => {
+  const today = new Date().toISOString().split("T")[0];
+  const { storage } = await import("../storage");
+  const day = await storage.getDayOrCreate(today);
+  const rituals = day.morningRituals as Record<string, any> | null;
+
+  let message: string;
+  if (rituals?.completedAt) {
+    message = "Morning ritual already complete — great start!";
+  } else {
+    const done: string[] = [];
+    const missing: string[] = [];
+    const habitLabels: Record<string, string> = {
+      pressUps: "Press-ups",
+      squats: "Squats",
+      reading: "Reading",
+      supplements: "Supplements",
+    };
+    for (const [key, label] of Object.entries(habitLabels)) {
+      if (rituals?.[key]?.done) done.push(label);
+      else missing.push(label);
+    }
+    if (done.length === 0 && missing.length === 0) {
+      message = `Your morning ritual hasn't been started yet.\n\nJust text me what you've done, e.g.:\n"Did 15 press ups, 10 squats, read 10 pages, took supplements"`;
+    } else {
+      message = `Morning ritual check-in:\n✅ Done: ${done.join(", ") || "none"}\n⬜ Remaining: ${missing.join(", ") || "all done!"}\n\nText me what you've completed.`;
+    }
+  }
+
+  try {
+    const { sendProactiveMessage } = await import("../channels/channel-manager");
+    const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+    for (const chatId of getAuthorizedChatIds()) {
+      await sendProactiveMessage("telegram", chatId, `☀️ Morning Check-in\n\n${message}`);
+    }
+  } catch {
+    // Telegram not configured — skip
+  }
+
+  logger.info({ agentSlug }, "Morning check-in sent");
+});
+
+/**
  * Inbox Triage — Process unclarified captures and suggest actions.
  */
 registerJobHandler("inbox_triage", async (agentId: string, agentSlug: string) => {
