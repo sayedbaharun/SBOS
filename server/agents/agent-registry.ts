@@ -349,8 +349,30 @@ export async function seedFromTemplates(
       .limit(1);
 
     if (existing) {
-      logger.debug({ slug: frontmatter.slug }, "Agent already exists — skipping");
-      skipped++;
+      // Update existing agent's soul, schedule, tools, etc. from template
+      const soul = `---\n${buildYamlBlock(frontmatter)}\n---\n\n${body}`.trim();
+      try {
+        await database
+          .update(agents)
+          .set({
+            soul,
+            expertise: frontmatter.expertise,
+            availableTools: frontmatter.tools,
+            actionPermissions: frontmatter.permissions,
+            canDelegateTo: frontmatter.delegates_to,
+            maxDelegationDepth: frontmatter.max_delegation_depth,
+            modelTier: frontmatter.model_tier,
+            temperature: frontmatter.temperature,
+            memoryScope: frontmatter.memory_scope,
+            schedule: frontmatter.schedule ?? null,
+          })
+          .where(eq(agents.id, existing.id));
+        logger.info({ slug: frontmatter.slug }, "Agent updated from template");
+        seeded++;
+      } catch (err) {
+        logger.error({ slug: frontmatter.slug, err: err instanceof Error ? err.message : String(err) }, "Failed to update agent");
+        skipped++;
+      }
       continue;
     }
 

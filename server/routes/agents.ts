@@ -395,8 +395,8 @@ router.post("/:slug/memory", async (req: Request, res: Response) => {
 router.post("/admin/seed", async (req: Request, res: Response) => {
   try {
     const templateDir = path.resolve(
-      __dirname,
-      "..",
+      process.cwd(),
+      "server",
       "agents",
       "templates"
     );
@@ -404,7 +404,7 @@ router.post("/admin/seed", async (req: Request, res: Response) => {
     res.json({
       success: true,
       ...result,
-      message: `Seeded ${result.seeded} agents, skipped ${result.skipped} existing`,
+      message: `Seeded/updated ${result.seeded} agents, skipped ${result.skipped}`,
     });
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
