@@ -760,6 +760,24 @@ export class DBStorage implements IStorage {
         await this.db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_net_worth_snapshots_created_at" ON "net_worth_snapshots" ("created_at")`);
         console.log("✅ Auto-Migration: Created net_worth_snapshots table");
       }
+      // One-time: migrate morning rituals reading → water (clears test data)
+      const hasOldRituals = await this.db.execute(sql`
+        SELECT 1 FROM "days"
+        WHERE "morning_rituals"::text LIKE '%reading%'
+        LIMIT 1
+      `);
+      if (hasOldRituals.rows.length > 0) {
+        console.log("🔧 Auto-Migration: Clearing old morning/evening ritual test data (reading → water)...");
+        await this.db.execute(sql`UPDATE "days" SET "morning_rituals" = NULL WHERE "morning_rituals"::text LIKE '%reading%'`);
+        await this.db.execute(sql`UPDATE "days" SET "evening_rituals" = NULL WHERE "evening_rituals" IS NOT NULL`);
+        await this.db.execute(sql`
+          UPDATE "user_preferences"
+          SET "morning_ritual_config" = NULL
+          WHERE "morning_ritual_config"::text LIKE '%reading%'
+        `);
+        console.log("✅ Auto-Migration: Old ritual data cleared, config reset to new defaults");
+      }
+
     } catch (error) {
       console.error("❌ Auto-Migration Error:", error);
       // Don't throw, let the app try to start anyway
