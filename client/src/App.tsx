@@ -39,6 +39,8 @@ import DelegationLogPage from "@/pages/delegation-log";
 import CommandCenterV2 from "@/pages/command-center-v2";
 import PeoplePage from "@/pages/people";
 import VentureLab from "@/pages/venture-lab";
+import ResearchInbox from "@/pages/research-inbox";
+import SettingsExternalAgents from "@/pages/settings-external-agents";
 import NotFound from "@/pages/not-found";
 import MobileQuickActions from "@/components/mobile/mobile-quick-actions";
 import InstallPrompt from "@/components/mobile/install-prompt";
@@ -87,6 +89,8 @@ function Router() {
             <Route path="/trading" component={TradingPage} />
             <Route path="/ai-chat" component={AiChat} />
             <Route path="/tasks" component={AllTasks} />
+            <Route path="/research-inbox" component={ResearchInbox} />
+            <Route path="/settings/external-agents" component={SettingsExternalAgents} />
             <Route path="/agents" component={AgentsPage} />
             <Route path="/agents/delegation-log" component={DelegationLogPage} />
             <Route path="/agents/:slug" component={AgentDetailPage} />

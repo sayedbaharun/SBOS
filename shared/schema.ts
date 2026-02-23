@@ -3432,3 +3432,95 @@ export const insertEntityRelationSchema = createInsertSchema(entityRelations).om
 
 export type EntityRelation = typeof entityRelations.$inferSelect;
 export type InsertEntityRelation = z.infer<typeof insertEntityRelationSchema>;
+
+// ----------------------------------------------------------------------------
+// EXTERNAL AGENT COMMUNICATION SYSTEM
+// ----------------------------------------------------------------------------
+
+export const externalAgentTypeEnum = pgEnum('external_agent_type', [
+  'research', 'automation', 'assistant'
+]);
+
+export const externalAgentStatusEnum = pgEnum('external_agent_status', [
+  'active', 'suspended', 'revoked'
+]);
+
+export const externalAgents = pgTable(
+  "external_agents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    slug: varchar("slug", { length: 100 }).notNull().unique(),
+    apiKeyHash: text("api_key_hash").notNull(),
+    type: externalAgentTypeEnum("type").default("research").notNull(),
+    status: externalAgentStatusEnum("status").default("active").notNull(),
+    capabilities: jsonb("capabilities").$type<string[]>(),
+    lastSeenAt: timestamp("last_seen_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_external_agents_slug").on(table.slug),
+    index("idx_external_agents_status").on(table.status),
+    index("idx_external_agents_api_key_hash").on(table.apiKeyHash),
+  ]
+);
+
+export const insertExternalAgentSchema = createInsertSchema(externalAgents).omit({
+  id: true,
+  lastSeenAt: true,
+  createdAt: true,
+});
+
+export type ExternalAgent = typeof externalAgents.$inferSelect;
+export type InsertExternalAgent = z.infer<typeof insertExternalAgentSchema>;
+
+// Research Submissions (staging area for external agent findings)
+
+export const researchCategoryEnum = pgEnum('research_category', [
+  'venture_idea', 'market_research', 'competitor_analysis',
+  'technology', 'opportunity', 'general'
+]);
+
+export const researchStatusEnum = pgEnum('research_status', [
+  'pending', 'approved', 'rejected', 'needs_more_info'
+]);
+
+export const researchSubmissions = pgTable(
+  "research_submissions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    externalAgentId: uuid("external_agent_id").references(() => externalAgents.id, { onDelete: "cascade" }).notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    fullContent: text("full_content"),
+    category: researchCategoryEnum("category").default("general").notNull(),
+    confidence: real("confidence").default(0.5),
+    sources: jsonb("sources").$type<string[]>(),
+    tags: jsonb("tags").$type<string[]>(),
+    status: researchStatusEnum("status").default("pending").notNull(),
+    reviewNote: text("review_note"),
+    promotedTo: jsonb("promoted_to").$type<{ type: string; id: string }>(),
+    embedding: text("embedding"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    reviewedAt: timestamp("reviewed_at"),
+  },
+  (table) => [
+    index("idx_research_submissions_agent").on(table.externalAgentId),
+    index("idx_research_submissions_status").on(table.status),
+    index("idx_research_submissions_category").on(table.category),
+    index("idx_research_submissions_created").on(table.createdAt),
+  ]
+);
+
+export const insertResearchSubmissionSchema = createInsertSchema(researchSubmissions).omit({
+  id: true,
+  status: true,
+  reviewNote: true,
+  promotedTo: true,
+  embedding: true,
+  createdAt: true,
+  reviewedAt: true,
+});
+
+export type ResearchSubmission = typeof researchSubmissions.$inferSelect;
+export type InsertResearchSubmission = z.infer<typeof insertResearchSubmissionSchema>;

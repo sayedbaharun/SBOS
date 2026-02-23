@@ -1389,28 +1389,68 @@ Claude Code has 3 MCP tools for persistent memory, reusing the existing `agent_m
 | `search_claude_memory` | Hybrid semantic + keyword search across Claude Code and shared memories. |
 | `get_claude_session_context` | Load accumulated memory context at the start of complex work. Optionally focus by topic. |
 
-**Usage conventions:**
-- Call `get_claude_session_context` at the start of complex or multi-session work
-- Call `store_claude_memory` when discovering project constraints, patterns, deployment gotchas, or user preferences
-- Use `scope: "shared"` for knowledge that agents should also benefit from (e.g., architectural decisions)
-- Memories are automatically included in nightly consolidation (merge duplicates, decay stale entries)
-
 **Sentinel:** `CLAUDE_CODE_AGENT_ID = "11111111-1111-1111-1111-111111111111"` (inactive agent row, slug: `_claude-code`)
+
+### MANDATORY Memory Protocol — MUST FOLLOW
+
+These rules are **non-negotiable**. Sayed requires full conversation continuity across sessions. Dropped context is unacceptable.
+
+**Rule 1: Checkpoint Before Proceeding**
+Before starting work on ANY new user request, you MUST first save a summary of the conversation so far. This includes:
+- What was just discussed/decided
+- Any bugs found or fixed
+- User preferences or feedback expressed
+- Decisions made and their reasoning
+
+Save to BOTH:
+- File-based memory: update `~/.claude/projects/-Users-sayedbaharun/memory/sessions/YYYY-MM-DD.md`
+- MCP (if available): call `store_claude_memory` for key decisions/learnings
+
+**This ensures nothing is lost to context window compression.** The old conversation is saved before new work begins.
+
+**Rule 2: Session Start**
+At the start of every session:
+1. Call `get_claude_session_context` (MCP) if available
+2. Read `memory/sessions/` for the most recent session log
+3. Read `memory/MEMORY.md` for persistent context
+4. Read `memory/TODO.md` for pending work
+
+**Rule 3: What to Save**
+After EVERY user interaction, save:
+- Bugs reported and their fix status
+- Features requested and implementation decisions
+- User preferences ("I want X", "don't do Y", "this doesn't work")
+- Architecture decisions and trade-offs
+- Open questions and unresolved issues
+
+**Rule 4: Proactive Updates**
+During long coding stretches, update the session log after completing each major task (not just at the end).
 
 ## Mobile Access
 
 ### What works now
 - **PWA**: Safari → Share → "Add to Home Screen" at `https://sbaura.up.railway.app`
 - **Telegram bot** (`@SBNexusBot`): Agent chat via `@cmo`, `@cto`, plain text → Chief of Staff
-- **Telegram commands**: `/briefing`, `/capture <text>`, `/today`, `/tasks`, `/done <number>`
 
-### Telegram quick commands
+### Telegram commands (9 total)
 | Command | What it does |
 |---------|-------------|
+| `/start` | Welcome message and usage guide |
+| `/agents` | List all available AI agents |
+| `/briefing` | Generate daily briefing via Chief of Staff agent |
 | `/capture <text>` | Creates a capture item directly → inbox |
 | `/today` | Top 3 outcomes + urgent tasks + inbox count |
 | `/tasks` | Lists in_progress and next tasks (numbered, max 10) |
 | `/done <number>` | Marks a task as done by number from `/tasks` |
+| `/shop <item> [#category]` | Add to shopping list (categories: #groceries, #household, #personal, #business) |
+| `/clip <url>` | Clip web article to Knowledge Hub (auto-embeds for RAG) |
+
+### Agent chat via Telegram
+- `@cmo <message>` → routes to CMO agent
+- `@cto <message>` → routes to CTO agent
+- `@<agent-slug> <message>` → routes to specific agent
+- Plain text → routes to Chief of Staff (default)
+- Bare URL → prompts to clip to Knowledge Hub
 
 ---
 

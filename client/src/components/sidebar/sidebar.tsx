@@ -20,6 +20,8 @@ import {
   Plug,
   Layers,
   DollarSign,
+  Inbox,
+  Bot,
 } from "lucide-react";
 import NavSection, { NavItemConfig } from "./nav-section";
 import VenturesNavSection from "./ventures-nav-section";
@@ -132,6 +134,11 @@ const navigationSections: Array<{ label: string; items: NavItemConfig[]; default
         icon: Users,
         label: "Agents",
       },
+      {
+        href: "/research-inbox",
+        icon: Inbox,
+        label: "Research Inbox",
+      },
     ],
   },
   {
@@ -177,6 +184,11 @@ const navigationSections: Array<{ label: string; items: NavItemConfig[]; default
         href: "/settings/categories",
         icon: Layers,
         label: "Categories",
+      },
+      {
+        href: "/settings/external-agents",
+        icon: Bot,
+        label: "External Agents",
       },
     ],
   },

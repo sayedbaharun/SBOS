@@ -46,6 +46,8 @@ import knowledgeFilesRoutes from "./knowledge-files";
 import memoryRoutes from "./memory";
 import agentRoutes from "./agents";
 import sessionRoutes from "./sessions";
+import externalRoutes from "./external";
+import researchRoutes from "./research";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
@@ -89,13 +91,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/auth', authRoutes);
 
   // ============================================================================
+  // EXTERNAL AGENT API (uses its own Bearer token auth, not session auth)
+  // ============================================================================
+  app.use('/api/external', externalRoutes);
+
+  // ============================================================================
   // PROTECTED ROUTES - All routes below require authentication
   // ============================================================================
 
-  // Apply authentication middleware to all /api routes except auth endpoints
+  // Apply authentication middleware to all /api routes except auth and external endpoints
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
-    // Skip auth for auth endpoints
-    if (req.path.startsWith('/auth/')) {
+    // Skip auth for auth and external endpoints (they have their own auth)
+    if (req.path.startsWith('/auth/') || req.path.startsWith('/external/')) {
       return next();
     }
     // Apply requireAuth
@@ -211,6 +218,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Cross-session continuity for Claude Code and other clients
   // ============================================================================
   app.use('/api/sessions', sessionRoutes);
+
+  // ============================================================================
+  // RESEARCH INBOX
+  // Review and approve external agent research submissions
+  // ============================================================================
+  app.use('/api/research', researchRoutes);
 
   // ============================================================================
   // FILE UPLOADS

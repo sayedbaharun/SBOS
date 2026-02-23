@@ -148,6 +148,12 @@ import {
   knowledgeFiles,
   auditLogs,
   type AuditLog,
+  type ExternalAgent,
+  type InsertExternalAgent,
+  type ResearchSubmission,
+  type InsertResearchSubmission,
+  externalAgents,
+  researchSubmissions,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { eq, desc, and, or, gte, lte, not, inArray, like, sql, asc, isNull } from "drizzle-orm";
@@ -482,6 +488,28 @@ export interface IStorage {
     examplesCount: number;
     teachingsCount: number;
   }>;
+
+  // External Agents
+  getExternalAgents(filters?: { status?: string }): Promise<ExternalAgent[]>;
+  getExternalAgent(id: string): Promise<ExternalAgent | undefined>;
+  getExternalAgentByApiKeyHash(hash: string): Promise<ExternalAgent | undefined>;
+  createExternalAgent(data: InsertExternalAgent): Promise<ExternalAgent>;
+  updateExternalAgent(id: string, data: Partial<InsertExternalAgent>): Promise<ExternalAgent | undefined>;
+  updateExternalAgentLastSeen(id: string): Promise<void>;
+  deleteExternalAgent(id: string): Promise<void>;
+
+  // Research Submissions
+  getResearchSubmissions(filters?: {
+    status?: string;
+    category?: string;
+    externalAgentId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ResearchSubmission[]>;
+  getResearchSubmission(id: string): Promise<ResearchSubmission | undefined>;
+  createResearchSubmission(data: InsertResearchSubmission): Promise<ResearchSubmission>;
+  updateResearchSubmission(id: string, data: Partial<ResearchSubmission>): Promise<ResearchSubmission | undefined>;
+  deleteResearchSubmission(id: string): Promise<void>;
 }
 
 // PostgreSQL Storage Implementation
@@ -4886,6 +4914,115 @@ export class DBStorage implements IStorage {
       console.error("Error fetching knowledge files for AI context:", error);
       return [];
     }
+  }
+
+  // ============================================================================
+  // EXTERNAL AGENTS
+  // ============================================================================
+
+  async getExternalAgents(filters?: { status?: string }): Promise<ExternalAgent[]> {
+    const conditions = [];
+    if (filters?.status) {
+      conditions.push(eq(externalAgents.status, filters.status as any));
+    }
+    return await this.db.select().from(externalAgents)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(externalAgents.createdAt));
+  }
+
+  async getExternalAgent(id: string): Promise<ExternalAgent | undefined> {
+    const [agent] = await this.db.select().from(externalAgents)
+      .where(eq(externalAgents.id, id)).limit(1);
+    return agent;
+  }
+
+  async getExternalAgentByApiKeyHash(hash: string): Promise<ExternalAgent | undefined> {
+    const [agent] = await this.db.select().from(externalAgents)
+      .where(eq(externalAgents.apiKeyHash, hash)).limit(1);
+    return agent;
+  }
+
+  async createExternalAgent(data: InsertExternalAgent): Promise<ExternalAgent> {
+    const [agent] = await this.db.insert(externalAgents)
+      .values(data as any).returning();
+    return agent;
+  }
+
+  async updateExternalAgent(id: string, data: Partial<InsertExternalAgent>): Promise<ExternalAgent | undefined> {
+    const [updated] = await this.db.update(externalAgents)
+      .set(data as any)
+      .where(eq(externalAgents.id, id)).returning();
+    return updated;
+  }
+
+  async updateExternalAgentLastSeen(id: string): Promise<void> {
+    await this.db.update(externalAgents)
+      .set({ lastSeenAt: new Date() } as any)
+      .where(eq(externalAgents.id, id));
+  }
+
+  async deleteExternalAgent(id: string): Promise<void> {
+    await this.db.delete(externalAgents).where(eq(externalAgents.id, id));
+  }
+
+  // ============================================================================
+  // RESEARCH SUBMISSIONS
+  // ============================================================================
+
+  async getResearchSubmissions(filters?: {
+    status?: string;
+    category?: string;
+    externalAgentId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ResearchSubmission[]> {
+    const conditions = [];
+    if (filters?.status) {
+      conditions.push(eq(researchSubmissions.status, filters.status as any));
+    }
+    if (filters?.category) {
+      conditions.push(eq(researchSubmissions.category, filters.category as any));
+    }
+    if (filters?.externalAgentId) {
+      conditions.push(eq(researchSubmissions.externalAgentId, filters.externalAgentId));
+    }
+
+    let query = this.db.select().from(researchSubmissions)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(researchSubmissions.createdAt))
+      .$dynamic();
+
+    if (filters?.limit) {
+      query = query.limit(filters.limit) as any;
+    }
+    if (filters?.offset) {
+      query = query.offset(filters.offset) as any;
+    }
+
+    return await query;
+  }
+
+  async getResearchSubmission(id: string): Promise<ResearchSubmission | undefined> {
+    const [submission] = await this.db.select().from(researchSubmissions)
+      .where(eq(researchSubmissions.id, id)).limit(1);
+    return submission;
+  }
+
+  async createResearchSubmission(data: InsertResearchSubmission): Promise<ResearchSubmission> {
+    const [submission] = await this.db.insert(researchSubmissions)
+      .values(data as any).returning();
+    return submission;
+  }
+
+  async updateResearchSubmission(id: string, data: Partial<ResearchSubmission>): Promise<ResearchSubmission | undefined> {
+    const [updated] = await this.db.update(researchSubmissions)
+      .set(data as any)
+      .where(eq(researchSubmissions.id, id)).returning();
+    return updated;
+  }
+
+  async deleteResearchSubmission(id: string): Promise<void> {
+    await this.db.delete(researchSubmissions).where(eq(researchSubmissions.id, id));
   }
 
 }
