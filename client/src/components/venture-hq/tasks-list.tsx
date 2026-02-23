@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import CreateTaskModal from "@/components/create-task-modal";
+import { useTaskDetailModal } from "@/lib/task-detail-modal-store";
 
 interface Task {
   id: string;
@@ -46,6 +47,7 @@ interface TasksListProps {
 
 export default function TasksList({ ventureId }: TasksListProps) {
   const { toast } = useToast();
+  const { openTaskDetail } = useTaskDetailModal();
   const [createModalOpen, setCreateModalOpen] = useState(false);
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -333,23 +335,27 @@ export default function TasksList({ ventureId }: TasksListProps) {
                 <div
                   key={task.id}
                   className={cn(
-                    "flex items-start gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors",
+                    "flex items-start gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors cursor-pointer",
                     task.status === "completed" && "opacity-60"
                   )}
+                  onClick={() => openTaskDetail(task.id)}
                 >
                   <Checkbox
                     checked={task.status === "completed"}
                     onCheckedChange={() => handleToggleTask(task)}
+                    onClick={(e) => e.stopPropagation()}
                     className="mt-1"
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <Badge className={getPriorityColor(task.priority)} variant="secondary">
-                        {task.priority}
+                        {task.priority ?? "—"}
                       </Badge>
+                      {task.type && (
                       <Badge className={getTypeColor(task.type)} variant="secondary">
                         {task.type.replace("_", " ")}
                       </Badge>
+                      )}
                       {task.projectId && (
                         <Badge variant="outline" className="text-xs">
                           {getProjectName(task.projectId)}
@@ -378,7 +384,7 @@ export default function TasksList({ ventureId }: TasksListProps) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => handleDeleteTask(task.id)}
+                    onClick={(e) => { e.stopPropagation(); handleDeleteTask(task.id); }}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
