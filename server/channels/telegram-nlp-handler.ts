@@ -13,6 +13,7 @@
 
 import { logger } from "../logger";
 import { storage } from "../storage";
+import { getUserDate } from "../utils/dates";
 
 // ============================================================================
 // KEYWORD GATES (zero-cost rejection for non-logging messages)
@@ -57,7 +58,7 @@ function isMorningDoneCombo(text: string): boolean {
 }
 
 async function handleMorningDoneShortcut(): Promise<string> {
-  const today = new Date().toISOString().split("T")[0];
+  const today = getUserDate();
   const day = await storage.getDayOrCreate(today);
   const existing = (day.morningRituals as Record<string, any>) ?? {};
 
@@ -162,7 +163,7 @@ async function extractStructured(text: string): Promise<{ intents: any[] }> {
 // ============================================================================
 
 async function handleMorningRitual(rituals: Record<string, any>): Promise<string> {
-  const today = new Date().toISOString().split("T")[0];
+  const today = getUserDate();
   const day = await storage.getDayOrCreate(today);
 
   // Merge with existing rituals (don't overwrite)
@@ -202,7 +203,7 @@ async function handleHealthLog(data: {
   weightKg?: number;
   fasting?: { status?: string; hours?: number; window?: string };
 }): Promise<string> {
-  const today = new Date().toISOString().split("T")[0];
+  const today = getUserDate();
   const day = await storage.getDayOrCreate(today);
 
   // Check if health entry already exists for today — update it instead of creating duplicate
@@ -263,7 +264,7 @@ async function handleWorkout(data: {
   durationMin?: number;
   notes?: string;
 }): Promise<string> {
-  const today = new Date().toISOString().split("T")[0];
+  const today = getUserDate();
   const day = await storage.getDayOrCreate(today);
 
   // Check if health entry exists — update workout fields, or create new
@@ -309,7 +310,7 @@ async function handleNutrition(data: {
   carbsG?: number;
   fatsG?: number;
 }): Promise<string> {
-  const today = new Date().toISOString().split("T")[0];
+  const today = getUserDate();
   const day = await storage.getDayOrCreate(today);
 
   await storage.createNutritionEntry({
@@ -333,6 +334,63 @@ async function handleNutrition(data: {
 }
 
 // ============================================================================
+// CONVERSATION PERSISTENCE (store NLP interactions for memory/learning)
+// ============================================================================
+
+/**
+ * Log NLP interactions as agent conversations so they appear in conversation
+ * history and trigger learning extraction. Uses chief-of-staff as the agent.
+ */
+async function logNlpConversation(userMessage: string, assistantResponse: string): Promise<void> {
+  try {
+    const { loadAgent } = await import("../agents/agent-registry");
+    const agent = await loadAgent("chief-of-staff");
+    if (!agent) return;
+
+    // Lazy DB access
+    const { storage: st } = await import("../storage");
+    const db = (st as any).db;
+    const { agentConversations } = await import("@shared/schema");
+
+    // Insert user message
+    await db.insert(agentConversations).values({
+      agentId: agent.id,
+      role: "user" as const,
+      content: userMessage,
+      metadata: { source: "telegram-nlp", channel: "telegram" },
+    });
+
+    // Insert assistant response
+    await db.insert(agentConversations).values({
+      agentId: agent.id,
+      role: "assistant" as const,
+      content: assistantResponse,
+      metadata: { source: "telegram-nlp", channel: "telegram" },
+    });
+
+    // Fire learning extraction (fire-and-forget)
+    const { extractConversationLearnings } = await import("../agents/learning-extractor");
+    extractConversationLearnings({
+      agentId: agent.id,
+      agentSlug: "chief-of-staff",
+      userMessage,
+      assistantResponse,
+    }).catch((err: any) =>
+      logger.warn({ error: err.message }, "NLP learning extraction failed (non-critical)")
+    );
+
+    // Fire entity relation extraction (fire-and-forget)
+    import("../memory/entity-linker").then(({ extractEntityRelations }) =>
+      extractEntityRelations({ userMessage, assistantResponse })
+        .catch(() => {})
+    ).catch(() => {});
+  } catch (error: any) {
+    // Non-critical — don't break the NLP response
+    logger.warn({ error: error.message }, "Failed to log NLP conversation (non-critical)");
+  }
+}
+
+// ============================================================================
 // MAIN ENTRY POINT
 // ============================================================================
 
@@ -344,6 +402,7 @@ export async function detectAndHandleLog(
     try {
       const response = await handleMorningDoneShortcut();
       logger.info("Morning done shortcut handled via Telegram");
+      logNlpConversation(text, response).catch(() => {});
       return { handled: true, response };
     } catch (error: any) {
       logger.error({ error: error.message }, "Morning done shortcut error");
@@ -415,6 +474,7 @@ export async function detectAndHandleLog(
       { intentCount: parsed.intents.length, intents: parsed.intents.map((i: any) => i.intent) },
       "NLP multi-intent log handled via Telegram"
     );
+    logNlpConversation(text, combined).catch(() => {});
     return { handled: true, response: combined };
   } catch (error: any) {
     logger.error({ error: error.message, text }, "NLP handler error");

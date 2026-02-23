@@ -45,6 +45,7 @@ import webClipRoutes from "./web-clip";
 import knowledgeFilesRoutes from "./knowledge-files";
 import memoryRoutes from "./memory";
 import agentRoutes from "./agents";
+import sessionRoutes from "./sessions";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
@@ -204,6 +205,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Multi-agent organization with delegation, hierarchy, and memory
   // ============================================================================
   app.use('/api/agents', agentRoutes);
+
+  // ============================================================================
+  // SESSION LOGS
+  // Cross-session continuity for Claude Code and other clients
+  // ============================================================================
+  app.use('/api/sessions', sessionRoutes);
 
   // ============================================================================
   // FILE UPLOADS

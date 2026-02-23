@@ -469,6 +469,31 @@ function buildCoreTools(agent: Agent, permissions: string[]): OpenAI.Chat.ChatCo
     });
   }
 
+  // Knowledge graph exploration
+  if (availableTools.includes("explore_knowledge_graph") || availableTools.includes("search_knowledge_base")) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "explore_knowledge_graph",
+        description: "Explore entity relationships in the knowledge graph. Find how people, projects, organizations, and concepts are connected.",
+        parameters: {
+          type: "object",
+          properties: {
+            entity_name: {
+              type: "string",
+              description: "Name of the entity to explore (e.g., 'Sayed', 'SB-OS', 'Railway')",
+            },
+            max_hops: {
+              type: "number",
+              description: "How many relationship hops to traverse (1-3, default 1)",
+            },
+          },
+          required: ["entity_name"],
+        },
+      },
+    });
+  }
+
   // Deployment
   if (availableTools.includes("deploy")) {
     tools.push({
@@ -869,6 +894,32 @@ async function executeTool(
         return { result: context };
       }
 
+      case "explore_knowledge_graph": {
+        const { getRelatedEntities, getEntityNeighborhood } = await import("../memory/entity-linker");
+        const entityName = args.entity_name as string;
+        const maxHops = Math.min(Math.max(args.max_hops || 1, 1), 3);
+
+        if (maxHops === 1) {
+          const related = await getRelatedEntities(entityName);
+          if (related.length === 0) {
+            return { result: `No known relationships found for "${entityName}".` };
+          }
+          const lines = related.map(r =>
+            `${r.direction === "outgoing" ? "→" : "←"} ${r.relation}: ${r.name} (${r.type || "unknown"}) [strength: ${r.strength?.toFixed(2)}, mentions: ${r.mentionCount}]`
+          );
+          return { result: `Entity: ${entityName}\nRelationships:\n${lines.join("\n")}` };
+        } else {
+          const neighborhood = await getEntityNeighborhood(entityName, maxHops);
+          if (neighborhood.length === 0) {
+            return { result: `No known relationships found for "${entityName}".` };
+          }
+          const lines = neighborhood.map(n =>
+            `[hop ${n.hop}] ${n.name} (${n.type || "unknown"}) — ${n.relation}${n.via ? ` via ${n.via}` : ""}`
+          );
+          return { result: `Entity neighborhood for "${entityName}" (${maxHops} hops):\n${lines.join("\n")}` };
+        }
+      }
+
       case "deploy": {
         switch (args.action) {
           case "deploy":
@@ -1110,6 +1161,12 @@ export async function executeAgentChat(
     ventureId: agent.ventureId || undefined,
     actions,
   }).catch(err => logger.debug({ err: err.message }, "Learning extraction failed (non-critical)"));
+
+  // Fire-and-forget: extract entity relationships
+  import("../memory/entity-linker").then(({ extractEntityRelations }) =>
+    extractEntityRelations({ userMessage, assistantResponse: finalResponse })
+      .catch(err => logger.debug({ err: err.message }, "Entity extraction failed (non-critical)"))
+  ).catch(() => {});
 
   logger.info(
     {

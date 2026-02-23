@@ -23,6 +23,7 @@ import type {
   IncomingMessage,
   OutgoingMessage,
 } from "../types";
+import { getUserDate } from "../../utils/dates";
 
 // ============================================================================
 // CONFIG
@@ -139,7 +140,10 @@ class TelegramAdapter implements ChannelAdapter {
         `• /capture <text> — quick capture to inbox\n` +
         `• /today — today's summary\n` +
         `• /tasks — list active tasks\n` +
-        `• /done <number> — mark task done`
+        `• /done <number> — mark task done\n` +
+        `• /shop <item> [#category] — add to shopping list\n` +
+        `• /clip <url> — clip article to Knowledge Hub\n\n` +
+        `Tip: Send a bare URL to get a "Clip it?" prompt.`
       );
     });
 
@@ -199,7 +203,7 @@ class TelegramAdapter implements ChannelAdapter {
     // ---- /today Command ----
     this.bot.command("today", async (ctx) => {
       try {
-        const today = new Date().toISOString().split("T")[0];
+        const today = getUserDate();
         const [day, todayTasks, urgentTasks, captures] = await Promise.all([
           storage.getDayOrCreate(today),
           storage.getTasksForToday(today),
@@ -278,6 +282,77 @@ class TelegramAdapter implements ChannelAdapter {
       }
     });
 
+    // ---- /shop Command ----
+    this.bot.command("shop", async (ctx) => {
+      try {
+        const text = ctx.message.text.replace(/^\/shop\s*/, "").trim();
+        if (!text) {
+          await ctx.reply("Usage: /shop <item> [#category]\nExample: /shop protein powder #groceries\nCategories: #groceries (default), #household, #personal, #business");
+          return;
+        }
+
+        // Parse optional hashtag category
+        const categoryMatch = text.match(/#(groceries|household|personal|business)\s*$/i);
+        const category = categoryMatch ? categoryMatch[1].toLowerCase() : "groceries";
+        const itemTitle = text.replace(/#(groceries|household|personal|business)\s*$/i, "").trim();
+
+        if (!itemTitle) {
+          await ctx.reply("Please provide an item name.");
+          return;
+        }
+
+        const item = await storage.createShoppingItem({
+          item: itemTitle,
+          category: category as any,
+          status: "to_buy",
+          priority: "P2",
+        } as any);
+
+        await ctx.reply(`🛒 Added: "${item.item}" [${category}]`);
+
+        // Log conversation (fire-and-forget)
+        this.logCommandConversation(text, `Shopping item created: "${item.item}" [${category}]`).catch(() => {});
+      } catch (error: any) {
+        await ctx.reply("Failed to add shopping item.");
+        this.recordError(error.message);
+      }
+    });
+
+    // ---- /clip Command ----
+    this.bot.command("clip", async (ctx) => {
+      try {
+        const url = ctx.message.text.replace(/^\/clip\s*/, "").trim();
+        if (!url) {
+          await ctx.reply("Usage: /clip <url>\nExample: /clip https://paulgraham.com/startupideas.html");
+          return;
+        }
+
+        await ctx.reply("Clipping article...");
+        const { clipUrl } = await import("../../web-clipper");
+        const { processDocumentNow } = await import("../../embedding-jobs");
+        const clipped = await clipUrl(url);
+
+        const doc = await storage.createDoc({
+          title: clipped.title,
+          body: clipped.body,
+          type: "reference",
+          domain: "personal",
+          status: "active",
+          tags: ["telegram-clip"],
+          metadata: clipped.metadata,
+        });
+
+        processDocumentNow(doc.id).catch(() => {});
+
+        await ctx.reply(`📎 Clipped: "${clipped.title}"\nWords: ${clipped.metadata.wordCount}\nSaved to Knowledge Hub.`);
+
+        this.logCommandConversation(`/clip ${url}`, `Clipped "${clipped.title}" (${clipped.metadata.wordCount} words)`).catch(() => {});
+      } catch (error: any) {
+        await ctx.reply(`Failed to clip: ${error.message}`);
+        this.recordError(error.message);
+      }
+    });
+
     // ---- /done Command ----
     this.bot.command("done", async (ctx) => {
       try {
@@ -319,6 +394,23 @@ class TelegramAdapter implements ChannelAdapter {
         const nlpResult = await detectAndHandleLog(ctx.message.text);
         if (nlpResult.handled) {
           await this.sendLongMessage(ctx.chat.id.toString(), nlpResult.response!);
+          this.stats.messagesSent++;
+          return;
+        }
+
+        // URL auto-detect: if message is a bare URL, offer to clip it
+        const urlMatch = ctx.message.text.match(/^(https?:\/\/\S+)$/i);
+        if (urlMatch) {
+          await ctx.reply("Clip this to Knowledge Hub?", {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "📎 Yes, clip it", callback_data: `clip:${urlMatch[1]}` },
+                  { text: "❌ No", callback_data: "clip:dismiss" },
+                ],
+              ],
+            },
+          });
           this.stats.messagesSent++;
           return;
         }
@@ -378,6 +470,56 @@ class TelegramAdapter implements ChannelAdapter {
         logger.error({ error: error.message }, "Error processing Telegram photo");
         await ctx.reply("Sorry, I couldn't process your photo.");
         this.recordError(error.message);
+      }
+    });
+
+    // ---- Callback Queries (inline keyboard responses) ----
+    this.bot.on("callback_query", async (ctx) => {
+      try {
+        const data = (ctx.callbackQuery as any).data as string;
+        if (!data) return;
+
+        if (data === "clip:dismiss") {
+          await ctx.answerCbQuery("Dismissed");
+          await ctx.editMessageReplyMarkup(undefined);
+          return;
+        }
+
+        if (data.startsWith("clip:")) {
+          const url = data.slice(5);
+          await ctx.answerCbQuery("Clipping...");
+          await ctx.editMessageReplyMarkup(undefined);
+
+          try {
+            const { clipUrl } = await import("../../web-clipper");
+            const { processDocumentNow } = await import("../../embedding-jobs");
+            const clipped = await clipUrl(url);
+
+            const doc = await storage.createDoc({
+              title: clipped.title,
+              body: clipped.body,
+              type: "reference",
+              domain: "personal",
+              status: "active",
+              tags: ["telegram-clip"],
+              metadata: clipped.metadata,
+            });
+
+            processDocumentNow(doc.id).catch(() => {});
+
+            await this.sendLongMessage(
+              ctx.chat!.id.toString(),
+              `📎 Clipped: "${clipped.title}"\nWords: ${clipped.metadata.wordCount}\nSaved to Knowledge Hub.`
+            );
+          } catch (err: any) {
+            await this.sendLongMessage(
+              ctx.chat!.id.toString(),
+              `Failed to clip: ${err.message}`
+            );
+          }
+        }
+      } catch (error: any) {
+        logger.error({ error: error.message }, "Error handling callback query");
       }
     });
 
@@ -550,6 +692,36 @@ class TelegramAdapter implements ChannelAdapter {
     } catch (error: any) {
       // Non-critical — don't fail the response
       logger.warn({ error: error.message }, "Failed to save Telegram message history");
+    }
+  }
+
+  /**
+   * Log a command interaction as an agent conversation for memory/learning.
+   */
+  private async logCommandConversation(userMessage: string, assistantResponse: string): Promise<void> {
+    try {
+      const { loadAgent } = await import("../../agents/agent-registry");
+      const agent = await loadAgent("chief-of-staff");
+      if (!agent) return;
+
+      const { storage: st } = await import("../../storage");
+      const db = (st as any).db;
+      const { agentConversations } = await import("@shared/schema");
+
+      await db.insert(agentConversations).values({
+        agentId: agent.id,
+        role: "user" as const,
+        content: userMessage,
+        metadata: { source: "telegram-command", channel: "telegram" },
+      });
+      await db.insert(agentConversations).values({
+        agentId: agent.id,
+        role: "assistant" as const,
+        content: assistantResponse,
+        metadata: { source: "telegram-command", channel: "telegram" },
+      });
+    } catch {
+      // Non-critical
     }
   }
 

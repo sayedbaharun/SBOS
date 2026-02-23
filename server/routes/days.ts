@@ -6,6 +6,7 @@ import { Router, Request, Response } from "express";
 import { storage } from "../storage";
 import { logger } from "../logger";
 import { insertDaySchema } from "@shared/schema";
+import { getUserDate } from "../utils/dates";
 import { z } from "zod";
 
 const router = Router();
@@ -29,7 +30,7 @@ router.get("/", async (req: Request, res: Response) => {
 // Get today's day (auto-create if doesn't exist)
 router.get("/today", async (req: Request, res: Response) => {
   try {
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const today = getUserDate();
     const day = await storage.getDayOrCreate(today);
     res.json(day);
   } catch (error) {

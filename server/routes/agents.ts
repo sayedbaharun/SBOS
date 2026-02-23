@@ -16,6 +16,7 @@ import {
   type Agent,
 } from "@shared/schema";
 import { z } from "zod";
+import { ilike, gte, or } from "drizzle-orm";
 import { executeAgentChat } from "../agents/agent-runtime";
 import { loadAllAgents, loadAgent, seedFromTemplates, invalidateCache } from "../agents/agent-registry";
 import { delegateFromUser } from "../agents/delegation-engine";
@@ -36,6 +37,76 @@ async function getDb() {
   }
   return db;
 }
+
+// ============================================================================
+// CROSS-AGENT CONVERSATION SEARCH
+// ============================================================================
+
+// Get recent conversations across ALL agents
+router.get("/conversations/recent", async (req: Request, res: Response) => {
+  try {
+    const database = await getDb();
+    const hours = parseInt(String(req.query.hours || "72"));
+    const limit = Math.min(parseInt(String(req.query.limit || "100")), 500);
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+    const conversations = await database
+      .select({
+        id: agentConversations.id,
+        agentId: agentConversations.agentId,
+        role: agentConversations.role,
+        content: agentConversations.content,
+        metadata: agentConversations.metadata,
+        createdAt: agentConversations.createdAt,
+        agentName: agents.name,
+        agentSlug: agents.slug,
+      })
+      .from(agentConversations)
+      .leftJoin(agents, eq(agentConversations.agentId, agents.id))
+      .where(gte(agentConversations.createdAt, since))
+      .orderBy(desc(agentConversations.createdAt))
+      .limit(limit);
+
+    res.json(conversations);
+  } catch (error) {
+    logger.error({ error }, "Error fetching recent conversations");
+    res.status(500).json({ error: "Failed to fetch recent conversations" });
+  }
+});
+
+// Full-text search across ALL agent conversations (no time limit)
+router.get("/conversations/search", async (req: Request, res: Response) => {
+  try {
+    const database = await getDb();
+    const query = String(req.query.q || "").trim();
+    if (!query) {
+      return res.status(400).json({ error: "Query parameter 'q' is required" });
+    }
+    const limit = Math.min(parseInt(String(req.query.limit || "20")), 100);
+
+    const conversations = await database
+      .select({
+        id: agentConversations.id,
+        agentId: agentConversations.agentId,
+        role: agentConversations.role,
+        content: agentConversations.content,
+        metadata: agentConversations.metadata,
+        createdAt: agentConversations.createdAt,
+        agentName: agents.name,
+        agentSlug: agents.slug,
+      })
+      .from(agentConversations)
+      .leftJoin(agents, eq(agentConversations.agentId, agents.id))
+      .where(ilike(agentConversations.content, `%${query}%`))
+      .orderBy(desc(agentConversations.createdAt))
+      .limit(limit);
+
+    res.json(conversations);
+  } catch (error) {
+    logger.error({ error }, "Error searching conversations");
+    res.status(500).json({ error: "Failed to search conversations" });
+  }
+});
 
 // ============================================================================
 // AGENT CRUD

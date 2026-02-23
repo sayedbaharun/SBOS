@@ -3343,3 +3343,92 @@ export const insertAgentMemorySchema = createInsertSchema(agentMemory).omit({
 
 export type AgentMemoryEntry = typeof agentMemory.$inferSelect;
 export type InsertAgentMemoryEntry = z.infer<typeof insertAgentMemorySchema>;
+
+// ============================================================================
+// SESSION LOGS — cross-session continuity for Claude Code and other clients
+// ============================================================================
+
+export const sessionSourceEnum = pgEnum('session_source', [
+  'claude-code',
+  'telegram',
+  'web',
+]);
+
+export const sessionLogs = pgTable(
+  "session_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    source: sessionSourceEnum("source").notNull(),
+    summary: text("summary").notNull(),
+    keyTopics: jsonb("key_topics").$type<string[]>().default([]),
+    decisions: jsonb("decisions").$type<string[]>().default([]),
+    openThreads: jsonb("open_threads").$type<string[]>().default([]),
+    filesModified: jsonb("files_modified").$type<string[]>().default([]),
+    tags: jsonb("tags").$type<string[]>().default([]),
+    embedding: text("embedding"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_session_logs_source").on(table.source),
+    index("idx_session_logs_created_at").on(table.createdAt),
+  ]
+);
+
+export const insertSessionLogSchema = createInsertSchema(sessionLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type SessionLog = typeof sessionLogs.$inferSelect;
+export type InsertSessionLog = z.infer<typeof insertSessionLogSchema>;
+
+// ============================================================================
+// ENTITY RELATIONS — lightweight knowledge graph in PostgreSQL
+// ============================================================================
+
+export const entityRelationTypeEnum = pgEnum('entity_relation_type', [
+  'works_at',
+  'works_on',
+  'collaborates_with',
+  'part_of',
+  'related_to',
+  'depends_on',
+  'owns',
+  'mentions',
+  'influenced_by',
+]);
+
+export const entityRelations = pgTable(
+  "entity_relations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sourceEntityId: uuid("source_entity_id"),
+    sourceName: text("source_name").notNull(),
+    sourceType: text("source_type"),
+    targetEntityId: uuid("target_entity_id"),
+    targetName: text("target_name").notNull(),
+    targetType: text("target_type"),
+    relationType: entityRelationTypeEnum("relation_type").notNull(),
+    strength: real("strength").default(0.5),
+    context: text("context"),
+    mentionCount: integer("mention_count").default(1),
+    firstSeen: timestamp("first_seen").defaultNow().notNull(),
+    lastSeen: timestamp("last_seen").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_entity_relations_source").on(table.sourceName),
+    index("idx_entity_relations_target").on(table.targetName),
+    index("idx_entity_relations_type").on(table.relationType),
+    index("idx_entity_relations_source_entity").on(table.sourceEntityId),
+    index("idx_entity_relations_target_entity").on(table.targetEntityId),
+  ]
+);
+
+export const insertEntityRelationSchema = createInsertSchema(entityRelations).omit({
+  id: true,
+  firstSeen: true,
+  lastSeen: true,
+});
+
+export type EntityRelation = typeof entityRelations.$inferSelect;
+export type InsertEntityRelation = z.infer<typeof insertEntityRelationSchema>;

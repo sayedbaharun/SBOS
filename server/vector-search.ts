@@ -9,6 +9,7 @@ import { storage } from "./storage";
 import { logger } from "./logger";
 import { generateEmbedding, cosineSimilarity, parseEmbedding } from "./embeddings";
 import { extractTextFromBlocks } from "./chunking";
+import { getOrBuildIndex, searchBM25, rerank } from "./bm25";
 import type { Doc } from "@shared/schema";
 
 /**
@@ -237,48 +238,45 @@ async function vectorSearchChunks(
 }
 
 /**
- * Keyword search on documents (without embeddings)
+ * Keyword search on documents using BM25 scoring
  */
 export async function keywordSearchDocs(
   query: string,
   options: VectorSearchOptions = {}
 ): Promise<VectorSearchResult[]> {
   const { ventureId, limit = 10 } = options;
-  const results: VectorSearchResult[] = [];
-
-  const queryTerms = extractKeywords(query);
-  if (queryTerms.length === 0) return results;
 
   try {
+    const index = await getOrBuildIndex();
+    const bm25Results = searchBM25(query, index);
+
+    if (bm25Results.length === 0) return [];
+
+    // Normalize BM25 scores to 0-1 range
+    const maxScore = bm25Results[0].score;
+    const normalizedResults = bm25Results.map((r) => ({
+      ...r,
+      score: maxScore > 0 ? r.score / maxScore : 0,
+    }));
+
+    // Fetch doc details for top results
     const docsFilter: { ventureId?: string; status?: string } = { status: 'active' };
     if (ventureId) docsFilter.ventureId = ventureId;
-
     const docs = await storage.getDocs(docsFilter);
+    const docMap = new Map(docs.map((d) => [d.id, d]));
 
-    for (const doc of docs) {
-      // Calculate weighted keyword score
-      let score = 0;
-      const titleLower = doc.title.toLowerCase();
-      const summaryLower = (doc.summary || '').toLowerCase();
-      const keyPointsLower = ((doc.keyPoints as string[]) || []).join(' ').toLowerCase();
-      const tagsLower = ((doc.tags as string[]) || []).join(' ').toLowerCase();
-      const bodyLower = (doc.body || '').toLowerCase();
+    // Filter by venture if needed
+    const ventureFilteredIds = ventureId
+      ? new Set(docs.filter((d) => String(d.ventureId) === ventureId).map((d) => d.id))
+      : null;
 
-      for (const term of queryTerms) {
-        if (titleLower.includes(term)) score += 5;
-        if (summaryLower.includes(term)) score += 4;
-        if (keyPointsLower.includes(term)) score += 3;
-        if (tagsLower.includes(term)) score += 2;
-        if (bodyLower.includes(term)) score += 1;
-      }
+    const results: VectorSearchResult[] = [];
+    for (const bm25Result of normalizedResults) {
+      if (ventureFilteredIds && !ventureFilteredIds.has(bm25Result.id)) continue;
 
-      if (score === 0) continue;
+      const doc = docMap.get(bm25Result.id);
+      if (!doc) continue;
 
-      // Normalize score to 0-1 range
-      const maxPossible = queryTerms.length * 15; // Sum of all weights
-      const normalizedScore = Math.min(score / maxPossible, 1);
-
-      // Get excerpt
       const summary = doc.summary || '';
       const bodyText = doc.body || (doc.content ? extractTextFromBlocks(doc.content) : '');
       const excerpt = summary || bodyText.slice(0, 300);
@@ -288,20 +286,20 @@ export async function keywordSearchDocs(
         id: doc.id,
         title: doc.title,
         content: excerpt,
-        similarity: normalizedScore,
+        similarity: bm25Result.score,
         metadata: {
           docType: doc.type,
           keyPoints: doc.keyPoints,
-          applicableWhen: doc.applicableWhen,
+          applicableWhen: (doc as any).applicableWhen,
         },
       });
+
+      if (results.length >= limit) break;
     }
 
-    // Sort by score and limit
-    results.sort((a, b) => b.similarity - a.similarity);
-    return results.slice(0, limit);
+    return results;
   } catch (error) {
-    logger.error({ error, query }, 'Keyword search failed');
+    logger.error({ error, query }, 'BM25 keyword search failed');
     throw error;
   }
 }
@@ -382,7 +380,7 @@ export async function hybridSearch(
 
     // Calculate combined scores using RRF formula
     const k = 60; // RRF constant
-    for (const entry of scoreMap.values()) {
+    for (const entry of Array.from(scoreMap.values())) {
       const vectorScore = entry.vectorRank === Infinity
         ? 0
         : vectorWeight / (k + entry.vectorRank);
@@ -412,7 +410,8 @@ export async function hybridSearch(
       }
     }
 
-    return sorted;
+    // Apply lightweight reranking (zero-latency adjustments)
+    return rerank(sorted, query);
   } catch (error) {
     logger.error({ error, query }, 'Hybrid search failed');
     throw error;

@@ -362,9 +362,20 @@ app.use((req, res, next) => {
       scheduleWeeklyPlanningReminder();
       scheduleDailyReflectionReminder();
 
+      // Initialize TickTick auto-sync (every 30 min, skips if no token)
+      const { scheduleTickTickAutoSync } = await import('./automations/ticktick-auto-sync');
+      scheduleTickTickAutoSync();
+
       // Initialize RAG embedding jobs
       const { scheduleEmbeddingJobs } = await import('./embedding-jobs');
       scheduleEmbeddingJobs();
+
+      // Build BM25 index (async, non-blocking)
+      import('./bm25').then(({ getOrBuildIndex }) =>
+        getOrBuildIndex().catch((err: any) =>
+          log('BM25 index build deferred:', err.message)
+        )
+      );
 
       // Initialize agent scheduler (proactive agent execution)
       const { initializeScheduler } = await import('./agents/agent-scheduler');
