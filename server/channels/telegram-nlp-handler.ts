@@ -42,6 +42,16 @@ const HEALTH_KEYWORDS = [
   "steps", "walked", "step count",
 ];
 
+const OUTCOMES_KEYWORDS = [
+  "outcomes", "top 3", "top three", "today i want", "today i will",
+  "my goals", "my priorities", "focus today", "ship today",
+  "plan for today", "today's plan",
+];
+const REFLECTION_KEYWORDS = [
+  "day was", "today was", "reflection", "day done", "wrapping up",
+  "good day", "bad day", "tough day", "productive day", "great day",
+];
+
 // "morning done" shortcut patterns — exact match, no LLM call needed
 const MORNING_DONE_PATTERNS = [
   "morning done", "morning complete", "rituals done", "habits done",
@@ -80,7 +90,10 @@ async function handleMorningDoneShortcut(): Promise<string> {
 
 function matchesAnyKeyword(text: string): boolean {
   const lower = text.toLowerCase();
-  const allKeywords = [...RITUAL_KEYWORDS, ...WORKOUT_KEYWORDS, ...NUTRITION_KEYWORDS, ...HEALTH_KEYWORDS];
+  const allKeywords = [
+    ...RITUAL_KEYWORDS, ...WORKOUT_KEYWORDS, ...NUTRITION_KEYWORDS,
+    ...HEALTH_KEYWORDS, ...OUTCOMES_KEYWORDS, ...REFLECTION_KEYWORDS,
+  ];
   return allKeywords.some((kw) => lower.includes(kw));
 }
 
@@ -127,6 +140,16 @@ Include the specific focus in notes (e.g., "push day" → notes: "Push day").
 4. Nutrition log:
 {"intent":"nutrition","mealType":"lunch","description":"Chicken shawarma wrap with hummus","calories":650,"proteinG":42,"carbsG":55,"fatsG":18}
 mealType must be one of: breakfast, lunch, dinner, snack. Estimate macros based on typical portions.
+
+5. Daily outcomes (setting the day's top 3 priorities):
+{"intent":"daily_outcomes","outcomes":["Ship beta feature","Review team performance","Close investor call"],"oneThingToShip":"Ship beta feature"}
+Extract 1-3 outcomes from the user's message. The "oneThingToShip" should be the single most important one.
+Trigger when user says things like "my top 3 today are...", "today I want to...", "outcomes: ...", "priorities: ...", "focus today: ...".
+
+6. Evening reflection:
+{"intent":"evening_reflection","reflection":"Good productive day, shipped the feature and closed the deal","mood":"high"}
+mood: "low", "medium", "high", "peak". Extract from tone of the message.
+Trigger when user says things like "day was great", "today was tough", "wrapping up", "reflection: ...".
 
 Examples of combined messages:
 - "morning done, slept 7h good quality, energy 4" → morning_ritual + health_log
@@ -343,6 +366,55 @@ async function handleNutrition(data: {
   return `Nutrition logged:\n${parts.map((p) => `  🍽 ${p}`).join("\n")}`;
 }
 
+async function handleDailyOutcomes(data: {
+  outcomes: string[];
+  oneThingToShip?: string;
+}): Promise<string> {
+  const today = getUserDate();
+  const day = await storage.getDayOrCreate(today);
+
+  const top3 = data.outcomes.slice(0, 3).map((text) => ({ text, completed: false }));
+  const updateData: Record<string, any> = { top3Outcomes: top3 };
+  if (data.oneThingToShip) {
+    updateData.oneThingToShip = data.oneThingToShip;
+  }
+
+  await storage.updateDay(today, updateData as any);
+
+  const parts = top3.map((o, i) => `  ${i + 1}. ${o.text}`);
+  let response = `Day set! Your top ${top3.length} outcomes:\n${parts.join("\n")}`;
+  if (data.oneThingToShip) {
+    response += `\n\nOne thing to ship: ${data.oneThingToShip}`;
+  }
+  response += "\n\nLet's make it happen.";
+  return response;
+}
+
+async function handleEveningReflection(data: {
+  reflection: string;
+  mood?: string;
+}): Promise<string> {
+  const today = getUserDate();
+
+  const updateData: Record<string, any> = {};
+  if (data.reflection) updateData.reflectionPm = data.reflection;
+  if (data.mood) updateData.mood = data.mood;
+
+  await storage.updateDay(today, updateData as any);
+
+  // Also mark outcomes as reviewed for the day
+  const day = await storage.getDayOrCreate(today);
+  const outcomes = day.top3Outcomes as Array<{ text: string; completed: boolean }> | null;
+  const completed = outcomes ? outcomes.filter((o: any) => o.completed).length : 0;
+  const total = outcomes ? outcomes.filter((o: any) => o.text).length : 0;
+
+  let response = `Reflection saved.`;
+  if (data.mood) response += ` Mood: ${data.mood}.`;
+  if (total > 0) response += ` Outcomes: ${completed}/${total} completed.`;
+  response += "\n\nRest well. See you tomorrow.";
+  return response;
+}
+
 // ============================================================================
 // CONVERSATION PERSISTENCE (store NLP interactions for memory/learning)
 // ============================================================================
@@ -469,6 +541,18 @@ export async function detectAndHandleLog(
             proteinG: intent.proteinG,
             carbsG: intent.carbsG,
             fatsG: intent.fatsG,
+          }));
+          break;
+        case "daily_outcomes":
+          responses.push(await handleDailyOutcomes({
+            outcomes: intent.outcomes || [],
+            oneThingToShip: intent.oneThingToShip,
+          }));
+          break;
+        case "evening_reflection":
+          responses.push(await handleEveningReflection({
+            reflection: intent.reflection || text,
+            mood: intent.mood,
           }));
           break;
         default:

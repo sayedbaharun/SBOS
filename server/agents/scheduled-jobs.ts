@@ -13,6 +13,7 @@ import { dailyBriefing, weeklySummary, ventureStatus } from "./tools/report-gene
 import { executeAgentChat } from "./agent-runtime";
 import { getAllAgentActivity } from "./conversation-manager";
 import { messageBus } from "./message-bus";
+import { getUserDate } from "../utils/dates";
 
 // Lazy DB
 let db: any = null;
@@ -79,6 +80,8 @@ export async function executeScheduledJob(
  */
 registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) => {
   const database = await getDb();
+  const { storage } = await import("../storage");
+  const today = getUserDate();
 
   // Generate the briefing using the report tool
   const briefingResult = await dailyBriefing();
@@ -92,8 +95,53 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
       ).join("\n")}`
     : "";
 
+  // Detect blockers: overdue tasks and stale in-progress items
+  let blockerSection = "";
+  try {
+    const allTasks = await storage.getTasks({});
+    const overdue = allTasks.filter(
+      (t: any) => t.dueDate && t.dueDate < today && !["done", "cancelled"].includes(t.status)
+    );
+    const staleInProgress = allTasks.filter(
+      (t: any) => t.status === "in_progress" && t.updatedAt &&
+        (Date.now() - new Date(t.updatedAt).getTime()) > 48 * 60 * 60 * 1000
+    );
+
+    if (overdue.length > 0 || staleInProgress.length > 0) {
+      blockerSection = "\n\n## ⚠️ Blockers & Attention Needed";
+      if (overdue.length > 0) {
+        blockerSection += `\n${overdue.length} overdue task${overdue.length > 1 ? "s" : ""}:`;
+        for (const t of overdue.slice(0, 5)) {
+          blockerSection += `\n- [OVERDUE] ${t.title} — due ${t.dueDate}`;
+        }
+      }
+      if (staleInProgress.length > 0) {
+        blockerSection += `\n${staleInProgress.length} stale in-progress task${staleInProgress.length > 1 ? "s" : ""} (no update in 48h):`;
+        for (const t of staleInProgress.slice(0, 5)) {
+          blockerSection += `\n- [STALE] ${t.title}`;
+        }
+      }
+    }
+  } catch {
+    // Non-critical
+  }
+
+  // Check if today's outcomes are already set
+  let outcomesPrompt = "";
+  try {
+    const day = await storage.getDayOrCreate(today);
+    const outcomes = day.top3Outcomes as Array<{ text: string; completed: boolean }> | null;
+    if (!outcomes || outcomes.length === 0 || outcomes.every((o: any) => !o.text)) {
+      outcomesPrompt = "\n\nEnd the briefing by asking: 'What are your top 3 outcomes for today? Reply with them and I'll set your day up.'";
+    } else {
+      outcomesPrompt = `\n\nToday's outcomes are already set: ${outcomes.map((o: any) => o.text).join(", ")}. Remind the founder of these.`;
+    }
+  } catch {
+    outcomesPrompt = "\n\nEnd the briefing by asking: 'What are your top 3 outcomes for today?'";
+  }
+
   // Have the agent synthesize the briefing with personality
-  const prompt = `Generate your daily briefing for the founder. Here is the data:\n\n${briefingData.report}${activitySummary}\n\nPresent this as your daily briefing, with your personality and insights. Highlight what matters most today.`;
+  const prompt = `Generate your daily briefing for the founder. Here is the data:\n\n${briefingData.report}${activitySummary}${blockerSection}\n\nPresent this as your daily briefing, with your personality and insights. Highlight what matters most today. Flag any blockers prominently.${outcomesPrompt}`;
 
   const result = await executeAgentChat(agentSlug, prompt, "scheduler");
 
@@ -106,7 +154,7 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
     const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
     const chatIds = getAuthorizedChatIds();
     for (const chatId of chatIds) {
-      await sendProactiveMessage("telegram", chatId, `Daily Briefing\n\n${result.response}`);
+      await sendProactiveMessage("telegram", chatId, `☀️ Daily Briefing\n\n${result.response}`);
     }
   } catch {
     // Telegram not configured — skip
@@ -309,6 +357,151 @@ registerJobHandler("morning_checkin", async (_agentId: string, agentSlug: string
   }
 
   logger.info({ agentSlug }, "Morning check-in sent");
+});
+
+/**
+ * Evening Review — Sends a 6pm Dubai summary of the day + asks for reflection.
+ * Part of the Autonomous Daily Execution Loop.
+ */
+registerJobHandler("evening_review", async (_agentId: string, agentSlug: string) => {
+  const { storage } = await import("../storage");
+  const today = getUserDate();
+
+  // Gather day data
+  const day = await storage.getDayOrCreate(today);
+  const outcomes = day.top3Outcomes as Array<{ text: string; completed: boolean }> | null;
+  const allTasks = await storage.getTasks({});
+  const todayCompleted = allTasks.filter(
+    (t: any) => t.status === "done" && t.completedAt &&
+      new Date(t.completedAt).toISOString().slice(0, 10) === today
+  );
+  const todayInProgress = allTasks.filter(
+    (t: any) => (t.focusDate === today || t.dueDate === today) && t.status !== "done" && t.status !== "cancelled"
+  );
+
+  // Health data
+  const healthEntries = await storage.getHealthEntries({ dateGte: today, dateLte: today });
+  const health = healthEntries[0];
+
+  // Build summary
+  const sections: string[] = [];
+
+  // Outcomes progress
+  if (outcomes && outcomes.length > 0 && outcomes.some((o: any) => o.text)) {
+    const completed = outcomes.filter((o: any) => o.completed).length;
+    const total = outcomes.filter((o: any) => o.text).length;
+    sections.push(`Outcomes: ${completed}/${total} completed`);
+    for (const o of outcomes) {
+      if (o.text) sections.push(`  ${o.completed ? "✅" : "⬜"} ${o.text}`);
+    }
+  }
+
+  // Tasks
+  if (todayCompleted.length > 0) {
+    sections.push(`\nTasks completed today: ${todayCompleted.length}`);
+    for (const t of todayCompleted.slice(0, 5)) {
+      sections.push(`  ✅ ${t.title}`);
+    }
+  }
+  if (todayInProgress.length > 0) {
+    sections.push(`\nStill open: ${todayInProgress.length}`);
+    for (const t of todayInProgress.slice(0, 5)) {
+      sections.push(`  ⬜ ${t.title}`);
+    }
+  }
+
+  // Health snapshot
+  if (health) {
+    const healthParts: string[] = [];
+    if (health.workoutDone) healthParts.push(`Workout: ${health.workoutType || "done"} (${health.workoutDurationMin || "?"}min)`);
+    if (health.steps) healthParts.push(`Steps: ${health.steps.toLocaleString()}`);
+    if (health.stressLevel) healthParts.push(`Stress: ${health.stressLevel}`);
+    if (healthParts.length > 0) sections.push(`\nHealth: ${healthParts.join(" | ")}`);
+  }
+
+  // One thing to ship
+  if (day.oneThingToShip) {
+    sections.push(`\nOne thing to ship: ${day.oneThingToShip}`);
+  }
+
+  const summaryData = sections.join("\n");
+
+  // Build Telegram message directly (no LLM needed for this)
+  let message = `🌙 Evening Review\n\n${summaryData}\n\n`;
+  message += "How was your day? Reply with a quick reflection — or just say 'done' to close the day.";
+
+  try {
+    const { sendProactiveMessage } = await import("../channels/channel-manager");
+    const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+    for (const chatId of getAuthorizedChatIds()) {
+      await sendProactiveMessage("telegram", chatId, message);
+    }
+  } catch {
+    // Telegram not configured — skip
+  }
+
+  logger.info({ agentSlug }, "Evening review sent");
+});
+
+/**
+ * Weekly Report — Chief of Staff generates Friday summary.
+ * Covers: tasks completed, ventures progressed, health trends, wins.
+ * Sent to Telegram + saved as Knowledge Hub doc.
+ */
+registerJobHandler("weekly_report_cos", async (agentId: string, agentSlug: string) => {
+  const weeklyResult = await weeklySummary();
+  const weeklyData = JSON.parse(weeklyResult.result);
+
+  // Get health trends for the week
+  const { storage } = await import("../storage");
+  const today = new Date();
+  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const weekAgoStr = weekAgo.toISOString().slice(0, 10);
+  const todayStr = getUserDate();
+
+  let healthTrend = "";
+  try {
+    const healthEntries = await storage.getHealthEntries({ dateGte: weekAgoStr, dateLte: todayStr });
+    if (healthEntries.length > 0) {
+      const avgSleep = healthEntries.reduce((sum: number, h: any) => sum + (h.sleepHours || 0), 0) / healthEntries.length;
+      const avgEnergy = healthEntries.reduce((sum: number, h: any) => sum + (h.energyLevel || 0), 0) / healthEntries.length;
+      const workoutDays = healthEntries.filter((h: any) => h.workoutDone).length;
+      healthTrend = `\n\n## Health Trends (${healthEntries.length} days tracked)\n- Avg sleep: ${avgSleep.toFixed(1)}h\n- Avg energy: ${avgEnergy.toFixed(1)}/5\n- Workouts: ${workoutDays}/${healthEntries.length} days`;
+    }
+  } catch {
+    // Non-critical
+  }
+
+  const prompt = `Generate a comprehensive weekly report for the founder. Here is the data:\n\n${weeklyData.report}${healthTrend}\n\nThis is a Friday wrap-up. Celebrate wins, flag concerns, and suggest focus areas for next week. Be encouraging but honest.`;
+
+  const result = await executeAgentChat(agentSlug, prompt, "scheduler");
+
+  messageBus.broadcast(agentId, `[Weekly Report] ${result.response.slice(0, 500)}`);
+
+  // Save as Knowledge Hub doc
+  try {
+    await storage.createDoc({
+      title: `Weekly Report — ${todayStr}`,
+      content: result.response,
+      type: "note",
+      tags: ["weekly-report", "auto-generated"],
+    } as any);
+  } catch {
+    // Non-critical
+  }
+
+  // Send to Telegram
+  try {
+    const { sendProactiveMessage } = await import("../channels/channel-manager");
+    const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+    for (const chatId of getAuthorizedChatIds()) {
+      await sendProactiveMessage("telegram", chatId, `📊 Weekly Report\n\n${result.response}`);
+    }
+  } catch {
+    // Telegram not configured — skip
+  }
+
+  logger.info({ agentSlug, tokensUsed: result.tokensUsed }, "Weekly report (CoS) generated");
 });
 
 /**

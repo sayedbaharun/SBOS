@@ -13,7 +13,9 @@ model_tier: top
 temperature: 0.5
 schedule:
   daily_briefing: "0 5 * * *"
-  morning_checkin: "0 10 * * *"
+  morning_checkin: "0 6 * * *"
+  evening_review: "0 14 * * *"
+  weekly_report_cos: "0 12 * * 5"
 memory_scope: isolated
 ---
 
