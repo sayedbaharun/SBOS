@@ -313,52 +313,14 @@ app.use((req, res, next) => {
       log('Categories seeding skipped:', String(error));
     }
 
-    // Initialize Telegram bot webhook or polling AFTER server starts
-    let telegramBot: any = null;
+    // Clear any stale Telegram webhook so the new channel adapter can use polling
+    // The new adapter (telegram-adapter.ts) handles voice, photos, NLP, and all commands
     try {
-      const { setupTelegramWebhook, removeTelegramWebhook, bot } = await import('./telegram-bot');
-      telegramBot = bot;
-
-      if (bot) {
-        const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT;
-
-        if (isProduction) {
-          // Production: use webhook with Railway domain
-          const domain = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.RAILWAY_STATIC_URL;
-
-          if (!domain) {
-            log('⚠️ No Railway domain found, Telegram webhook not configured');
-            log('Set RAILWAY_PUBLIC_DOMAIN environment variable or use Railway auto-generated domain');
-          } else {
-            const webhookUrl = `https://${domain}/api/telegram-webhook`;
-            await setupTelegramWebhook(webhookUrl);
-            log(`Telegram webhook configured: ${webhookUrl}`);
-          }
-        } else {
-          // Development: use polling
-          log('Starting Telegram bot in development mode...');
-          await removeTelegramWebhook();
-          log('Webhook removed, launching bot...');
-          try {
-            // Launch bot with timeout to prevent hanging
-            const launchPromise = bot.launch({
-              dropPendingUpdates: true, // Skip old updates
-            });
-
-            const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Bot launch timeout')), 10000)
-            );
-
-            await Promise.race([launchPromise, timeoutPromise]);
-            log('✓ Telegram bot running in polling mode (development)');
-          } catch (launchError) {
-            log('⚠ Telegram bot launch issue:', String(launchError));
-            log('Bot may still receive messages via webhook when deployed');
-          }
-        }
-      }
+      const { removeTelegramWebhook } = await import('./telegram-bot');
+      await removeTelegramWebhook();
+      log('✓ Telegram webhook cleared (using polling via channel adapter)');
     } catch (error) {
-      log('Telegram bot setup skipped:', String(error));
+      log('Telegram webhook cleanup skipped:', String(error));
     }
 
     // Initialize SB-OS automations
