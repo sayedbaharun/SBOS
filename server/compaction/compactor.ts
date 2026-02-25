@@ -149,6 +149,19 @@ export async function compactSession(
       }
     }
 
+    // Step 7b: Ingest to FalkorDB graph (non-blocking)
+    import("../memory/graph-store").then(({ ingestCompactionToGraph }) =>
+      ingestCompactionToGraph({
+        id: compactedId,
+        summary: parsed.summary,
+        domain: parsed.domain,
+        importance: compactedPayload.importance,
+        timestamp: compactedPayload.timestamp,
+        key_entities: parsed.key_entities,
+        key_decisions: parsed.key_decisions,
+      }).catch(() => {})
+    );
+
     // Step 8: Replace session context
     replaceAfterCompaction(sessionId, parsed.summary, toKeep);
 

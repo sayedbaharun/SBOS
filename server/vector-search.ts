@@ -84,7 +84,8 @@ function keywordScore(queryTerms: string[], text: string): number {
 }
 
 /**
- * Vector search on documents with embeddings
+ * Vector search on documents — uses Qdrant ANN index when available,
+ * falls back to JS cosine loop for backwards compatibility.
  */
 export async function vectorSearchDocs(
   query: string,
@@ -97,21 +98,60 @@ export async function vectorSearchDocs(
     includeChunks = true,
   } = options;
 
-  const results: VectorSearchResult[] = [];
-
   try {
-    // Generate query embedding
+    // Try Qdrant-backed search first (O(log n) ANN instead of O(n) JS loop)
+    try {
+      const { searchKB, getKBCollectionCount } = await import("./memory/kb-qdrant");
+      const count = await getKBCollectionCount();
+
+      if (count > 0) {
+        const qdrantResults = await searchKB(query, {
+          limit: limit * 2,
+          minScore: minSimilarity,
+          ventureId: ventureId ? String(ventureId) : undefined,
+        });
+
+        const results: VectorSearchResult[] = qdrantResults.map((r) => ({
+          type: 'doc' as const,
+          id: r.id,
+          title: r.title,
+          content: r.excerpt,
+          similarity: r.score,
+          metadata: {
+            docType: r.payload.docType,
+            keyPoints: r.payload.keyPoints,
+            aiReady: r.payload.aiReady,
+          },
+        }));
+
+        // Still include chunk search for granularity
+        if (includeChunks) {
+          const queryResult = await generateEmbedding(query);
+          const chunkResults = await vectorSearchChunks(query, queryResult.embedding, {
+            ventureId,
+            minSimilarity,
+            limit: limit * 2,
+          });
+          results.push(...chunkResults);
+        }
+
+        return deduplicateResults(results).slice(0, limit);
+      }
+    } catch (qdrantErr) {
+      logger.debug({ error: qdrantErr }, "Qdrant KB search unavailable, falling back to JS loop");
+    }
+
+    // Fallback: JS cosine loop (O(n) — works but doesn't scale)
+    const results: VectorSearchResult[] = [];
     const queryResult = await generateEmbedding(query);
     const queryEmbedding = queryResult.embedding;
 
-    // Get docs with embeddings
     const docsFilter: { ventureId?: string; status?: string } = { status: 'active' };
     if (ventureId) docsFilter.ventureId = ventureId;
 
     const docs = await storage.getDocs(docsFilter);
     const docsWithEmbeddings = docs.filter(d => d.embedding);
 
-    // Score each doc
     for (const doc of docsWithEmbeddings) {
       const docEmbedding = parseEmbedding(doc.embedding as string);
       if (!docEmbedding) continue;
@@ -119,7 +159,6 @@ export async function vectorSearchDocs(
       const similarity = cosineSimilarity(queryEmbedding, docEmbedding);
       if (similarity < minSimilarity) continue;
 
-      // Get best excerpt for the result
       const summary = doc.summary || '';
       const bodyText = doc.body || (doc.content ? extractTextFromBlocks(doc.content) : '');
       const excerpt = summary || bodyText.slice(0, 300);
@@ -139,50 +178,52 @@ export async function vectorSearchDocs(
       });
     }
 
-    // Search chunks if enabled
     if (includeChunks) {
       const chunkResults = await vectorSearchChunks(query, queryEmbedding, {
         ventureId,
         minSimilarity,
-        limit: limit * 2, // Get more chunks, we'll merge later
+        limit: limit * 2,
       });
       results.push(...chunkResults);
     }
 
-    // Sort by similarity and limit
-    results.sort((a, b) => b.similarity - a.similarity);
-
-    // Deduplicate by preferring chunks from the same doc
-    const seen = new Map<string, VectorSearchResult>();
-    const finalResults: VectorSearchResult[] = [];
-
-    for (const result of results) {
-      const docId = result.type === 'chunk'
-        ? (result.metadata?.docId as string)
-        : result.id;
-
-      if (!seen.has(docId)) {
-        seen.set(docId, result);
-        finalResults.push(result);
-      } else {
-        // Keep the one with higher similarity
-        const existing = seen.get(docId)!;
-        if (result.similarity > existing.similarity) {
-          // Replace in finalResults
-          const idx = finalResults.indexOf(existing);
-          if (idx >= 0) {
-            finalResults[idx] = result;
-            seen.set(docId, result);
-          }
-        }
-      }
-    }
-
-    return finalResults.slice(0, limit);
+    return deduplicateResults(results).slice(0, limit);
   } catch (error) {
     logger.error({ error, query }, 'Vector search failed');
     throw error;
   }
+}
+
+/**
+ * Deduplicate search results, keeping highest-scoring per doc
+ */
+function deduplicateResults(results: VectorSearchResult[]): VectorSearchResult[] {
+  results.sort((a, b) => b.similarity - a.similarity);
+
+  const seen = new Map<string, VectorSearchResult>();
+  const deduped: VectorSearchResult[] = [];
+
+  for (const result of results) {
+    const docId = result.type === 'chunk'
+      ? (result.metadata?.docId as string)
+      : result.id;
+
+    if (!seen.has(docId)) {
+      seen.set(docId, result);
+      deduped.push(result);
+    } else {
+      const existing = seen.get(docId)!;
+      if (result.similarity > existing.similarity) {
+        const idx = deduped.indexOf(existing);
+        if (idx >= 0) {
+          deduped[idx] = result;
+          seen.set(docId, result);
+        }
+      }
+    }
+  }
+
+  return deduped;
 }
 
 /**

@@ -81,6 +81,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
     "express-session": "^1.19.0",
+    "falkordb": "^6.6.0",
     "framer-motion": "^12.34.2",
     "googleapis": "^171.4.0",
     "helmet": "^8.1.0",

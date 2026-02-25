@@ -379,13 +379,30 @@ app.use((req, res, next) => {
 
     // Initialize memory systems (non-blocking)
     try {
-      // Qdrant: create collections if they don't exist, then ensure indexes
+      // Qdrant: create collections if they don't exist, then ensure indexes + KB sync
       import('./memory/qdrant-store').then(({ initCollections, ensurePayloadIndexes }) =>
         initCollections()
           .then(() => ensurePayloadIndexes())
-          .then(() => log('✓ Qdrant collections + indexes initialized'))
+          .then(() => log('✓ Qdrant memory collections + indexes initialized'))
           .catch((err: any) => log('⚠ Qdrant init deferred:', err.message))
       );
+
+      // Qdrant KB: init collection + bulk sync docs
+      import('./memory/kb-qdrant').then(({ initKBCollection, bulkSyncDocsToQdrant }) =>
+        initKBCollection()
+          .then(() => bulkSyncDocsToQdrant())
+          .then(({ synced, skipped }) => log(`✓ Qdrant KB: ${synced} docs synced, ${skipped} skipped`))
+          .catch((err: any) => log('⚠ Qdrant KB sync deferred:', err.message))
+      );
+
+      // FalkorDB: init graph schema (if configured)
+      if (process.env.FALKORDB_URL) {
+        import('./memory/graph-store').then(({ initGraphSchema }) =>
+          initGraphSchema()
+            .then(() => log('✓ FalkorDB graph schema initialized'))
+            .catch((err: any) => log('⚠ FalkorDB init deferred:', err.message))
+        );
+      }
 
       // Pinecone: validate connection
       import('./memory/pinecone-store').then(({ getPineconeStatus }) =>

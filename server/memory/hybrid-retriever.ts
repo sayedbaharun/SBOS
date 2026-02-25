@@ -1,13 +1,17 @@
 /**
- * Hybrid Retriever
+ * Hybrid Retriever — Triple-Arm Search
  *
- * Unified retrieval across local Qdrant and cloud Pinecone.
- * Strategy: local-first, cloud-fallback.
+ * Three retrieval arms fused via Reciprocal Rank Fusion:
+ *   1. Qdrant vector search (semantic similarity)
+ *   2. PostgreSQL keyword search (BM25-lite term matching)
+ *   3. FalkorDB graph traversal (structural relationships) — when available
  *
- * Scoring formula:
+ * Scoring formula (per-result):
  *   final_score = 0.70 * cosine_similarity
  *               + 0.15 * recency_decay(half_life=30d)
  *               + 0.15 * importance_score
+ *
+ * Arms merged via RRF with weights: vector=0.55, keyword=0.25, graph=0.20
  */
 
 import { logger } from "../logger";
@@ -96,19 +100,26 @@ export async function retrieveMemories(
   if (include_entities) collections.push(QDRANT_COLLECTIONS.ENTITY_INDEX);
 
   try {
-    // Step 1: Search local Qdrant with metadata pre-filters
-    const localResults = await searchAllCollections(query, {
-      limit: limit * 2, // Fetch extra for re-ranking
-      min_score: min_score * 0.7, // Lower threshold, we'll re-score
-      collections,
-      domainFilter: domains?.[0], // Simple filter for now
-      minImportance, // Pre-filter: skip low-importance noise
-      maxAgeDays, // Pre-filter: skip old irrelevant memories
-      entityTypes, // Pre-filter: restrict entity types
-    });
+    // Step 1: Run all three search arms in parallel
+    const [localResults, keywordResults, graphResults] = await Promise.all([
+      // Arm 1 — Vector: Qdrant ANN with metadata pre-filters
+      searchAllCollections(query, {
+        limit: limit * 2,
+        min_score: min_score * 0.7,
+        collections,
+        domainFilter: domains?.[0],
+        minImportance,
+        maxAgeDays,
+        entityTypes,
+      }),
+      // Arm 2 — Keyword: PostgreSQL ILIKE on agent_memory table
+      keywordSearchMemories(query, limit * 2).catch(() => []),
+      // Arm 3 — Graph: FalkorDB structural traversal (if available)
+      graphSearchArm(query, limit).catch(() => []),
+    ]);
 
-    // Step 2: Re-score with full formula
-    const scored: RetrievedMemory[] = localResults.map((r) => {
+    // Step 2: Re-score vector results with full formula
+    const vectorScored: RetrievedMemory[] = localResults.map((r) => {
       const payload = r.payload;
       const timestamp = (payload.timestamp as number) || Date.now();
       const importance = (payload.importance as number) || 0.5;
@@ -127,16 +138,42 @@ export async function retrieveMemories(
       };
     });
 
-    // Step 3: Sort by final score
-    scored.sort((a, b) => b.finalScore - a.finalScore);
+    // Step 3: Convert keyword results to RetrievedMemory
+    const keywordScored: RetrievedMemory[] = keywordResults.map((r) => ({
+      id: r.id,
+      collection: "pg:agent_memory",
+      rawScore: r.score,
+      finalScore: r.score,
+      text: r.content,
+      timestamp: r.timestamp,
+      domain: undefined,
+      metadata: { memoryType: r.memoryType, importance: r.importance },
+      source: "local" as const,
+    }));
 
-    // Step 4: Filter by min_score
-    const filtered = scored.filter((r) => r.finalScore >= min_score);
+    // Step 4: Convert graph results to RetrievedMemory
+    const graphScored: RetrievedMemory[] = graphResults.map((r) => ({
+      id: r.id,
+      collection: "graph:falkordb",
+      rawScore: r.score,
+      finalScore: r.score,
+      text: r.text,
+      timestamp: Date.now(),
+      domain: undefined,
+      metadata: r.metadata,
+      source: "local" as const,
+    }));
 
-    // Step 5: Deduplicate by content checksum
+    // Step 5: Triple-arm Reciprocal Rank Fusion
+    const merged = tripleArmRRF(vectorScored, keywordScored, graphScored);
+
+    // Step 5: Filter by min_score
+    const filtered = merged.filter((r) => r.finalScore >= min_score);
+
+    // Step 6: Deduplicate by content checksum
     const deduped = deduplicateResults(filtered);
 
-    // Step 6: If local yields < 3 quality results, try cloud fallback
+    // Step 7: If local yields < 3 quality results, try cloud fallback
     if (deduped.length < 3) {
       try {
         const cloudResults = await cloudFallback(query, {
@@ -248,6 +285,170 @@ function deduplicateResults(results: RetrievedMemory[]): RetrievedMemory[] {
   }
 
   return deduped;
+}
+
+// ============================================================================
+// KEYWORD SEARCH (BM25-lite on PostgreSQL agent_memory)
+// ============================================================================
+
+interface KeywordMemoryResult {
+  id: string;
+  content: string;
+  score: number;
+  timestamp: number;
+  memoryType: string;
+  importance: number;
+}
+
+/**
+ * Keyword search on agent_memory table.
+ * Uses PostgreSQL ILIKE for term matching + recency/importance scoring.
+ * Acts as the keyword arm alongside Qdrant vector search.
+ */
+async function keywordSearchMemories(
+  query: string,
+  limit: number
+): Promise<KeywordMemoryResult[]> {
+  try {
+    const { storage } = await import("../storage");
+    const db = (storage as any).db;
+    const { agentMemory } = await import("@shared/schema");
+    const { sql } = await import("drizzle-orm");
+
+    // Tokenize query into search terms
+    const terms = query
+      .toLowerCase()
+      .replace(/[^\w\s]/g, " ")
+      .split(/\s+/)
+      .filter((t) => t.length > 2);
+
+    if (terms.length === 0) return [];
+
+    // Build ILIKE conditions for each term
+    const rows = await db
+      .select()
+      .from(agentMemory)
+      .where(
+        sql`LOWER(${agentMemory.content}) LIKE ${"%" + terms[0] + "%"}`
+      )
+      .orderBy(sql`${agentMemory.importance} DESC`)
+      .limit(limit * 2);
+
+    if (rows.length === 0) return [];
+
+    // Score results: term coverage + recency + importance
+    const now = Date.now();
+    const HALF_LIFE = 30 * 24 * 60 * 60 * 1000;
+
+    const scored: KeywordMemoryResult[] = rows.map((r: any) => {
+      const contentLower = r.content.toLowerCase();
+
+      // Term coverage score (0-1)
+      const matchedTerms = terms.filter((t) => contentLower.includes(t));
+      const termCoverage = matchedTerms.length / terms.length;
+
+      // Recency decay
+      const ageMs = now - new Date(r.createdAt).getTime();
+      const recency = ageMs > 0 ? Math.pow(0.5, ageMs / HALF_LIFE) : 1.0;
+
+      const importance = r.importance || 0.5;
+
+      // Weighted score matching the standard formula weights
+      const score = 0.70 * termCoverage + 0.15 * recency + 0.15 * importance;
+
+      return {
+        id: r.id,
+        content: r.content,
+        score,
+        timestamp: new Date(r.createdAt).getTime(),
+        memoryType: r.memoryType,
+        importance,
+      };
+    });
+
+    // Filter to only results that match at least one term well
+    return scored
+      .filter((r) => r.score > 0.2)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+  } catch (error) {
+    logger.debug({ error }, "Keyword memory search failed");
+    return [];
+  }
+}
+
+// ============================================================================
+// RECIPROCAL RANK FUSION
+// ============================================================================
+
+/**
+ * Triple-arm Reciprocal Rank Fusion.
+ * Weights: vector=0.55, keyword=0.25, graph=0.20
+ * If graph arm is empty, redistributes: vector=0.70, keyword=0.30
+ */
+function tripleArmRRF(
+  vectorResults: RetrievedMemory[],
+  keywordResults: RetrievedMemory[],
+  graphResults: RetrievedMemory[]
+): RetrievedMemory[] {
+  const k = 60; // RRF constant
+
+  // Adaptive weights: if graph arm is empty, redistribute to vector + keyword
+  const hasGraph = graphResults.length > 0;
+  const vectorWeight = hasGraph ? 0.55 : 0.70;
+  const keywordWeight = hasGraph ? 0.25 : 0.30;
+  const graphWeight = hasGraph ? 0.20 : 0;
+
+  const scoreMap = new Map<string, { result: RetrievedMemory; score: number }>();
+
+  const addArm = (results: RetrievedMemory[], weight: number) => {
+    results.forEach((r, idx) => {
+      const key = r.id;
+      const rankScore = weight / (k + idx + 1);
+
+      if (scoreMap.has(key)) {
+        scoreMap.get(key)!.score += rankScore;
+      } else {
+        scoreMap.set(key, { result: r, score: rankScore });
+      }
+    });
+  };
+
+  addArm(vectorResults, vectorWeight);
+  addArm(keywordResults, keywordWeight);
+  if (hasGraph) addArm(graphResults, graphWeight);
+
+  // Normalize and apply as finalScore
+  const entries = Array.from(scoreMap.values());
+  if (entries.length === 0) return [];
+
+  const maxScore = Math.max(...entries.map((e) => e.score));
+  for (const entry of entries) {
+    entry.result.finalScore = maxScore > 0 ? entry.score / maxScore : 0;
+  }
+
+  return entries
+    .sort((a, b) => b.score - a.score)
+    .map((e) => e.result);
+}
+
+/**
+ * Graph search arm — queries FalkorDB for structurally related memories.
+ * Gracefully returns [] if FalkorDB is not configured.
+ */
+async function graphSearchArm(
+  query: string,
+  limit: number
+): Promise<Array<{ id: string; text: string; score: number; metadata: Record<string, unknown> }>> {
+  try {
+    const { isGraphAvailable, graphContextSearch } = await import("./graph-store");
+    const available = await isGraphAvailable();
+    if (!available) return [];
+
+    return await graphContextSearch(query, limit);
+  } catch {
+    return [];
+  }
 }
 
 /**

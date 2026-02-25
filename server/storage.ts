@@ -1778,6 +1778,14 @@ export class DBStorage implements IStorage {
 
     // Return the updated doc with quality score
     const updatedDoc = await this.getDoc(doc.id);
+
+    // Sync to Qdrant KB (non-blocking)
+    if (updatedDoc?.embedding) {
+      import("./memory/kb-qdrant").then(({ upsertDocToQdrant }) =>
+        upsertDocToQdrant(updatedDoc as any).catch(() => {})
+      );
+    }
+
     return updatedDoc!;
   }
 
@@ -1791,8 +1799,16 @@ export class DBStorage implements IStorage {
     // Auto-recalculate quality score after update
     if (updated) {
       await this.updateDocQualityScore(id);
-      // Return the updated doc with new quality score
-      return await this.getDoc(id);
+      const finalDoc = await this.getDoc(id);
+
+      // Sync to Qdrant KB (non-blocking)
+      if (finalDoc?.embedding) {
+        import("./memory/kb-qdrant").then(({ upsertDocToQdrant }) =>
+          upsertDocToQdrant(finalDoc as any).catch(() => {})
+        );
+      }
+
+      return finalDoc;
     }
 
     return updated;
@@ -1800,6 +1816,11 @@ export class DBStorage implements IStorage {
 
   async deleteDoc(id: string): Promise<void> {
     await this.db.delete(docs).where(eq(docs.id, id));
+
+    // Remove from Qdrant KB (non-blocking)
+    import("./memory/kb-qdrant").then(({ removeDocFromQdrant }) =>
+      removeDocFromQdrant(id).catch(() => {})
+    );
   }
 
   async searchDocs(query: string): Promise<Doc[]> {
