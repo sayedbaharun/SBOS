@@ -3366,6 +3366,7 @@ export const sessionLogs = pgTable(
     filesModified: jsonb("files_modified").$type<string[]>().default([]),
     tags: jsonb("tags").$type<string[]>().default([]),
     embedding: text("embedding"),
+    processed: boolean("processed").default(false),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [

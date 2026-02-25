@@ -16,6 +16,7 @@ schedule:
   morning_checkin: "0 6 * * *"
   evening_review: "0 14 * * *"
   weekly_report_cos: "0 12 * * 5"
+  session_log_extraction: "0 22 * * *"
   memory_consolidation: "0 23 * * *"
 memory_scope: isolated
 ---

@@ -505,6 +505,21 @@ registerJobHandler("weekly_report_cos", async (agentId: string, agentSlug: strin
 });
 
 /**
+ * Session Log Extraction — Nightly processing of Claude Code session logs.
+ * Extracts learnings, decisions, and preferences → agent_memory + Qdrant + Pinecone.
+ * Runs at 10pm UTC (2am Dubai), 1 hour before memory_consolidation.
+ */
+registerJobHandler("session_log_extraction", async (_agentId: string, agentSlug: string) => {
+  const { processSessionLogs } = await import("./session-log-processor");
+  const result = await processSessionLogs();
+
+  logger.info(
+    { agentSlug, ...result },
+    "Session log extraction completed"
+  );
+});
+
+/**
  * Inbox Triage — Process unclarified captures and suggest actions.
  */
 registerJobHandler("inbox_triage", async (agentId: string, agentSlug: string) => {
