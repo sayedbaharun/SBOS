@@ -88,7 +88,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { runPipelineHealthCheck } = await import("../agents/scheduled-jobs");
       const result = await runPipelineHealthCheck();
       const statusCode = result.overall === "pass" ? 200 : 503;
-      res.status(statusCode).json(result);
+
+      // Return HTML dashboard if accessed from browser, JSON for programmatic access
+      if (req.headers.accept?.includes("text/html")) {
+        const checks = result.checks as Record<string, any>;
+        const statusIcon = (s: string) => s === "pass" ? "\u2705" : s === "skip" ? "\u23ed\ufe0f" : "\u274c";
+        const overallColor = result.overall === "pass" ? "#22c55e" : "#ef4444";
+        const rows = Object.entries(checks).map(([key, val]: [string, any]) => {
+          const label: Record<string, string> = {
+            sessionLogIngestion: "Session Log Ingestion",
+            unprocessedBacklog: "Nightly Cron Backlog",
+            qdrantStatus: "Qdrant Vector Store",
+            pineconeStatus: "Pinecone Cloud Backup",
+          };
+          return `<tr>
+            <td style="padding:12px 16px;border-bottom:1px solid #1e293b">${statusIcon(val.status)} ${label[key] || key}</td>
+            <td style="padding:12px 16px;border-bottom:1px solid #1e293b;color:${val.status === "pass" ? "#86efac" : val.status === "skip" ? "#94a3b8" : "#fca5a5"}">${val.status.toUpperCase()}</td>
+            <td style="padding:12px 16px;border-bottom:1px solid #1e293b;color:#94a3b8">${val.detail}</td>
+          </tr>`;
+        }).join("");
+        const alertsHtml = (result.alerts as string[]).length > 0
+          ? `<div style="margin-top:20px;padding:16px;background:#451a03;border:1px solid #92400e;border-radius:8px">
+              <strong style="color:#fbbf24">Alerts:</strong>
+              <ul style="margin:8px 0 0;padding-left:20px">${(result.alerts as string[]).map(a => `<li style="color:#fde68a;margin:4px 0">${a}</li>`).join("")}</ul>
+            </div>`
+          : `<div style="margin-top:20px;padding:16px;background:#052e16;border:1px solid #166534;border-radius:8px;color:#86efac">No alerts — all systems operational.</div>`;
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SB-OS Pipeline Health</title></head>
+          <body style="margin:0;padding:20px;background:#0f172a;color:#e2e8f0;font-family:-apple-system,system-ui,sans-serif">
+            <div style="max-width:600px;margin:0 auto">
+              <h1 style="font-size:24px;margin-bottom:4px">SB-OS Pipeline Health</h1>
+              <p style="color:#64748b;margin-top:0">${new Date(result.timestamp as string).toLocaleString("en-GB", { timeZone: "Asia/Dubai", dateStyle: "medium", timeStyle: "short" })} Dubai</p>
+              <div style="display:inline-block;padding:8px 20px;border-radius:20px;font-weight:bold;font-size:18px;background:${overallColor};color:white;margin-bottom:20px">
+                ${result.overall === "pass" ? "ALL SYSTEMS GO" : "ISSUES DETECTED"}
+              </div>
+              <table style="width:100%;border-collapse:collapse;background:#1e293b;border-radius:8px;overflow:hidden">
+                <thead><tr style="background:#334155">
+                  <th style="padding:10px 16px;text-align:left">Component</th>
+                  <th style="padding:10px 16px;text-align:left">Status</th>
+                  <th style="padding:10px 16px;text-align:left">Detail</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
+              ${alertsHtml}
+              <p style="margin-top:20px;color:#475569;font-size:12px">Auto-checks every 4 hours. Alerts sent via Telegram @SBNexusBot.</p>
+            </div>
+          </body></html>`;
+        res.status(statusCode).type("html").send(html);
+      } else {
+        res.status(statusCode).json(result);
+      }
     } catch (error: any) {
       logger.error({ error }, "Pipeline health check endpoint failed");
       res.status(500).json({ overall: "fail", error: error.message });
