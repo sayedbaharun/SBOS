@@ -9,7 +9,7 @@
  *   4. Mark as processed
  */
 
-import { eq, and, gte } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { logger } from "../logger";
 import * as modelManager from "../model-manager";
 import { sessionLogs, agentMemory, agents } from "@shared/schema";
@@ -108,19 +108,17 @@ export interface ProcessSessionLogsResult {
 
 export async function processSessionLogs(): Promise<ProcessSessionLogsResult> {
   const database = await getDb();
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-  // Query unprocessed claude-code logs from past 24h
+  // Query ALL unprocessed claude-code logs (no time window — process everything pending)
   const logs = await database
     .select()
     .from(sessionLogs)
     .where(
       and(
         eq(sessionLogs.source, "claude-code"),
-        eq(sessionLogs.processed, false),
-        gte(sessionLogs.createdAt, since)
+        eq(sessionLogs.processed, false)
       )
-    );
+    )
+    .orderBy(sessionLogs.createdAt);
 
   if (logs.length === 0) {
     logger.info("No unprocessed session logs found — skipping");
