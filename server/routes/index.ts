@@ -80,6 +80,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ============================================================================
+  // PIPELINE HEALTH CHECK (No auth required — monitoring endpoint)
+  // ============================================================================
+
+  app.get('/api/health/pipeline', async (req, res) => {
+    try {
+      const { runPipelineHealthCheck } = await import("../agents/scheduled-jobs");
+      const result = await runPipelineHealthCheck();
+      const statusCode = result.overall === "pass" ? 200 : 503;
+      res.status(statusCode).json(result);
+    } catch (error: any) {
+      logger.error({ error }, "Pipeline health check endpoint failed");
+      res.status(500).json({ overall: "fail", error: error.message });
+    }
+  });
+
+  // ============================================================================
   // FAVICON FALLBACK (redirect to PNG icon since favicon.ico doesn't exist)
   // ============================================================================
   app.get('/favicon.ico', (req, res) => {

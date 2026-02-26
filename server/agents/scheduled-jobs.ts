@@ -6,9 +6,9 @@
  * the Chief of Staff to generate and save a daily report.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, gte, sql } from "drizzle-orm";
 import { logger } from "../logger";
-import { agents, agentConversations, type Agent } from "@shared/schema";
+import { agents, agentConversations, sessionLogs, type Agent } from "@shared/schema";
 import { dailyBriefing, weeklySummary, ventureStatus } from "./tools/report-generator";
 import { executeAgentChat } from "./agent-runtime";
 import { getAllAgentActivity } from "./conversation-manager";
@@ -518,6 +518,161 @@ registerJobHandler("session_log_extraction", async (_agentId: string, agentSlug:
     "Session log extraction completed"
   );
 });
+
+/**
+ * Pipeline Health Check — Monitors the memory pipeline for failures.
+ * Checks: session log ingestion, unprocessed backlog, Qdrant status, Pinecone status.
+ * Runs every 4 hours. Sends a consolidated Telegram alert if any check fails.
+ */
+registerJobHandler("pipeline_health_check", async (_agentId: string, agentSlug: string) => {
+  const result = await runPipelineHealthCheck();
+
+  if (result.alerts.length > 0) {
+    // Send consolidated Telegram alert
+    const alertMessage = `Pipeline Health Alert\n\n${result.alerts.map((a) => `- ${a}`).join("\n")}\n\nRun GET /api/health/pipeline for full status.`;
+
+    try {
+      const { sendProactiveMessage } = await import("../channels/channel-manager");
+      const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+      for (const chatId of getAuthorizedChatIds()) {
+        await sendProactiveMessage("telegram", chatId, alertMessage);
+      }
+    } catch {
+      // Telegram not configured — skip
+    }
+  }
+
+  logger.info(
+    { agentSlug, pass: result.overall === "pass", alertCount: result.alerts.length },
+    "Pipeline health check completed"
+  );
+});
+
+// ============================================================================
+// PIPELINE HEALTH CHECK LOGIC (shared between job handler and API endpoint)
+// ============================================================================
+
+export interface PipelineHealthResult {
+  overall: "pass" | "fail";
+  timestamp: string;
+  checks: {
+    sessionLogIngestion: { status: "pass" | "fail" | "skip"; detail: string };
+    unprocessedBacklog: { status: "pass" | "fail"; detail: string; count: number };
+    qdrantStatus: { status: "pass" | "fail"; detail: string; collections?: Record<string, { count: number }> };
+    pineconeStatus: { status: "pass" | "fail"; detail: string };
+  };
+  alerts: string[];
+}
+
+export async function runPipelineHealthCheck(): Promise<PipelineHealthResult> {
+  const database = await getDb();
+  const alerts: string[] = [];
+
+  // --- Check 1: Session log ingestion (during active hours 8am-midnight Dubai / UTC+4) ---
+  let sessionLogCheck: PipelineHealthResult["checks"]["sessionLogIngestion"];
+  try {
+    const nowUTC = new Date();
+    const dubaiHour = (nowUTC.getUTCHours() + 4) % 24;
+    const isActiveHours = dubaiHour >= 8 && dubaiHour < 24;
+
+    if (isActiveHours) {
+      const [{ count: recentCount }] = await database
+        .select({ count: sql`COUNT(*)::int` })
+        .from(sessionLogs)
+        .where(gte(sessionLogs.createdAt, new Date(Date.now() - 4 * 60 * 60 * 1000)));
+
+      if (recentCount === 0) {
+        sessionLogCheck = { status: "fail", detail: `No session logs in last 4 hours (active hours, Dubai hour: ${dubaiHour})` };
+        alerts.push(`Session log ingestion: No new session_logs rows in last 4 hours during active hours`);
+        logger.warn({ dubaiHour }, "Pipeline health: No session logs in last 4 hours during active hours");
+      } else {
+        sessionLogCheck = { status: "pass", detail: `${recentCount} session log(s) in last 4 hours` };
+      }
+    } else {
+      sessionLogCheck = { status: "skip", detail: `Outside active hours (Dubai hour: ${dubaiHour})` };
+    }
+  } catch (err: any) {
+    sessionLogCheck = { status: "fail", detail: `Query failed: ${err.message}` };
+    alerts.push(`Session log ingestion check failed: ${err.message}`);
+    logger.warn({ error: err.message }, "Pipeline health: Session log check query failed");
+  }
+
+  // --- Check 2: Unprocessed backlog (>20 unprocessed session logs) ---
+  let unprocessedCheck: PipelineHealthResult["checks"]["unprocessedBacklog"];
+  try {
+    const [{ count: unprocessedCount }] = await database
+      .select({ count: sql`COUNT(*)::int` })
+      .from(sessionLogs)
+      .where(eq(sessionLogs.processed, false));
+
+    if (unprocessedCount > 20) {
+      unprocessedCheck = { status: "fail", detail: `${unprocessedCount} unprocessed session logs (threshold: 20)`, count: unprocessedCount };
+      alerts.push(`Nightly cron backlog: ${unprocessedCount} unprocessed session logs piling up (>20)`);
+      logger.warn({ unprocessedCount }, "Pipeline health: Unprocessed session logs exceeding threshold");
+    } else {
+      unprocessedCheck = { status: "pass", detail: `${unprocessedCount} unprocessed session log(s)`, count: unprocessedCount };
+    }
+  } catch (err: any) {
+    unprocessedCheck = { status: "fail", detail: `Query failed: ${err.message}`, count: -1 };
+    alerts.push(`Unprocessed backlog check failed: ${err.message}`);
+    logger.warn({ error: err.message }, "Pipeline health: Unprocessed backlog check query failed");
+  }
+
+  // --- Check 3: Qdrant status ---
+  let qdrantCheck: PipelineHealthResult["checks"]["qdrantStatus"];
+  try {
+    const { getQdrantStatus } = await import("../memory/qdrant-store");
+    const qdrant = await getQdrantStatus();
+
+    if (!qdrant.available) {
+      qdrantCheck = { status: "fail", detail: `Qdrant unavailable: ${qdrant.error || "unknown"}` };
+      alerts.push(`Qdrant unavailable: ${qdrant.error || "connection failed"}`);
+      logger.warn({ error: qdrant.error }, "Pipeline health: Qdrant unavailable");
+    } else {
+      // Check if raw_memories has any points (basic sanity)
+      const rawCount = qdrant.collections["raw_memories"]?.count || 0;
+      qdrantCheck = { status: "pass", detail: `Qdrant available, raw_memories: ${rawCount} points`, collections: qdrant.collections };
+    }
+  } catch (err: any) {
+    qdrantCheck = { status: "fail", detail: `Qdrant check failed: ${err.message}` };
+    alerts.push(`Qdrant check error: ${err.message}`);
+    logger.warn({ error: err.message }, "Pipeline health: Qdrant check threw");
+  }
+
+  // --- Check 4: Pinecone status ---
+  let pineconeCheck: PipelineHealthResult["checks"]["pineconeStatus"];
+  try {
+    const { getPineconeStatus } = await import("../memory/pinecone-store");
+    const pinecone = await getPineconeStatus();
+
+    if (!pinecone.available) {
+      pineconeCheck = { status: "fail", detail: `Pinecone unavailable: ${pinecone.error || "unknown"}` };
+      alerts.push(`Pinecone disconnected: ${pinecone.error || "connection failed"}`);
+      logger.warn({ error: pinecone.error }, "Pipeline health: Pinecone unavailable");
+    } else {
+      const totalRecords = pinecone.stats?.totalRecordCount || 0;
+      pineconeCheck = { status: "pass", detail: `Pinecone available, ${totalRecords} total records` };
+    }
+  } catch (err: any) {
+    pineconeCheck = { status: "fail", detail: `Pinecone check failed: ${err.message}` };
+    alerts.push(`Pinecone check error: ${err.message}`);
+    logger.warn({ error: err.message }, "Pipeline health: Pinecone check threw");
+  }
+
+  const overall = alerts.length > 0 ? "fail" : "pass";
+
+  return {
+    overall,
+    timestamp: new Date().toISOString(),
+    checks: {
+      sessionLogIngestion: sessionLogCheck,
+      unprocessedBacklog: unprocessedCheck,
+      qdrantStatus: qdrantCheck,
+      pineconeStatus: pineconeCheck,
+    },
+    alerts,
+  };
+}
 
 /**
  * Inbox Triage — Process unclarified captures and suggest actions.
