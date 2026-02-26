@@ -322,28 +322,45 @@ registerJobHandler("morning_checkin", async (_agentId: string, agentSlug: string
   const day = await storage.getDayOrCreate(today);
   const rituals = day.morningRituals as Record<string, any> | null;
 
-  let message: string;
+  // Skip entirely if morning rituals already completed
   if (rituals?.completedAt) {
-    message = "Morning ritual already complete — great start!";
-  } else {
-    const done: string[] = [];
-    const missing: string[] = [];
-    const habitLabels: Record<string, string> = {
-      pressUps: "Press-ups",
-      squats: "Squats",
-      water: "Water",
-      supplements: "Supplements",
-    };
-    for (const [key, label] of Object.entries(habitLabels)) {
-      if (rituals?.[key]?.done) done.push(label);
-      else missing.push(label);
-    }
-    if (done.length === 0 && missing.length === 0) {
-      message = `How's the morning going? Quick update:\n- How many press-ups did you do?\n- How many squats?\n- Have you taken your supplements?\n- Have you had your water?\n\nJust text me naturally, e.g. "Did 20 press ups, 15 squats, took supplements and had my water"\n\nOr just say "morning done" to check everything off!`;
-    } else {
-      const doneStr = done.length > 0 ? `\n\nAlready done: ${done.join(", ")} ✅` : "";
-      message = `How's the morning going?${doneStr}\n\nStill to do: ${missing.join(", ")}\n\nJust text me what you've completed.\n\nOr just say "morning done" to check everything off!`;
-    }
+    logger.info({ agentSlug }, "Morning check-in skipped — rituals already complete");
+    return;
+  }
+
+  // Check individual habits
+  const habitLabels: Record<string, string> = {
+    pressUps: "Press-ups",
+    squats: "Squats",
+    water: "Water",
+    supplements: "Supplements",
+  };
+  const missing: string[] = [];
+  for (const [key, label] of Object.entries(habitLabels)) {
+    if (!rituals?.[key]?.done) missing.push(label);
+  }
+
+  // Skip entirely if all habits done (even without completedAt flag)
+  if (missing.length === 0) {
+    logger.info({ agentSlug }, "Morning check-in skipped — all habits done");
+    return;
+  }
+
+  // Check if outcomes are set
+  const outcomes = day.top3Outcomes as Array<{ text: string; completed: boolean }> | null;
+  const outcomesSet = outcomes?.some((o: any) => o.text);
+
+  // Build message with only missing items
+  let message = `Still to do: ${missing.join(", ")}\n\nJust text me what you've completed, or say "morning done" to check everything off!`;
+
+  if (!outcomesSet) {
+    message += "\n\nWhat are your top 3 outcomes for today?";
+  }
+
+  // Append system health issues if any
+  const healthIssues = await runSystemHealthCheck();
+  if (healthIssues.length > 0) {
+    message += "\n\n⚠️ System Issues:\n" + healthIssues.map(i => `- ${i}`).join("\n");
   }
 
   try {
@@ -369,6 +386,18 @@ registerJobHandler("evening_review", async (_agentId: string, agentSlug: string)
 
   // Gather day data
   const day = await storage.getDayOrCreate(today);
+  const eveningRituals = day.eveningRituals as Record<string, any> | null;
+
+  // Skip entirely if already reviewed or reflected
+  if (eveningRituals?.reviewCompleted) {
+    logger.info({ agentSlug }, "Evening review skipped — already reviewed");
+    return;
+  }
+  if (day.reflectionPm) {
+    logger.info({ agentSlug }, "Evening review skipped — reflection already logged");
+    return;
+  }
+
   const outcomes = day.top3Outcomes as Array<{ text: string; completed: boolean }> | null;
   const allTasks = await storage.getTasks({});
   const todayCompleted = allTasks.filter(
@@ -379,30 +408,29 @@ registerJobHandler("evening_review", async (_agentId: string, agentSlug: string)
     (t: any) => (t.focusDate === today || t.dueDate === today) && t.status !== "done" && t.status !== "cancelled"
   );
 
-  // Health data
-  const healthEntries = await storage.getHealthEntries({ dateGte: today, dateLte: today });
-  const health = healthEntries[0];
+  // Check if outcomes are all complete
+  const outcomesWithText = outcomes?.filter((o: any) => o.text) || [];
+  const allOutcomesDone = outcomesWithText.length > 0 && outcomesWithText.every((o: any) => o.completed);
 
-  // Build summary
+  // If everything is done (outcomes complete, no open tasks), skip or send brief congrats
+  if (allOutcomesDone && todayInProgress.length === 0) {
+    logger.info({ agentSlug }, "Evening review skipped — all outcomes and tasks done");
+    return;
+  }
+
+  // Build summary of only incomplete items
   const sections: string[] = [];
 
-  // Outcomes progress
-  if (outcomes && outcomes.length > 0 && outcomes.some((o: any) => o.text)) {
-    const completed = outcomes.filter((o: any) => o.completed).length;
-    const total = outcomes.filter((o: any) => o.text).length;
-    sections.push(`Outcomes: ${completed}/${total} completed`);
-    for (const o of outcomes) {
-      if (o.text) sections.push(`  ${o.completed ? "✅" : "⬜"} ${o.text}`);
+  // Outcomes progress (only if there are incomplete ones)
+  if (outcomesWithText.length > 0 && !allOutcomesDone) {
+    const completed = outcomesWithText.filter((o: any) => o.completed).length;
+    sections.push(`Outcomes: ${completed}/${outcomesWithText.length} completed`);
+    for (const o of outcomesWithText) {
+      if (!o.completed) sections.push(`  ⬜ ${o.text}`);
     }
   }
 
-  // Tasks
-  if (todayCompleted.length > 0) {
-    sections.push(`\nTasks completed today: ${todayCompleted.length}`);
-    for (const t of todayCompleted.slice(0, 5)) {
-      sections.push(`  ✅ ${t.title}`);
-    }
-  }
+  // Only show open tasks
   if (todayInProgress.length > 0) {
     sections.push(`\nStill open: ${todayInProgress.length}`);
     for (const t of todayInProgress.slice(0, 5)) {
@@ -410,25 +438,21 @@ registerJobHandler("evening_review", async (_agentId: string, agentSlug: string)
     }
   }
 
-  // Health snapshot
-  if (health) {
-    const healthParts: string[] = [];
-    if (health.workoutDone) healthParts.push(`Workout: ${health.workoutType || "done"} (${health.workoutDurationMin || "?"}min)`);
-    if (health.steps) healthParts.push(`Steps: ${health.steps.toLocaleString()}`);
-    if (health.stressLevel) healthParts.push(`Stress: ${health.stressLevel}`);
-    if (healthParts.length > 0) sections.push(`\nHealth: ${healthParts.join(" | ")}`);
-  }
-
-  // One thing to ship
-  if (day.oneThingToShip) {
-    sections.push(`\nOne thing to ship: ${day.oneThingToShip}`);
+  // Completed tasks summary (brief)
+  if (todayCompleted.length > 0) {
+    sections.push(`\n✅ ${todayCompleted.length} task${todayCompleted.length > 1 ? "s" : ""} completed today`);
   }
 
   const summaryData = sections.join("\n");
 
-  // Build Telegram message directly (no LLM needed for this)
   let message = `🌙 Evening Review\n\n${summaryData}\n\n`;
   message += "How was your day? Reply with a quick reflection — or just say 'done' to close the day.";
+
+  // Append system health issues if any
+  const healthIssues = await runSystemHealthCheck();
+  if (healthIssues.length > 0) {
+    message += "\n\n⚠️ System Issues:\n" + healthIssues.map(i => `- ${i}`).join("\n");
+  }
 
   try {
     const { sendProactiveMessage } = await import("../channels/channel-manager");
@@ -547,6 +571,79 @@ registerJobHandler("pipeline_health_check", async (_agentId: string, agentSlug: 
     "Pipeline health check completed"
   );
 });
+
+// ============================================================================
+// SYSTEM HEALTH CHECK (used by morning check-in + evening review)
+// ============================================================================
+
+/**
+ * Run a lightweight system health check across key subsystems.
+ * Returns an array of issue strings (empty = all healthy).
+ */
+async function runSystemHealthCheck(): Promise<string[]> {
+  const issues: string[] = [];
+
+  try {
+    // 1. Pipeline health (existing function)
+    const pipeline = await runPipelineHealthCheck();
+    if (pipeline.overall === "fail") {
+      issues.push(...pipeline.alerts);
+    }
+  } catch {
+    issues.push("Pipeline health check failed to run");
+  }
+
+  try {
+    // 2. Embedding jobs — check for backlog
+    const { getJobStatus } = await import("../embedding-jobs");
+    const embedStatus = getJobStatus();
+    if (embedStatus.totalErrors > 10) {
+      issues.push(`Embedding jobs: ${embedStatus.totalErrors} total errors`);
+    }
+  } catch {
+    // Non-critical
+  }
+
+  try {
+    // 3. Agent scheduler — check for jobs with errors
+    const { getScheduleStatus } = await import("./agent-scheduler");
+    const scheduleStatus = getScheduleStatus();
+    for (const job of scheduleStatus) {
+      if (job.errorCount > 0) {
+        issues.push(`${job.agentSlug}:${job.jobName} has ${job.errorCount} error${job.errorCount > 1 ? "s" : ""}`);
+      }
+    }
+  } catch {
+    // Non-critical
+  }
+
+  try {
+    // 4. Nudge engine — check last run (should have run within 45 min)
+    const { lastNudgeRunAt } = await import("../automations/nudge-engine");
+    if (lastNudgeRunAt) {
+      const msSinceRun = Date.now() - lastNudgeRunAt.getTime();
+      if (msSinceRun > 45 * 60 * 1000) {
+        const minAgo = Math.round(msSinceRun / 60000);
+        issues.push(`Nudge engine last ran ${minAgo}min ago (expected every 30min)`);
+      }
+    }
+    // Don't flag if never run — could be fresh restart
+  } catch {
+    // Non-critical
+  }
+
+  try {
+    // 5. Telegram connection
+    const { telegramAdapter } = await import("../channels/adapters/telegram-adapter");
+    if (!telegramAdapter.isConnected()) {
+      issues.push("Telegram bot disconnected!");
+    }
+  } catch {
+    // Non-critical — Telegram may not be configured
+  }
+
+  return issues;
+}
 
 // ============================================================================
 // PIPELINE HEALTH CHECK LOGIC (shared between job handler and API endpoint)

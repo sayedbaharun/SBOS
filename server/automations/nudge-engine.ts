@@ -16,6 +16,9 @@ import { storage } from "../storage";
 import { logger } from "../logger";
 import { getUserDate } from "../utils/dates";
 
+// Track last run time for system health monitoring
+export let lastNudgeRunAt: Date | null = null;
+
 // Track nudges sent today to avoid duplicates
 const sentNudges = new Map<string, Set<string>>();
 
@@ -211,6 +214,7 @@ async function checkEveningReminder(today: string): Promise<NudgeResult | null> 
  * Run all nudge checks and send any triggered nudges
  */
 async function runNudgeChecks(): Promise<void> {
+  lastNudgeRunAt = new Date();
   const today = getUserDate();
 
   const checks = await Promise.allSettled([
