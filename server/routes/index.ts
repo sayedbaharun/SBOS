@@ -49,6 +49,7 @@ import agentRoutes from "./agents";
 import sessionRoutes from "./sessions";
 import externalRoutes from "./external";
 import researchRoutes from "./research";
+import reviewRoutes from "./review";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
@@ -294,6 +295,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Review and approve external agent research submissions
   // ============================================================================
   app.use('/api/research', researchRoutes);
+
+  // ============================================================================
+  // REVIEW QUEUE
+  // Review and approve agent deliverables before they go live
+  // ============================================================================
+  app.use('/api/review', reviewRoutes);
 
   // ============================================================================
   // FILE UPLOADS

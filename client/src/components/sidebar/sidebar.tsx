@@ -1,5 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { apiRequest } from "@/lib/queryClient";
 import {
   LayoutDashboard,
   Heart,
@@ -21,6 +23,8 @@ import {
   DollarSign,
   Inbox,
   Bot,
+  ShoppingCart,
+  ClipboardCheck,
 } from "lucide-react";
 import NavSection, { NavItemConfig } from "./nav-section";
 import VenturesNavSection from "./ventures-nav-section";
@@ -129,6 +133,11 @@ const navigationSections: Array<{ label: string; items: NavItemConfig[]; default
         label: "Agents",
       },
       {
+        href: "/review",
+        icon: ClipboardCheck,
+        label: "Review",
+      },
+      {
         href: "/research-inbox",
         icon: Inbox,
         label: "Research Inbox",
@@ -142,6 +151,16 @@ const navigationSections: Array<{ label: string; items: NavItemConfig[]; default
         href: "/health-hub",
         icon: Heart,
         label: "Health",
+      },
+      {
+        href: "/shopping",
+        icon: ShoppingCart,
+        label: "Shopping",
+      },
+      {
+        href: "/books",
+        icon: BookOpen,
+        label: "Books",
       },
       {
         href: "/finance",
@@ -235,6 +254,34 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   // Collapsed state (desktop only) - shared across components
   const [isCollapsed, setIsCollapsed] = useSidebarCollapsed();
 
+  // Fetch review queue pending count for badge
+  const { data: reviewStats } = useQuery<{ pending: number }>({
+    queryKey: ["review-stats"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/review/stats");
+      return res.json();
+    },
+    refetchInterval: 60000,
+    staleTime: 30000,
+  });
+
+  // Merge dynamic badges into navigation sections
+  const sectionsWithBadges = useMemo(() => {
+    return navigationSections.map((section) => {
+      if (section.label !== "Work") return section;
+      return {
+        ...section,
+        items: section.items.map((item) => {
+          if (item.href !== "/review") return item;
+          const pending = reviewStats?.pending || 0;
+          return pending > 0
+            ? { ...item, badge: { content: pending, variant: "alert" as const } }
+            : item;
+        }),
+      };
+    });
+  }, [reviewStats]);
+
   // Handle escape key to close mobile menu
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -312,7 +359,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
 
         {/* Navigation sections */}
         <div className="flex-1 overflow-y-auto px-3 py-4">
-          {navigationSections.map((section, index) => (
+          {sectionsWithBadges.map((section, index) => (
             <div key={section.label}>
               <NavSection
                 label={section.label}

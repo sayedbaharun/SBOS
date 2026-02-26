@@ -220,6 +220,70 @@ function buildCoreTools(agent: Agent, permissions: string[]): OpenAI.Chat.ChatCo
     });
   }
 
+  // Submit deliverable (for review before going live)
+  if (availableTools.includes("submit_deliverable") && (permissions.includes("create_doc") || permissions.includes("write"))) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "submit_deliverable",
+        description:
+          "Submit a structured deliverable (document, recommendation, action items, or code) for Sayed's review before it goes live. Use this instead of create_doc when the output needs human approval.",
+        parameters: {
+          type: "object",
+          properties: {
+            type: {
+              type: "string",
+              enum: ["document", "recommendation", "action_items", "code"],
+              description: "Type of deliverable",
+            },
+            title: { type: "string", description: "Clear title for the deliverable" },
+            // Document fields
+            body: { type: "string", description: "Document content (markdown). Required for type=document" },
+            docType: {
+              type: "string",
+              enum: ["page", "sop", "spec", "research", "strategy", "playbook", "tech_doc", "process", "reference"],
+              description: "Document type (for type=document)",
+            },
+            domain: {
+              type: "string",
+              enum: ["venture_ops", "marketing", "product", "sales", "tech", "trading", "finance", "legal", "hr", "personal"],
+              description: "Domain scope",
+            },
+            ventureId: { type: "string", description: "Venture scope" },
+            // Recommendation fields
+            summary: { type: "string", description: "Summary of the deliverable" },
+            rationale: { type: "string", description: "Reasoning behind the recommendation (for type=recommendation)" },
+            suggestedAction: {
+              type: "string",
+              enum: ["create_task", "create_doc", "no_action"],
+              description: "What should happen on approval (for type=recommendation)",
+            },
+            // Action items fields
+            items: {
+              type: "array",
+              description: "List of action items (for type=action_items)",
+              items: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  notes: { type: "string" },
+                  priority: { type: "string", enum: ["P0", "P1", "P2", "P3"] },
+                  dueDate: { type: "string", description: "YYYY-MM-DD" },
+                },
+                required: ["title"],
+              },
+            },
+            // Code fields
+            language: { type: "string", description: "Programming language (for type=code)" },
+            code: { type: "string", description: "Code content (for type=code)" },
+            description: { type: "string", description: "Description of what the code does (for type=code)" },
+          },
+          required: ["type", "title"],
+        },
+      },
+    });
+  }
+
   // Create project
   if (availableTools.includes("create_project") && (permissions.includes("create_project") || permissions.includes("write"))) {
     tools.push({
@@ -717,6 +781,64 @@ async function executeTool(
             actionType: "create_doc",
             entityType: "doc",
             entityId: doc.id,
+            parameters: { title: args.title, type: args.type },
+            status: "success",
+          },
+        };
+      }
+
+      case "submit_deliverable": {
+        const database = await getDb();
+        // Build structured result based on type
+        const deliverableResult: Record<string, any> = { type: args.type, title: args.title };
+
+        switch (args.type) {
+          case "document":
+            deliverableResult.body = args.body;
+            deliverableResult.docType = args.docType;
+            deliverableResult.domain = args.domain;
+            deliverableResult.ventureId = args.ventureId || agent.ventureId;
+            deliverableResult.summary = args.summary;
+            break;
+          case "recommendation":
+            deliverableResult.summary = args.summary;
+            deliverableResult.rationale = args.rationale;
+            deliverableResult.suggestedAction = args.suggestedAction || "no_action";
+            deliverableResult.actionDetails = args.actionDetails;
+            break;
+          case "action_items":
+            deliverableResult.summary = args.summary;
+            deliverableResult.items = args.items || [];
+            break;
+          case "code":
+            deliverableResult.language = args.language;
+            deliverableResult.code = args.code;
+            deliverableResult.description = args.description;
+            deliverableResult.ventureId = args.ventureId || agent.ventureId;
+            break;
+        }
+
+        // Create agentTask with status needs_review
+        const [deliverableTask] = await database
+          .insert(agentTasks)
+          .values({
+            title: args.title,
+            description: args.summary || args.description || `${args.type} deliverable from ${agent.name}`,
+            assignedBy: agent.id,
+            assignedTo: agent.id,
+            status: "needs_review",
+            deliverableType: args.type,
+            result: deliverableResult,
+            priority: 3,
+          })
+          .returning();
+
+        return {
+          result: `Deliverable submitted for review: "${args.title}" (ID: ${deliverableTask.id}). Sayed will review it in the Review Queue.`,
+          action: {
+            actionType: "submit_deliverable",
+            entityType: "agent_task",
+            entityId: deliverableTask.id,
             parameters: { title: args.title, type: args.type },
             status: "success",
           },

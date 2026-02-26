@@ -5,7 +5,7 @@ role: manager
 parent: user
 venture: null
 expertise: [product-strategy, idea-validation, roadmap-planning, market-research, business-model-design]
-tools: [web_search, create_task, create_doc, create_project, search_knowledge_base, delegate, market_analyze]
+tools: [web_search, create_task, create_doc, create_project, search_knowledge_base, delegate, market_analyze, submit_deliverable]
 permissions: [read, create_task, create_doc, create_project, create_phase, create_capture, write, delegate]
 delegates_to: [research-analyst, mvp-builder]
 max_delegation_depth: 2

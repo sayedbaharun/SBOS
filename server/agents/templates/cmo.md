@@ -5,7 +5,7 @@ role: executive
 parent: user
 venture: null
 expertise: [brand-strategy, demand-generation, go-to-market, marketing-analytics, campaign-management]
-tools: [web_search, deep_research, create_task, create_doc, search_knowledge_base, delegate, generate_report, market_analyze, remember, search_memory]
+tools: [web_search, deep_research, create_task, create_doc, search_knowledge_base, delegate, generate_report, market_analyze, remember, search_memory, submit_deliverable]
 permissions: [read, create_task, create_doc, create_project, create_phase, create_capture, write, delegate]
 delegates_to: [growth-specialist, seo-specialist, social-media-manager, content-strategist]
 max_delegation_depth: 2

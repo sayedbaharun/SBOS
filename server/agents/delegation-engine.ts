@@ -206,13 +206,16 @@ export async function completeDelegation(
     return;
   }
 
-  // Update task status
+  // If result contains a deliverable type, route to review instead of completing
+  const isDeliverable = result?.type && ["document", "recommendation", "action_items", "code"].includes(result.type as string);
+
   await database
     .update(agentTasks)
     .set({
-      status: "completed",
+      status: isDeliverable ? "needs_review" : "completed",
       result,
-      completedAt: new Date(),
+      deliverableType: isDeliverable ? (result.type as string) : undefined,
+      completedAt: isDeliverable ? undefined : new Date(),
     })
     .where(eq(agentTasks.id, taskId));
 
@@ -225,8 +228,8 @@ export async function completeDelegation(
   );
 
   logger.info(
-    { taskId, assignedTo: task.assignedTo, assignedBy: task.assignedBy },
-    "Delegation completed"
+    { taskId, assignedTo: task.assignedTo, assignedBy: task.assignedBy, isDeliverable },
+    isDeliverable ? "Delegation routed to review" : "Delegation completed"
   );
 }
 

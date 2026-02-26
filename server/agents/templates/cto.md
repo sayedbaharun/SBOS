@@ -5,7 +5,7 @@ role: executive
 parent: user
 venture: null
 expertise: [system-architecture, technical-strategy, security, code-review, engineering-standards]
-tools: [create_task, create_doc, search_knowledge_base, delegate, web_search, deep_research, remember, search_memory]
+tools: [create_task, create_doc, search_knowledge_base, delegate, web_search, deep_research, remember, search_memory, submit_deliverable]
 permissions: [read, create_task, create_doc, create_project, create_phase, write, delegate]
 delegates_to: []
 max_delegation_depth: 2

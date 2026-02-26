@@ -168,20 +168,23 @@ export function DocCard({
               {projectName}
             </Badge>
           )}
-          {doc.tags && doc.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {doc.tags.slice(0, 3).map((tag) => (
-                <Badge key={tag} variant="outline" className="text-xs">
-                  {tag}
-                </Badge>
-              ))}
-              {doc.tags.length > 3 && (
-                <Badge variant="outline" className="text-xs">
-                  +{doc.tags.length - 3} more
-                </Badge>
-              )}
-            </div>
-          )}
+          {doc.tags && (() => {
+            const tagsArr = Array.isArray(doc.tags) ? doc.tags : (typeof doc.tags === 'string' ? (doc.tags as string).split(',').map(t => t.trim()).filter(Boolean) : []);
+            return tagsArr.length > 0 ? (
+              <div className="flex flex-wrap gap-1">
+                {tagsArr.slice(0, 3).map((tag) => (
+                  <Badge key={tag} variant="outline" className="text-xs">
+                    {tag}
+                  </Badge>
+                ))}
+                {tagsArr.length > 3 && (
+                  <Badge variant="outline" className="text-xs">
+                    +{tagsArr.length - 3} more
+                  </Badge>
+                )}
+              </div>
+            ) : null;
+          })()}
           <p className="text-sm text-muted-foreground">
             Updated {formatDistanceToNow(new Date(doc.updatedAt), { addSuffix: true })}
           </p>

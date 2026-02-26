@@ -3279,6 +3279,11 @@ export const agentTasks = pgTable(
     startedAt: timestamp("started_at"),
     completedAt: timestamp("completed_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+
+    // Deliverable review system
+    deliverableType: text("deliverable_type").$type<'document' | 'recommendation' | 'action_items' | 'code'>(),
+    reviewFeedback: text("review_feedback"),
+    promotedTo: jsonb("promoted_to").$type<Array<{ type: string; id: string }>>(),
   },
   (table) => [
     index("idx_agent_tasks_assigned_by").on(table.assignedBy),
@@ -3300,6 +3305,58 @@ export const insertAgentTaskSchema = createInsertSchema(agentTasks).omit({
 
 export type AgentTask = typeof agentTasks.$inferSelect;
 export type InsertAgentTask = z.infer<typeof insertAgentTaskSchema>;
+
+// Deliverable result schemas — discriminated union for structured agent outputs
+export const deliverableDocumentSchema = z.object({
+  type: z.literal("document"),
+  title: z.string(),
+  body: z.string(),
+  docType: z.enum(["page", "sop", "spec", "research", "strategy", "playbook", "tech_doc", "process", "reference"]).optional(),
+  domain: z.enum(["venture_ops", "marketing", "product", "sales", "tech", "trading", "finance", "legal", "hr", "personal"]).optional(),
+  ventureId: z.string().optional(),
+  summary: z.string().optional(),
+});
+
+export const deliverableRecommendationSchema = z.object({
+  type: z.literal("recommendation"),
+  title: z.string(),
+  summary: z.string(),
+  rationale: z.string(),
+  suggestedAction: z.enum(["create_task", "create_doc", "no_action"]).default("no_action"),
+  actionDetails: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const deliverableActionItemsSchema = z.object({
+  type: z.literal("action_items"),
+  title: z.string(),
+  summary: z.string().optional(),
+  items: z.array(z.object({
+    title: z.string(),
+    notes: z.string().optional(),
+    priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
+    ventureId: z.string().optional(),
+    projectId: z.string().optional(),
+    dueDate: z.string().optional(),
+  })),
+});
+
+export const deliverableCodeSchema = z.object({
+  type: z.literal("code"),
+  title: z.string(),
+  language: z.string().optional(),
+  code: z.string(),
+  description: z.string().optional(),
+  ventureId: z.string().optional(),
+});
+
+export const deliverableResultSchema = z.discriminatedUnion("type", [
+  deliverableDocumentSchema,
+  deliverableRecommendationSchema,
+  deliverableActionItemsSchema,
+  deliverableCodeSchema,
+]);
+
+export type DeliverableResult = z.infer<typeof deliverableResultSchema>;
 
 // Agent Memory — per-agent persistent memory with learning pipeline support
 export const agentMemory = pgTable(

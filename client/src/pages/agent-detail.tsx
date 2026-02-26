@@ -169,7 +169,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
           className={`rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
             isUser
               ? "bg-foreground text-background rounded-br-sm"
-              : "bg-muted/60 text-foreground rounded-bl-sm"
+              : "bg-zinc-100 text-zinc-900 dark:bg-muted/60 dark:text-foreground rounded-bl-sm"
           }`}
         >
           <p className="whitespace-pre-wrap">{message.content}</p>

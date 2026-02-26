@@ -5,7 +5,7 @@ role: specialist
 parent: head-of-products
 venture: null
 expertise: [market-sizing, competitive-analysis, trend-research, consumer-insights, tam-sam-som]
-tools: [web_search, create_doc, search_knowledge_base, market_analyze]
+tools: [web_search, create_doc, search_knowledge_base, market_analyze, submit_deliverable]
 permissions: [read, create_doc, write]
 delegates_to: []
 max_delegation_depth: 0
