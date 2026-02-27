@@ -265,6 +265,44 @@ app.use((req, res, next) => {
     log('WebSocket setup skipped:', String(wsError));
   }
 
+  // Register Telegram webhook route BEFORE the SPA catch-all
+  // The catch-all in serveStatic/setupVite uses app.use("*path") which intercepts ALL methods including POST
+  // So this must be registered first to ensure Telegram POSTs reach the handler
+  if (process.env.TELEGRAM_WEBHOOK_URL && process.env.TELEGRAM_BOT_TOKEN) {
+    const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+    app.post('/api/telegram/webhook', async (req, res) => {
+      try {
+        // Validate secret token if configured
+        if (secret) {
+          const headerSecret = req.headers['x-telegram-bot-api-secret-token'];
+          if (headerSecret !== secret) {
+            log('Telegram webhook: secret mismatch');
+            res.status(403).json({ error: 'Forbidden' });
+            return;
+          }
+        }
+
+        // Dynamically get the adapter's bot (it's initialized in the listen callback)
+        const { telegramAdapter } = await import('./channels/adapters/telegram-adapter');
+        const bot = telegramAdapter.bot;
+        if (!bot) {
+          log('Telegram webhook: bot not yet initialized');
+          res.status(200).json({ ok: true });
+          return;
+        }
+
+        const update = req.body;
+        log(`Telegram webhook: update_id=${update.update_id}, has_message=${!!update.message}, text="${update.message?.text || 'N/A'}", chat_id=${update.message?.chat?.id || 'N/A'}`);
+        await bot.handleUpdate(update);
+        res.status(200).json({ ok: true });
+      } catch (err) {
+        log('Telegram webhook handleUpdate error:', String(err));
+        res.status(200).json({ ok: true }); // Always 200 to Telegram
+      }
+    });
+    log('✓ Telegram webhook route registered at /api/telegram/webhook (before SPA catch-all)');
+  }
+
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
@@ -373,35 +411,6 @@ app.use((req, res, next) => {
         const { telegramAdapter } = await import('./channels/adapters/telegram-adapter');
         registerAdapter(telegramAdapter);
         await startAllAdapters();
-
-        // Mount Telegram webhook route if in webhook mode
-        // Must use handleUpdate directly since express.json() already consumed the raw body
-        if (process.env.TELEGRAM_WEBHOOK_URL && telegramAdapter.bot) {
-          const bot = telegramAdapter.bot;
-          const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
-          app.post('/api/telegram/webhook', async (req, res) => {
-            // Validate secret token if configured
-            if (secret) {
-              const headerSecret = req.headers['x-telegram-bot-api-secret-token'];
-              if (headerSecret !== secret) {
-                log('Telegram webhook: secret mismatch');
-                res.status(403).json({ error: 'Forbidden' });
-                return;
-              }
-            }
-            try {
-              // req.body is already parsed by express.json()
-              const update = req.body;
-              log(`Telegram webhook: update_id=${update.update_id}, has_message=${!!update.message}, text="${update.message?.text || 'N/A'}", chat_id=${update.message?.chat?.id || 'N/A'}`);
-              await bot.handleUpdate(update);
-              res.status(200).json({ ok: true });
-            } catch (err) {
-              log('Telegram webhook handleUpdate error:', String(err));
-              res.status(200).json({ ok: true }); // Always 200 to Telegram
-            }
-          });
-          log('✓ Telegram webhook route mounted at /api/telegram/webhook');
-        }
 
         log('✓ Channel adapters initialized');
       } catch (channelError) {
