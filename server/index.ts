@@ -375,12 +375,22 @@ app.use((req, res, next) => {
         await startAllAdapters();
 
         // Mount Telegram webhook route if in webhook mode
+        // Must use handleUpdate directly since express.json() already consumed the raw body
         if (process.env.TELEGRAM_WEBHOOK_URL && telegramAdapter.bot) {
+          const bot = telegramAdapter.bot;
           const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
-          app.use(telegramAdapter.bot.webhookCallback(
-            '/api/telegram/webhook',
-            { secretToken: secret }
-          ));
+          app.post('/api/telegram/webhook', (req, res) => {
+            // Validate secret token if configured
+            if (secret) {
+              const headerSecret = req.headers['x-telegram-bot-api-secret-token'];
+              if (headerSecret !== secret) {
+                res.status(403).json({ error: 'Forbidden' });
+                return;
+              }
+            }
+            // req.body is already parsed by express.json()
+            bot.handleUpdate(req.body, res);
+          });
           log('✓ Telegram webhook route mounted at /api/telegram/webhook');
         }
 
