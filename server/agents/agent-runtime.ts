@@ -47,6 +47,7 @@ import { hybridSearch } from "../vector-search";
 import { buildLifeContext } from "./tools/life-context";
 import { getConversationHistory } from "./conversation-manager";
 import { scoreResponse, getEscalationModel, scrubCredentials } from "./response-quality-gate";
+import { ToolLoopDetector } from "../infra/tool-loop-detector";
 
 // Lazy DB
 let db: any = null;
@@ -1195,6 +1196,7 @@ export async function executeAgentChat(
   let tokensUsed = 0;
   let modelUsed = "";
   const maxTurns = 10;
+  const loopDetector = new ToolLoopDetector();
 
   const preferredModel = resolveAgentModel(agent);
 
@@ -1291,6 +1293,61 @@ export async function executeAgentChat(
         tool_call_id: toolCall.id,
         content: toolResult.result,
       });
+
+      // Tool loop detection: check for repetitive behavior
+      const loopCheck = loopDetector.recordAndCheck(
+        toolCall.function.name,
+        args,
+        toolResult.result
+      );
+
+      if (loopCheck.detected) {
+        logger.warn(
+          {
+            agentSlug: agent.slug,
+            detector: loopCheck.detector,
+            severity: loopCheck.severity,
+            count: loopCheck.count,
+            message: loopCheck.message,
+          },
+          "Tool loop detected"
+        );
+
+        if (loopCheck.severity === "circuit_breaker") {
+          // Hard stop: inject a system message and force exit
+          toolResults.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: `[SYSTEM] Tool loop detected: ${loopCheck.message}. You must provide your final response now without making more tool calls.`,
+          });
+          conversationMessages.push(...toolResults);
+          // Force one more turn to get a final response, but with no tools
+          const { response: exitResponse, metrics: exitMetrics } = await modelManager.chatCompletion(
+            {
+              messages: conversationMessages,
+              temperature: agent.temperature || 0.7,
+              max_tokens: agent.maxTokens || 4096,
+            },
+            "complex",
+            preferredModel
+          );
+          tokensUsed += exitMetrics.tokensUsed || 0;
+          modelUsed = exitMetrics.modelUsed;
+          finalResponse = scrubCredentials(exitResponse.choices[0]?.message?.content || "I encountered an issue and need to stop processing.");
+          // Jump out of the outer loop
+          turn = maxTurns;
+          break;
+        }
+
+        if (loopCheck.severity === "critical") {
+          // Inject a warning into the tool result to steer the model
+          toolResults[toolResults.length - 1] = {
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: toolResult.result + `\n\n[SYSTEM WARNING] ${loopCheck.message}. Try a different approach or provide your final response.`,
+          };
+        }
+      }
     }
 
     conversationMessages.push(...toolResults);

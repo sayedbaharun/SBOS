@@ -24,6 +24,14 @@ import type {
   OutgoingMessage,
 } from "../types";
 import { getUserDate } from "../../utils/dates";
+import {
+  applyNetworkTuning,
+  runWithPollingResilience,
+  monitorWebhookHealth,
+  runServiceHealthMonitor,
+  type ServiceCheck,
+} from "../../infra/telegram-resilience";
+import { safeSendChatAction, chatActionBreaker } from "../../infra/chat-action-circuit-breaker";
 
 // ============================================================================
 // CONFIG
@@ -77,6 +85,7 @@ class TelegramAdapter implements ChannelAdapter {
   private connected = false;
   private startedAt: Date | null = null;
   private lastTasksList = new Map<string, (string | number)[]>();
+  private abortController: AbortController | null = null;
   private stats = {
     messagesReceived: 0,
     messagesSent: 0,
@@ -663,8 +672,12 @@ class TelegramAdapter implements ChannelAdapter {
       this.recordError(err.message || "Unknown Telegraf error");
     });
 
-    // ---- Launch ----
-    // Use polling in development, webhook in production
+    // ---- Network tuning ----
+    applyNetworkTuning();
+
+    // ---- Launch with resilience ----
+    this.abortController = new AbortController();
+
     if (process.env.TELEGRAM_WEBHOOK_URL) {
       const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL;
       const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
@@ -672,13 +685,38 @@ class TelegramAdapter implements ChannelAdapter {
         secret_token: secret,
       });
       logger.info({ webhookUrl }, "Telegram bot started with webhook");
+
+      // Start webhook health monitor in background
+      if (BOT_TOKEN) {
+        monitorWebhookHealth({
+          botToken: BOT_TOKEN,
+          expectedWebhookUrl: webhookUrl,
+          webhookSecret: secret,
+          checkIntervalMs: 5 * 60 * 1000,
+          signal: this.abortController.signal,
+        }).catch((err) => {
+          logger.error({ error: (err as Error).message }, "Webhook health monitor stopped");
+        });
+      }
     } else {
-      // Use polling — launch in background
-      this.bot.launch().catch((err: any) => {
-        logger.error({ error: err.message }, "Telegram bot polling failed");
-        this.recordError(err.message);
+      // Use polling with resilience loop (auto-restart on failure)
+      const bot = this.bot;
+      const adapter = this;
+      runWithPollingResilience({
+        startBot: async () => {
+          await bot.launch();
+        },
+        stopBot: async () => {
+          try { bot.stop("restart"); } catch {}
+        },
+        isConnected: () => adapter.connected,
+        maxConsecutiveRestarts: 10,
+        signal: this.abortController.signal,
+      }).catch((err) => {
+        logger.error({ error: (err as Error).message }, "Telegram polling resilience loop stopped");
+        adapter.recordError((err as Error).message);
       });
-      logger.info("Telegram bot started with polling");
+      logger.info("Telegram bot started with resilient polling");
     }
 
     this.connected = true;
@@ -686,6 +724,12 @@ class TelegramAdapter implements ChannelAdapter {
   }
 
   async stop(): Promise<void> {
+    // Signal all background monitors to stop
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
+
     if (this.bot) {
       this.bot.stop("SIGTERM");
       this.connected = false;
@@ -713,7 +757,7 @@ class TelegramAdapter implements ChannelAdapter {
     return this.connected;
   }
 
-  getStatus(): ChannelStatus {
+  getStatus(): ChannelStatus & { circuitBreaker?: ReturnType<typeof chatActionBreaker.getState> } {
     return {
       platform: "telegram",
       connected: this.connected,
@@ -723,6 +767,7 @@ class TelegramAdapter implements ChannelAdapter {
       errors: this.stats.errors,
       lastError: this.stats.lastError,
       lastActivity: this.stats.lastActivity?.toISOString() || null,
+      circuitBreaker: chatActionBreaker.getState(),
     };
   }
 
