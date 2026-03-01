@@ -20,16 +20,23 @@ import { estimateTokens } from "../chunking";
 // Model context window limits (tokens)
 // ---------------------------------------------------------------------------
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-  // OpenRouter model IDs
+  // Current OpenRouter model IDs (from types.ts MODEL_TIER_DEFAULTS)
+  "anthropic/claude-opus-4": 200_000,
+  "anthropic/claude-sonnet-4": 200_000,
+  "anthropic/claude-3.5-haiku": 200_000,
+  // Legacy IDs (still valid on OpenRouter)
   "anthropic/claude-3-opus": 200_000,
   "anthropic/claude-3.5-sonnet": 200_000,
   "anthropic/claude-3-sonnet": 200_000,
   "anthropic/claude-3-haiku": 200_000,
-  "anthropic/claude-3.5-haiku": 200_000,
+  // OpenAI
   "openai/gpt-4o": 128_000,
   "openai/gpt-4o-mini": 128_000,
   "openai/gpt-4-turbo": 128_000,
+  // Google
   "google/gemini-pro-1.5": 1_000_000,
+  // Local
+  "local/auto": 32_000,
 };
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
