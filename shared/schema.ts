@@ -3611,3 +3611,57 @@ export const insertTelegramMessageSchema = createInsertSchema(telegramMessages).
 
 export type TelegramMessage = typeof telegramMessages.$inferSelect;
 export type InsertTelegramMessage = z.infer<typeof insertTelegramMessageSchema>;
+
+// ============================================================================
+// AGENT COMPACTION — Resonance Pentad context management
+// ============================================================================
+
+export const agentCompactionEvents = pgTable(
+  "agent_compaction_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id").references(() => agents.id, { onDelete: "cascade" }).notNull(),
+    taskId: uuid("task_id").references(() => agentTasks.id, { onDelete: "set null" }),
+    sessionId: text("session_id").notNull(),
+    layer: integer("layer").notNull(), // 1, 2, or 3
+    turnNumber: integer("turn_number").notNull(),
+    tokensBefore: integer("tokens_before").notNull(),
+    tokensAfter: integer("tokens_after").notNull(),
+    tokensSaved: integer("tokens_saved").notNull(),
+    compactionModel: text("compaction_model"),
+    latencyMs: integer("latency_ms").notNull(),
+    observation: jsonb("observation").$type<Record<string, any>>(),
+    taskOutcome: text("task_outcome"), // set post-task
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_compaction_events_agent").on(table.agentId),
+    index("idx_compaction_events_session").on(table.sessionId),
+    index("idx_compaction_events_created_at").on(table.createdAt),
+  ]
+);
+
+export const insertAgentCompactionEventSchema = createInsertSchema(agentCompactionEvents).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type AgentCompactionEvent = typeof agentCompactionEvents.$inferSelect;
+export type InsertAgentCompactionEvent = z.infer<typeof insertAgentCompactionEventSchema>;
+
+export const agentCompactionConfig = pgTable(
+  "agent_compaction_config",
+  {
+    agentId: uuid("agent_id").primaryKey().references(() => agents.id, { onDelete: "cascade" }),
+    thresholdPct: real("threshold_pct").default(0.75),
+    layer2Model: text("layer2_model").default("openai/gpt-4o-mini"),
+    maxObservationTokens: integer("max_observation_tokens").default(2000),
+    enableLayer3: boolean("enable_layer3").default(false),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  }
+);
+
+export const insertAgentCompactionConfigSchema = createInsertSchema(agentCompactionConfig);
+
+export type AgentCompactionConfig = typeof agentCompactionConfig.$inferSelect;
+export type InsertAgentCompactionConfig = z.infer<typeof insertAgentCompactionConfigSchema>;

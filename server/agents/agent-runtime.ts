@@ -48,6 +48,7 @@ import { buildLifeContext } from "./tools/life-context";
 import { getConversationHistory } from "./conversation-manager";
 import { scoreResponse, getEscalationModel, scrubCredentials } from "./response-quality-gate";
 import { ToolLoopDetector } from "../infra/tool-loop-detector";
+import { ContextBudget, ContextOverflowError } from "./context-budget";
 
 // Lazy DB
 let db: any = null;
@@ -1199,18 +1200,94 @@ export async function executeAgentChat(
   const loopDetector = new ToolLoopDetector();
 
   const preferredModel = resolveAgentModel(agent);
+  const contextBudget = new ContextBudget(preferredModel);
 
   for (let turn = 0; turn < maxTurns; turn++) {
-    const { response, metrics } = await modelManager.chatCompletion(
-      {
-        messages: conversationMessages,
-        tools: tools.length > 0 ? tools : undefined,
-        temperature: agent.temperature || 0.7,
-        max_tokens: agent.maxTokens || 4096,
-      },
-      "complex",
-      preferredModel
-    );
+    // --- Context Budget: check and compact before LLM call ---
+    if (turn > 0 && contextBudget.shouldCompact(conversationMessages)) {
+      // Layer 1: strip older tool results (synchronous, <5ms)
+      contextBudget.stripToolResults(conversationMessages, turn);
+
+      // Layer 2: if still over threshold, run observer compaction
+      if (contextBudget.shouldCompact(conversationMessages)) {
+        // Layer 3: if 3+ observations accumulated, reflect first to condense them
+        if (contextBudget.shouldReflect()) {
+          import("./reflector").then(({ reflectAndRoute }) => {
+            reflectAndRoute(contextBudget.getObservations(), agent.id, agent.slug)
+              .then(() => contextBudget.clearObservations())
+              .catch(err => logger.debug({ err: err.message }, "Reflection failed (non-critical)"));
+          }).catch(() => {});
+        }
+
+        const l2Event = await contextBudget.compactWithObserver(conversationMessages, turn);
+
+        // Fire-and-forget: rescue memories from compacted messages
+        if (l2Event?.observation) {
+          import("../compaction/memory-rescue").then(({ rescueMemories }) => {
+            const texts = conversationMessages
+              .filter(m => typeof m.content === "string" && m.role !== "system")
+              .map(m => m.content as string);
+            if (texts.length > 0) {
+              rescueMemories(`agent-${agent.id}-${turn}`, texts).catch(err =>
+                logger.debug({ err: err.message }, "Memory rescue failed (non-critical)")
+              );
+            }
+          }).catch(() => {});
+        }
+      }
+    }
+
+    let response: OpenAI.Chat.ChatCompletion;
+    let metrics: any;
+    try {
+      ({ response, metrics } = await modelManager.chatCompletion(
+        {
+          messages: conversationMessages,
+          tools: tools.length > 0 ? tools : undefined,
+          temperature: agent.temperature || 0.7,
+          max_tokens: agent.maxTokens || 4096,
+        },
+        "complex",
+        preferredModel
+      ));
+    } catch (error: any) {
+      // Catch context length exceeded errors and trigger emergency compaction
+      if (
+        error?.status === 400 &&
+        (error?.message?.includes("context_length_exceeded") ||
+         error?.message?.includes("maximum context length") ||
+         error?.message?.includes("too many tokens"))
+      ) {
+        logger.warn(
+          { agentSlug: agent.slug, turn, error: error.message },
+          "Context overflow detected — running emergency compaction"
+        );
+        // Emergency: strip all tool results + run observer
+        contextBudget.stripToolResults(conversationMessages, turn);
+        await contextBudget.compactWithObserver(conversationMessages, turn);
+
+        // Retry once after emergency compaction
+        try {
+          ({ response, metrics } = await modelManager.chatCompletion(
+            {
+              messages: conversationMessages,
+              tools: tools.length > 0 ? tools : undefined,
+              temperature: agent.temperature || 0.7,
+              max_tokens: agent.maxTokens || 4096,
+            },
+            "complex",
+            preferredModel
+          ));
+        } catch (retryError: any) {
+          throw new ContextOverflowError(
+            contextBudget.estimateContextSize(conversationMessages),
+            contextBudget.getContextWindow(),
+          );
+        }
+      } else {
+        throw error;
+      }
+    }
 
     tokensUsed += metrics.tokensUsed || 0;
     modelUsed = metrics.modelUsed;
@@ -1366,7 +1443,8 @@ export async function executeAgentChat(
     },
   });
 
-  // Fire-and-forget: extract learnings from this conversation
+  // Fire-and-forget: extract learnings from this conversation (enhanced with compaction observations)
+  const compactionObservations = contextBudget.getObservations();
   extractConversationLearnings({
     agentId: agent.id,
     agentSlug: agent.slug,
@@ -1374,6 +1452,7 @@ export async function executeAgentChat(
     assistantResponse: finalResponse,
     ventureId: agent.ventureId || undefined,
     actions,
+    compactionObservations: compactionObservations.length > 0 ? compactionObservations : undefined,
   }).catch(err => logger.debug({ err: err.message }, "Learning extraction failed (non-critical)"));
 
   // Fire-and-forget: extract entity relationships
@@ -1490,19 +1569,89 @@ export async function executeAgentTask(
   const maxTurns = 10;
 
   const preferredModel = resolveAgentModel(agent);
+  const contextBudget = new ContextBudget(preferredModel);
 
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
-      const { response, metrics } = await modelManager.chatCompletion(
-        {
-          messages: conversationMessages,
-          tools: tools.length > 0 ? tools : undefined,
-          temperature: agent.temperature || 0.7,
-          max_tokens: agent.maxTokens || 4096,
-        },
-        "complex",
-        preferredModel
-      );
+      // --- Context Budget: check and compact before LLM call ---
+      if (turn > 0 && contextBudget.shouldCompact(conversationMessages)) {
+        contextBudget.stripToolResults(conversationMessages, turn);
+
+        if (contextBudget.shouldCompact(conversationMessages)) {
+          // Layer 3: reflect if 3+ observations accumulated
+          if (contextBudget.shouldReflect()) {
+            import("./reflector").then(({ reflectAndRoute }) => {
+              reflectAndRoute(contextBudget.getObservations(), agent.id, agent.slug)
+                .then(() => contextBudget.clearObservations())
+                .catch(err => logger.debug({ err: err.message }, "Reflection failed (non-critical)"));
+            }).catch(() => {});
+          }
+
+          const l2Event = await contextBudget.compactWithObserver(conversationMessages, turn);
+
+          if (l2Event?.observation) {
+            import("../compaction/memory-rescue").then(({ rescueMemories }) => {
+              const texts = conversationMessages
+                .filter(m => typeof m.content === "string" && m.role !== "system")
+                .map(m => m.content as string);
+              if (texts.length > 0) {
+                rescueMemories(`task-${taskId}-${turn}`, texts).catch(err =>
+                  logger.debug({ err: err.message }, "Memory rescue failed (non-critical)")
+                );
+              }
+            }).catch(() => {});
+          }
+        }
+      }
+
+      let response: OpenAI.Chat.ChatCompletion;
+      let metrics: any;
+      try {
+        ({ response, metrics } = await modelManager.chatCompletion(
+          {
+            messages: conversationMessages,
+            tools: tools.length > 0 ? tools : undefined,
+            temperature: agent.temperature || 0.7,
+            max_tokens: agent.maxTokens || 4096,
+          },
+          "complex",
+          preferredModel
+        ));
+      } catch (error: any) {
+        if (
+          error?.status === 400 &&
+          (error?.message?.includes("context_length_exceeded") ||
+           error?.message?.includes("maximum context length") ||
+           error?.message?.includes("too many tokens"))
+        ) {
+          logger.warn(
+            { agentSlug: agent.slug, taskId, turn, error: error.message },
+            "Context overflow in task — running emergency compaction"
+          );
+          contextBudget.stripToolResults(conversationMessages, turn);
+          await contextBudget.compactWithObserver(conversationMessages, turn);
+
+          try {
+            ({ response, metrics } = await modelManager.chatCompletion(
+              {
+                messages: conversationMessages,
+                tools: tools.length > 0 ? tools : undefined,
+                temperature: agent.temperature || 0.7,
+                max_tokens: agent.maxTokens || 4096,
+              },
+              "complex",
+              preferredModel
+            ));
+          } catch (retryError: any) {
+            throw new ContextOverflowError(
+              contextBudget.estimateContextSize(conversationMessages),
+              contextBudget.getContextWindow(),
+            );
+          }
+        } else {
+          throw error;
+        }
+      }
 
       tokensUsed += metrics.tokensUsed || 0;
       modelUsed = metrics.modelUsed;

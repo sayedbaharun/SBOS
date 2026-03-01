@@ -311,6 +311,18 @@ registerJobHandler("memory_consolidation", async (_agentId: string, agentSlug: s
     { agentSlug, totalMerged, totalDecayed, agentCount: allAgents.length },
     "Memory consolidation completed"
   );
+
+  // Run compaction tuner as part of nightly consolidation
+  try {
+    const { tuneAllAgentCompaction } = await import("./compaction-tuner");
+    const tuneResult = await tuneAllAgentCompaction();
+    logger.info(
+      { agentsAnalyzed: tuneResult.agentsAnalyzed, configsUpdated: tuneResult.configsUpdated },
+      "Compaction tuning completed"
+    );
+  } catch (err: any) {
+    logger.debug({ error: err.message }, "Compaction tuning failed (non-critical)");
+  }
 });
 
 /**

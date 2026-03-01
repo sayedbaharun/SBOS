@@ -624,4 +624,42 @@ router.post("/:slug/reload-schedule", async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// COMPACTION STATS — Resonance Pentad metrics
+// ============================================================================
+
+// Aggregate compaction stats across all agents
+router.get("/compaction-stats", async (_req: Request, res: Response) => {
+  try {
+    const { getAggregateCompactionStats } = await import("../agents/compaction-tuner");
+    const stats = await getAggregateCompactionStats();
+    res.json(stats);
+  } catch (error) {
+    logger.error({ error }, "Error fetching aggregate compaction stats");
+    res.status(500).json({ error: "Failed to fetch compaction stats" });
+  }
+});
+
+// Per-agent compaction stats
+router.get("/:slug/compaction-stats", async (req: Request, res: Response) => {
+  try {
+    const database = await getDb();
+    const [agent] = await database
+      .select()
+      .from(agents)
+      .where(eq(agents.slug, String(req.params.slug)));
+
+    if (!agent) {
+      return res.status(404).json({ error: "Agent not found" });
+    }
+
+    const { getAgentCompactionStats } = await import("../agents/compaction-tuner");
+    const stats = await getAgentCompactionStats(agent.id);
+    res.json(stats || { message: "No compaction data yet" });
+  } catch (error) {
+    logger.error({ error }, "Error fetching agent compaction stats");
+    res.status(500).json({ error: "Failed to fetch compaction stats" });
+  }
+});
+
 export default router;

@@ -103,8 +103,15 @@ export async function extractConversationLearnings(params: {
   conversationId?: string;
   ventureId?: string;
   actions?: Array<{ actionType: string; entityType?: string }>;
+  /** Optional: pre-computed observations from context compaction (avoids duplicate LLM call) */
+  compactionObservations?: Array<{
+    key_decisions: Array<{ text: string; priority: string }>;
+    key_facts: string[];
+    key_entities: string[];
+    domain: string;
+  }>;
 }): Promise<void> {
-  const { agentId, agentSlug, userMessage, assistantResponse, conversationId, ventureId, actions } = params;
+  const { agentId, agentSlug, userMessage, assistantResponse, conversationId, ventureId, actions, compactionObservations } = params;
 
   // Skip trivial exchanges
   const combined = userMessage + assistantResponse;
@@ -113,6 +120,22 @@ export async function extractConversationLearnings(params: {
   }
 
   try {
+    // If compaction observations are available, extract structured data from them
+    // to enhance learning extraction without an extra LLM call
+    let observationContext = "";
+    if (compactionObservations && compactionObservations.length > 0) {
+      const decisions = compactionObservations.flatMap(o => o.key_decisions);
+      const facts = compactionObservations.flatMap(o => o.key_facts);
+      const entities = compactionObservations.flatMap(o => o.key_entities);
+
+      if (decisions.length > 0 || facts.length > 0) {
+        observationContext = `\n\nPre-extracted observations from context compaction:` +
+          (decisions.length > 0 ? `\nDecisions: ${decisions.map(d => `[${d.priority}] ${d.text}`).join("; ")}` : "") +
+          (facts.length > 0 ? `\nFacts: ${facts.join("; ")}` : "") +
+          (entities.length > 0 ? `\nEntities: ${entities.join(", ")}` : "");
+      }
+    }
+
     const actionSummary = actions && actions.length > 0
       ? `\nActions taken: ${actions.map(a => a.actionType).join(", ")}`
       : "";
@@ -123,7 +146,7 @@ export async function extractConversationLearnings(params: {
           { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
           {
             role: "user",
-            content: `Agent: ${agentSlug}\n\nUser message:\n${userMessage.slice(0, 2000)}\n\nAssistant response:\n${assistantResponse.slice(0, 2000)}${actionSummary}`,
+            content: `Agent: ${agentSlug}\n\nUser message:\n${userMessage.slice(0, 2000)}\n\nAssistant response:\n${assistantResponse.slice(0, 2000)}${actionSummary}${observationContext}`,
           },
         ],
         temperature: 0.1,
