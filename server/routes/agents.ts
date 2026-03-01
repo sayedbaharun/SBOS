@@ -147,6 +147,18 @@ router.get("/", async (req: Request, res: Response) => {
   }
 });
 
+// Aggregate compaction stats (MUST be before /:slug routes)
+router.get("/compaction-stats", async (_req: Request, res: Response) => {
+  try {
+    const { getAggregateCompactionStats } = await import("../agents/compaction-tuner");
+    const stats = await getAggregateCompactionStats();
+    res.json(stats);
+  } catch (error) {
+    logger.error({ error }, "Error fetching aggregate compaction stats");
+    res.status(500).json({ error: "Failed to fetch compaction stats" });
+  }
+});
+
 // Get single agent by slug
 router.get("/:slug", async (req: Request, res: Response) => {
   try {
@@ -621,22 +633,6 @@ router.post("/:slug/reload-schedule", async (req: Request, res: Response) => {
   } catch (error) {
     logger.error({ error }, "Error reloading schedule");
     res.status(500).json({ error: "Failed to reload schedule" });
-  }
-});
-
-// ============================================================================
-// COMPACTION STATS — Resonance Pentad metrics
-// ============================================================================
-
-// Aggregate compaction stats across all agents
-router.get("/compaction-stats", async (_req: Request, res: Response) => {
-  try {
-    const { getAggregateCompactionStats } = await import("../agents/compaction-tuner");
-    const stats = await getAggregateCompactionStats();
-    res.json(stats);
-  } catch (error) {
-    logger.error({ error }, "Error fetching aggregate compaction stats");
-    res.status(500).json({ error: "Failed to fetch compaction stats" });
   }
 });
 
