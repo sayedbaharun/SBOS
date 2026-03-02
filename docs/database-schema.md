@@ -1,6 +1,6 @@
 # Database Schema
 
-> 64 tables organized by domain. All defined in `shared/schema.ts` using Drizzle ORM.
+> 68 tables organized by domain. All defined in `shared/schema.ts` using Drizzle ORM.
 
 ## Schema Management
 
@@ -130,6 +130,15 @@ npm run db:push
 | `memory_sync_ledger` | Qdrant↔Pinecone version tracking | `entityType`, `entityId`, `localVersion`, `cloudVersion`, `status` |
 | `session_logs` | Cross-session continuity | `source`, `summary`, `keyTopics`, `decisions`, `openThreads`, `embedding`, `processed` |
 
+## Intelligence & Automation (4 tables)
+
+| Table | Purpose | Key Columns |
+|-------|---------|-------------|
+| `daily_intelligence` | Daily cross-domain synthesis | `date`, `synthesis`, `conflicts`, `priorities`, `blindSpots`, `rawData`, `notifiedAt` |
+| `email_triage` | Email classifications | `emailId`, `fromAddress`, `subject`, `classification`, `summary`, `suggestedAction`, `threadId`, `triagedAt` |
+| `meeting_preps` | Meeting prep briefs | `eventId`, `eventTitle`, `eventStart`, `attendees`, `brief`, `notified` |
+| `nudge_responses` | Nudge action tracking | `nudgeType`, `nudgeMessage`, `responseType`, `respondedAt` |
+
 ## Other (7 tables)
 
 | Table | Purpose | Key Columns |
@@ -149,6 +158,8 @@ npm run db:push
 |------|--------|
 | `agent_role` | executive, manager, specialist, worker |
 | `agent_task_status` | pending, in_progress, delegated, completed, failed, needs_review |
+| `email_triage_classification` | urgent, action_needed, informational, spam, delegatable |
+| `nudge_response_type` | acted, snoozed, dismissed, ignored |
 | `agent_memory_type` | learning, preference, context, relationship, decision |
 | `trading_knowledge_doc_category` | strategy, playbook, notes, research, psychology, education, other |
 | `knowledge_file_category` | document, strategy, playbook, notes, research, reference, template, image, spreadsheet, presentation, other |

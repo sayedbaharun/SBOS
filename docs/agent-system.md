@@ -9,7 +9,7 @@ SAYED (CEO / Founder)
 │
 ├── Chief of Staff (Opus) ─── daily briefing, coordination, triage
 │   ├── delegates to → CMO, Head of Products, CTO
-│   └── schedule: 9am briefing, 10am check-in, 6pm review, Fri 4pm weekly
+│   └── schedule: 8:45am intelligence, 9am briefing, 10am check-in, email triage 3x/day, meeting prep */15min, 6pm review, Fri 4pm weekly
 │
 ├── CMO (Sonnet) ─── marketing strategy across all ventures
 │   ├── Growth Specialist (Haiku)
@@ -43,7 +43,7 @@ To rebalance tiers: update templates in `server/agents/templates/`, then `POST /
 
 | Slug | Name | Role | Parent | Tools | Schedule |
 |------|------|------|--------|-------|----------|
-| `chief-of-staff` | Chief of Staff | executive | user | delegate, create_task, search_knowledge_base, list_tasks, list_projects, get_venture_summary, generate_report, remember, search_memory, submit_deliverable | daily_briefing, morning_checkin, evening_review, weekly_report_cos, session_log_extraction, pipeline_health_check, memory_consolidation |
+| `chief-of-staff` | Chief of Staff | executive | user | delegate, create_task, search_knowledge_base, list_tasks, list_projects, get_venture_summary, generate_report, remember, search_memory, submit_deliverable | daily_intelligence (8:45am), daily_briefing (9am), morning_checkin (10am), email_triage (8am/1pm/6pm), meeting_prep (*/15min), evening_review (6pm), weekly_report_cos (Fri 4pm), session_log_extraction, pipeline_health_check, memory_consolidation |
 | `cmo` | CMO | executive | user | web_search, deep_research, create_task, create_doc, search_knowledge_base, delegate, generate_report, market_analyze, remember, search_memory, submit_deliverable | weekly_report (Fri 5pm), campaign_review (Mon 9am) |
 | `cto` | CTO | executive | user | create_task, create_doc, search_knowledge_base, delegate, web_search, deep_research, remember, search_memory, submit_deliverable | tech_review (Wed 10am) |
 | `head-of-products` | Head of Products | manager | user | web_search, create_task, create_doc, create_project, search_knowledge_base, delegate, market_analyze, submit_deliverable | product_review (Wed 10am) |

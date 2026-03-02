@@ -588,7 +588,7 @@ Express session storage (managed by connect-pg-simple).
 
 ## 7. API Reference
 
-All routes prefixed with `/api`. **147+ total endpoints**.
+All routes prefixed with `/api`. **157+ total endpoints**.
 
 ### Authentication & Settings
 | Method | Endpoint | Description |
@@ -735,6 +735,20 @@ All routes prefixed with `/api`. **147+ total endpoints**.
 | POST | `/api/categories` | Create category |
 | PATCH | `/api/categories/:id` | Update category |
 | DELETE | `/api/categories/:id` | Delete category |
+
+### Intelligence (Jarvis)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/intelligence/daily` | Today's intelligence synthesis |
+| GET | `/api/intelligence/history` | Past syntheses |
+| POST | `/api/intelligence/run` | Manually trigger synthesis |
+| GET | `/api/intelligence/email/triage` | Today's email triage |
+| GET | `/api/intelligence/email/triage/:id` | Single triaged email |
+| POST | `/api/intelligence/email/triage/run` | Trigger email triage |
+| POST | `/api/intelligence/email/reply` | Send email reply |
+| GET | `/api/intelligence/meeting-preps` | Meeting preps |
+| POST | `/api/intelligence/meeting-preps/run` | Trigger meeting prep |
+| GET | `/api/intelligence/nudges/stats` | Nudge response analytics |
 
 ### AI Chat
 | Method | Endpoint | Description |
@@ -1432,7 +1446,7 @@ During long coding stretches, update the session log after completing each major
 - **PWA**: Safari → Share → "Add to Home Screen" at `https://sbaura.up.railway.app`
 - **Telegram bot** (`@SBNexusBot`): Agent chat via `@cmo`, `@cto`, plain text → Chief of Staff
 
-### Telegram commands (9 total)
+### Telegram commands (12 total)
 | Command | What it does |
 |---------|-------------|
 | `/start` | Welcome message and usage guide |
@@ -1444,6 +1458,9 @@ During long coding stretches, update the session log after completing each major
 | `/done <number>` | Marks a task as done by number from `/tasks` |
 | `/shop <item> [#category]` | Add to shopping list (categories: #groceries, #household, #personal, #business) |
 | `/clip <url>` | Clip web article to Knowledge Hub (auto-embeds for RAG) |
+| `/emails` | Today's email triage summary (urgent, action needed, info) |
+| `/email <id>` | Full triaged email details with suggested reply |
+| `/reply <id> <msg>` | Send email reply via Gmail |
 
 ### Agent chat via Telegram
 - `@cmo <message>` → routes to CMO agent

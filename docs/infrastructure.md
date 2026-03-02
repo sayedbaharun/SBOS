@@ -93,10 +93,32 @@ Prevents agents from wasting tokens by calling the same tools repeatedly without
 | `critical` | Inject warning into tool result, continue |
 | `circuit_breaker` | Force final response with no tools, exit loop |
 
-At circuit breaker severity (7 repetitions), the system injects:
+### Guidance (added 2026-03-02)
+
+Each detector now includes a `guidance` field with structured explanations:
+
+```typescript
+guidance?: {
+  explanation: string;    // Why this pattern is harmful
+  suggestion: string;     // What the agent should do instead
+  pattern_detected: string; // Detector name
+}
 ```
-[SYSTEM] Tool loop detected. You must provide your final response now without making more tool calls.
+
+| Detector | Explanation | Suggestion |
+|----------|-------------|------------|
+| `generic_repeat` | Same tool with identical args — no new information | Try a different approach or answer with what you have |
+| `poll_no_progress` | Resource returning unchanged results | Use the data you already have |
+| `ping_pong` | Two tools alternating without convergence | Synthesize what you know from both tools |
+
+Guidance is injected into agent system messages at both `critical` and `circuit_breaker` severity levels:
 ```
+[SYSTEM] Tool loop detected: {message}
+Explanation: {guidance.explanation}
+Suggestion: {guidance.suggestion}
+```
+
+At circuit breaker severity (7 repetitions), the system also forces a final response with no tools.
 
 ## Chat Action Circuit Breaker
 
@@ -167,3 +189,57 @@ Checks 5 subsystems (piggybacked on morning check-in + evening review):
 | Telegram | Bot connection | Connection status unhealthy |
 
 Issues are appended to Telegram messages from morning check-in and evening review — not a standalone cron.
+
+## Proactive Intelligence Engine (added 2026-03-02)
+
+Cross-domain intelligence and event-driven automation. See also: [API Reference — Intelligence](api-reference.md#intelligence-10-endpoints).
+
+### Daily Intelligence Synthesizer
+
+**File**: `server/agents/intelligence-synthesizer.ts`
+
+Runs at 8:45am Dubai via CoS schedule. Gathers 5 data sources in parallel:
+1. Today's calendar events (Google Calendar)
+2. Active/overdue tasks (storage)
+3. Unread emails (Gmail)
+4. Life context (health, nutrition, outcomes)
+5. Yesterday's agent memory outcomes
+
+Then detects conflicts:
+- Calendar event overlaps
+- P0 tasks with no calendar time blocked
+- Overdue tasks
+- Meeting-heavy days (>4 meetings)
+
+Sends all data to GPT-4o-mini for synthesis → `daily_intelligence` table + Telegram + injected into morning briefing context.
+
+### Email Triage
+
+**File**: `server/agents/email-triage.ts`
+
+Runs 3x/day (8am, 1pm, 6pm). Fetches unread via `gmail.ts`, batch-classifies via GPT-4o-mini with JSON response format. Classifications: `urgent`, `action_needed`, `informational`, `spam`, `delegatable`. Stores to `email_triage` table. Sends Telegram digest with counts per classification.
+
+### Meeting Prep
+
+**File**: `server/agents/meeting-prep.ts`
+
+Runs every 15 minutes. For meetings with external attendees starting within 30 minutes:
+1. Pulls event details from Google Calendar
+2. Searches CRM (`people` table) for attendee matches
+3. Searches vector memory (hybrid search) for prior mentions
+4. Generates 3-5 bullet prep brief via GPT-4o-mini
+5. Sends via Telegram, stores in `meeting_preps` table
+
+### Proactive Event Triggers
+
+**File**: `server/agents/proactive-triggers.ts`
+
+Event-driven agent wiring with typed event system:
+
+| Event | Trigger | Action |
+|-------|---------|--------|
+| `urgent_email_received` | Email classified as urgent | CoS agent assessment |
+| `deadline_approaching` | Task due within 24h | Grouped alerts by venture |
+| `calendar_conflict_detected` | Overlapping events | Telegram notification |
+| `meeting_in_30min` | Meeting starting soon | Meeting prep agent |
+| `cross_agent_flag` | Agent discovers cross-domain info | Broadcast via message bus |

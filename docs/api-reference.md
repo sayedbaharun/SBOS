@@ -1,6 +1,6 @@
 # API Reference
 
-> 170+ REST endpoints organized by resource. All require session authentication unless noted.
+> 180+ REST endpoints organized by resource. All require session authentication unless noted.
 
 ## Authentication
 
@@ -204,7 +204,7 @@ See [Agent System](agent-system.md#api-endpoints) for full list. Key endpoints:
 | `GET` | `/api/memory/status` | Memory system status |
 | `GET` | `/api/memory/search` | Hybrid search across memories |
 | `POST` | `/api/memory/store` | Store memory/fact |
-| `GET` | `/api/rag/search` | RAG-powered knowledge search |
+| `POST` | `/api/rag/search` | Hybrid search (vector + keyword). Returns `_search_meta` with method, weights, result_count, top_relevance |
 | `POST` | `/api/rag/sync` | Sync knowledge base with Qdrant |
 | `GET` | `/api/rag/status` | RAG system status |
 
@@ -246,6 +246,23 @@ See [Agent System](agent-system.md#api-endpoints) for full list. Key endpoints:
 | `GET` | `/api/drive/file/:fileId` | Get file info |
 | `POST` | `/api/drive/upload` | Upload file |
 | `DELETE` | `/api/drive/file/:fileId` | Delete file |
+
+## Intelligence (10 endpoints)
+
+Cross-domain intelligence synthesis, email triage, meeting prep, and nudge analytics.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/intelligence/daily` | Get today's intelligence synthesis (`?date=YYYY-MM-DD`) |
+| `GET` | `/api/intelligence/history` | Past syntheses (`?limit=7`) |
+| `POST` | `/api/intelligence/run` | Manually trigger synthesis |
+| `GET` | `/api/intelligence/email/triage` | Today's email triage (`?date=&classification=&limit=50`) |
+| `GET` | `/api/intelligence/email/triage/:id` | Single triaged email |
+| `POST` | `/api/intelligence/email/triage/run` | Manually trigger email triage |
+| `POST` | `/api/intelligence/email/reply` | Send email reply (`{ emailId, message }`) |
+| `GET` | `/api/intelligence/meeting-preps` | Meeting preps (`?date=`) |
+| `POST` | `/api/intelligence/meeting-preps/run` | Manually trigger meeting prep |
+| `GET` | `/api/intelligence/nudges/stats` | Nudge response analytics (`?days=14`) |
 
 ## Other Resources
 

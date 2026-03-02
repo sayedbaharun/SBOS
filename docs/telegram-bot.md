@@ -1,6 +1,6 @@
 # Telegram Bot
 
-> @SBNexusBot — 9 commands, 8 NLP intents, voice/image processing, nudge engine.
+> @SBNexusBot — 12 commands, 8 NLP intents, voice/image processing, smart nudge engine, multi-turn context.
 
 ## Setup
 
@@ -27,7 +27,7 @@
 3. Find your `chat.id` in the response
 4. Add to `AUTHORIZED_TELEGRAM_CHAT_IDS`
 
-## Commands (9)
+## Commands (12)
 
 | Command | Description |
 |---------|-------------|
@@ -40,6 +40,9 @@
 | `/done <number>` | Mark task as done by number from `/tasks` list |
 | `/shop <item> [#category]` | Add to shopping list (#groceries, #household, #personal, #business) |
 | `/clip <url>` | Clip web article to Knowledge Hub with auto-embedding for RAG |
+| `/emails` | Show today's email triage summary (urgent, action needed, info) |
+| `/email <id>` | Show full triaged email details with suggested reply |
+| `/reply <id> <message>` | Send email reply via Gmail |
 
 ## Agent Routing
 
@@ -128,15 +131,37 @@ This triggers: `morning_ritual` (morning done shortcut) + `health_log` (sleep, e
 - **Vision**: GPT-4o-mini with vision — meal photos analyzed for nutrition logging
 - Photo messages sent to bot are analyzed and logged as nutrition entries
 
+## Multi-Turn Conversation Context
+
+Telegram now supports multi-turn conversations. The system maintains a 10-message context window per chat with 30-minute TTL. This allows follow-up questions like "What about tomorrow?" after asking about today's schedule.
+
+- In-memory storage (per chatId)
+- Context prefix injected into agent messages as `[Recent conversation context]`
+- Auto-expires after 30 minutes of inactivity
+
+## Inline Action Buttons
+
+Proactive messages include inline keyboard buttons for quick responses:
+
+- **Nudge responses**: `[Done]` `[Snooze 1h]` `[Dismiss]` — tracked in `nudge_responses` table
+- **Email actions**: `[Flag]` `[Archive]` — via Gmail API
+- **Task actions**: `[Done]` `[Snooze 1h]` — update task status or move to tomorrow
+
 ## Nudge Engine
 
-5 check types running every 30 minutes:
+5 check types running every 30 minutes, with **context-aware suppression**:
 
 1. **Morning ritual check** — nudge if rituals not started by 10am
 2. **Outcomes check** — nudge if top 3 not set by 11am
 3. **Health check** — nudge if no health entry by 2pm
 4. **Nutrition check** — nudge if no meals logged by 3pm
 5. **Evening reflection** — nudge if no reflection by 9pm
+
+### Smart Features (added 2026-03-02)
+
+- **Meeting suppression**: During calendar events, only high-priority nudges pass through
+- **Auto-suppression**: Nudge types with <10% action rate (>10 samples) are automatically suppressed
+- **Response tracking**: All sent nudges recorded to `nudge_responses` table. Responses tracked via inline buttons.
 
 Exports `lastNudgeRunAt` for health monitoring.
 
