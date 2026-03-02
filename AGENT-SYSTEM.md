@@ -1,5 +1,7 @@
 # SB-OS Agent Operating System — Architecture & Operations Guide
 
+> **Note**: This document is partially stale (references 10 agents, now 13). For the current reference, see [`docs/agent-system.md`](docs/agent-system.md).
+
 > Complete technical reference for the hierarchical multi-agent system.
 > Generated: 2026-02-20
 
