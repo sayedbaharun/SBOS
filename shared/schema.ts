@@ -3665,3 +3665,147 @@ export const insertAgentCompactionConfigSchema = createInsertSchema(agentCompact
 
 export type AgentCompactionConfig = typeof agentCompactionConfig.$inferSelect;
 export type InsertAgentCompactionConfig = z.infer<typeof insertAgentCompactionConfigSchema>;
+
+// ============================================================================
+// JARVIS UPGRADE — Cross-Domain Intelligence Tables
+// ============================================================================
+
+/**
+ * Daily Intelligence Synthesis — cross-domain reasoning output
+ * Generated at 8:45am by the intelligence synthesizer
+ */
+export const dailyIntelligence = pgTable(
+  "daily_intelligence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    date: date("date").notNull(),
+    synthesis: text("synthesis").notNull(),
+    conflicts: jsonb("conflicts").$type<Array<{ type: string; description: string; severity: string }>>(),
+    priorities: jsonb("priorities").$type<Array<{ item: string; reason: string; urgency: string }>>(),
+    blindSpots: jsonb("blind_spots").$type<Array<{ area: string; suggestion: string }>>(),
+    calendarSummary: jsonb("calendar_summary").$type<{ eventCount: number; nextEvent?: string; freeHours?: number }>(),
+    emailSummary: jsonb("email_summary").$type<{ unreadCount: number; urgentCount: number; actionNeeded: number }>(),
+    taskSummary: jsonb("task_summary").$type<{ dueToday: number; overdue: number; inProgress: number }>(),
+    rawInputs: jsonb("raw_inputs").$type<Record<string, any>>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_daily_intelligence_date").on(table.date),
+  ]
+);
+
+export const insertDailyIntelligenceSchema = createInsertSchema(dailyIntelligence).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type DailyIntelligence = typeof dailyIntelligence.$inferSelect;
+export type InsertDailyIntelligence = z.infer<typeof insertDailyIntelligenceSchema>;
+
+/**
+ * Email Triage — automated email classification
+ * Populated 3x/day by the email triage job
+ */
+export const emailTriageClassificationEnum = pgEnum('email_triage_classification', [
+  'urgent',
+  'action_needed',
+  'informational',
+  'spam',
+  'delegatable',
+]);
+
+export const emailTriage = pgTable(
+  "email_triage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    emailId: text("email_id").notNull(),
+    threadId: text("thread_id"),
+    fromAddress: text("from_address").notNull(),
+    subject: text("subject").notNull(),
+    snippet: text("snippet"),
+    classification: emailTriageClassificationEnum("classification").notNull(),
+    summary: text("summary"),
+    suggestedAction: text("suggested_action"),
+    isUrgent: boolean("is_urgent").default(false),
+    notified: boolean("notified").default(false),
+    triagedAt: timestamp("triaged_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_email_triage_email_id").on(table.emailId),
+    index("idx_email_triage_triaged_at").on(table.triagedAt),
+    index("idx_email_triage_classification").on(table.classification),
+  ]
+);
+
+export const insertEmailTriageSchema = createInsertSchema(emailTriage).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type EmailTriage = typeof emailTriage.$inferSelect;
+export type InsertEmailTriage = z.infer<typeof insertEmailTriageSchema>;
+
+/**
+ * Meeting Preps — auto-generated briefings before meetings
+ */
+export const meetingPreps = pgTable(
+  "meeting_preps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventId: text("event_id").notNull(),
+    eventTitle: text("event_title").notNull(),
+    eventStart: timestamp("event_start").notNull(),
+    attendees: jsonb("attendees").$type<Array<{ email: string; name?: string; context?: string }>>(),
+    brief: text("brief").notNull(),
+    notified: boolean("notified").default(false),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_meeting_preps_event_id").on(table.eventId),
+    index("idx_meeting_preps_event_start").on(table.eventStart),
+  ]
+);
+
+export const insertMeetingPrepSchema = createInsertSchema(meetingPreps).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type MeetingPrep = typeof meetingPreps.$inferSelect;
+export type InsertMeetingPrep = z.infer<typeof insertMeetingPrepSchema>;
+
+/**
+ * Nudge Responses — track whether Sayed acts on nudges
+ */
+export const nudgeResponseTypeEnum = pgEnum('nudge_response_type', [
+  'acted',
+  'snoozed',
+  'dismissed',
+  'ignored',
+]);
+
+export const nudgeResponses = pgTable(
+  "nudge_responses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    nudgeType: text("nudge_type").notNull(),
+    nudgeMessage: text("nudge_message"),
+    responseType: nudgeResponseTypeEnum("response_type").notNull(),
+    responseTimeMs: integer("response_time_ms"),
+    date: date("date").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_nudge_responses_date").on(table.date),
+    index("idx_nudge_responses_type").on(table.nudgeType),
+  ]
+);
+
+export const insertNudgeResponseSchema = createInsertSchema(nudgeResponses).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type NudgeResponse = typeof nudgeResponses.$inferSelect;
+export type InsertNudgeResponse = z.infer<typeof insertNudgeResponseSchema>;

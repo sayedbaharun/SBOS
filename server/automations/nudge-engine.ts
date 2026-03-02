@@ -207,6 +207,49 @@ async function checkEveningReminder(today: string): Promise<NudgeResult | null> 
 }
 
 // ============================================================================
+// CONTEXT-AWARE GATING
+// ============================================================================
+
+/**
+ * Check if currently in a meeting (suppress non-critical nudges during meetings).
+ */
+async function isInMeeting(): Promise<boolean> {
+  try {
+    const { listEvents } = await import("../google-calendar");
+    const now = new Date();
+    const soon = new Date(now.getTime() + 5 * 60 * 1000); // 5min buffer
+    const events = await listEvents(new Date(now.getTime() - 5 * 60 * 1000), soon, 5);
+    return events.some((e: any) => {
+      const start = new Date(e.start?.dateTime || e.start?.date);
+      const end = new Date(e.end?.dateTime || e.end?.date);
+      return now >= start && now <= end;
+    });
+  } catch {
+    return false; // If calendar unavailable, don't suppress
+  }
+}
+
+/**
+ * Check nudge response stats to auto-suppress low-action nudge types.
+ */
+async function getSuppressedNudgeTypes(): Promise<Set<string>> {
+  const suppressed = new Set<string>();
+  try {
+    const stats = await storage.getNudgeResponseStats(14);
+    for (const stat of stats) {
+      // Suppress nudge types with <10% action rate after enough data (>10 nudges)
+      if (stat.total >= 10 && stat.rate < 0.1) {
+        suppressed.add(stat.nudgeType);
+        logger.debug({ nudgeType: stat.nudgeType, rate: stat.rate }, "Nudge type auto-suppressed");
+      }
+    }
+  } catch {
+    // Non-critical
+  }
+  return suppressed;
+}
+
+// ============================================================================
 // ENGINE
 // ============================================================================
 
@@ -234,12 +277,42 @@ async function runNudgeChecks(): Promise<void> {
 
   if (nudges.length === 0) return;
 
+  // Context-aware gating: check if in a meeting
+  const inMeeting = await isInMeeting();
+
+  // Get auto-suppressed nudge types based on response tracking
+  const suppressedTypes = await getSuppressedNudgeTypes();
+
+  // Filter nudges based on context
+  const contextFiltered = nudges.filter(nudge => {
+    // Auto-suppress based on response tracking
+    if (suppressedTypes.has(nudge.type)) return false;
+
+    // During meetings: only allow high-priority nudges
+    if (inMeeting && nudge.priority !== "high") {
+      logger.debug({ type: nudge.type }, "Nudge suppressed — in meeting");
+      return false;
+    }
+
+    return true;
+  });
+
+  if (contextFiltered.length === 0) return;
+
   // Sort by priority (high first)
   const priorityOrder = { high: 0, medium: 1, low: 2 };
-  nudges.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+  contextFiltered.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+
+  // Escalate deadline nudges if deadline is TODAY and task not started
+  for (const nudge of contextFiltered) {
+    if (nudge.type === "task_deadlines" && nudge.priority !== "high") {
+      nudge.priority = "high";
+      nudge.message = "🔥 " + nudge.message;
+    }
+  }
 
   // Send via Telegram (max 2 nudges per cycle to avoid spam)
-  const toSend = nudges.slice(0, 2);
+  const toSend = contextFiltered.slice(0, 2);
 
   try {
     const { sendProactiveMessage } = await import("../channels/channel-manager");
@@ -251,7 +324,20 @@ async function runNudgeChecks(): Promise<void> {
         await sendProactiveMessage("telegram", chatId, nudge.message);
       }
       markNudgeSent(today, nudge.type);
-      logger.info({ type: nudge.type, priority: nudge.priority }, "Nudge sent");
+
+      // Record nudge for response tracking (starts as "ignored", updated when Sayed responds)
+      try {
+        await storage.createNudgeResponse({
+          nudgeType: nudge.type,
+          nudgeMessage: nudge.message,
+          responseType: "ignored",
+          date: today,
+        });
+      } catch {
+        // Non-critical
+      }
+
+      logger.info({ type: nudge.type, priority: nudge.priority, inMeeting }, "Nudge sent");
     }
   } catch (error) {
     logger.error({ error }, "Failed to send nudges");

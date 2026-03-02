@@ -79,6 +79,35 @@ setInterval(() => {
 // ADAPTER
 // ============================================================================
 
+// ============================================================================
+// CONVERSATION CONTEXT WINDOW (multi-turn memory)
+// ============================================================================
+
+const conversationContext = new Map<string, Array<{ role: "user" | "assistant"; text: string; timestamp: number }>>();
+const MAX_CONTEXT_MESSAGES = 10; // last 5 exchanges (5 user + 5 assistant)
+const CONTEXT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+function addToContext(chatId: string, role: "user" | "assistant", text: string): void {
+  if (!conversationContext.has(chatId)) conversationContext.set(chatId, []);
+  const ctx = conversationContext.get(chatId)!;
+  ctx.push({ role, text: text.slice(0, 500), timestamp: Date.now() });
+  // Keep only recent messages
+  while (ctx.length > MAX_CONTEXT_MESSAGES) ctx.shift();
+}
+
+function getContextPrefix(chatId: string): string {
+  const ctx = conversationContext.get(chatId);
+  if (!ctx || ctx.length === 0) return "";
+
+  // Filter out stale messages
+  const now = Date.now();
+  const recent = ctx.filter(m => now - m.timestamp < CONTEXT_TTL_MS);
+  if (recent.length === 0) return "";
+
+  const lines = recent.map(m => `${m.role === "user" ? "User" : "Bot"}: ${m.text}`);
+  return `[Recent conversation context]\n${lines.join("\n")}\n[End context]\n\n`;
+}
+
 class TelegramAdapter implements ChannelAdapter {
   platform = "telegram" as const;
   public bot: Telegraf | null = null;
@@ -401,6 +430,92 @@ class TelegramAdapter implements ChannelAdapter {
       }
     });
 
+    // ---- /emails Command ----
+    this.bot.command("emails", async (ctx) => {
+      try {
+        const { getTodayTriageSummary } = await import("../../agents/email-triage");
+        const summary = await getTodayTriageSummary();
+        await this.sendLongMessage(ctx.chat.id.toString(), summary);
+        this.saveMessageHistory(ctx.chat.id.toString(), "/emails", summary, "command").catch(() => {});
+      } catch (error: any) {
+        await ctx.reply("Email triage not available. Check Gmail configuration.");
+        this.recordError(error.message);
+      }
+    });
+
+    // ---- /email <id> Command ----
+    this.bot.command("email", async (ctx) => {
+      try {
+        const emailId = ctx.message.text.replace(/^\/email\s*/, "").trim();
+        if (!emailId) {
+          await ctx.reply("Usage: /email <email_id>\nUse /emails to see triaged emails.");
+          return;
+        }
+
+        const triage = await storage.getEmailTriageById(emailId);
+        if (!triage) {
+          // Try by email ID
+          const byEmailId = await storage.getEmailTriageByEmailId(emailId);
+          if (!byEmailId) {
+            await ctx.reply("Email not found in triage. Use /emails to see available.");
+            return;
+          }
+          const reply = `📧 ${byEmailId.subject}\nFrom: ${byEmailId.fromAddress}\nClassification: ${byEmailId.classification}\n\n${byEmailId.summary || byEmailId.snippet}\n\nSuggested: ${byEmailId.suggestedAction || "N/A"}`;
+          await ctx.reply(reply);
+          this.saveMessageHistory(ctx.chat.id.toString(), `/email ${emailId}`, reply, "command").catch(() => {});
+          return;
+        }
+
+        const reply = `📧 ${triage.subject}\nFrom: ${triage.fromAddress}\nClassification: ${triage.classification}\n\n${triage.summary || triage.snippet}\n\nSuggested: ${triage.suggestedAction || "N/A"}`;
+        await ctx.reply(reply);
+        this.saveMessageHistory(ctx.chat.id.toString(), `/email ${emailId}`, reply, "command").catch(() => {});
+      } catch (error: any) {
+        await ctx.reply("Failed to fetch email details.");
+        this.recordError(error.message);
+      }
+    });
+
+    // ---- /reply <emailId> <message> Command ----
+    this.bot.command("reply", async (ctx) => {
+      try {
+        const args = ctx.message.text.replace(/^\/reply\s*/, "").trim();
+        const spaceIndex = args.indexOf(" ");
+        if (spaceIndex === -1) {
+          await ctx.reply("Usage: /reply <email_id> <your message>");
+          return;
+        }
+
+        const emailId = args.slice(0, spaceIndex).trim();
+        const replyText = args.slice(spaceIndex + 1).trim();
+
+        // Find the triage entry to get thread context
+        const triage = await storage.getEmailTriageByEmailId(emailId);
+        if (!triage) {
+          await ctx.reply("Email not found. Use /emails to see available.");
+          return;
+        }
+
+        const { sendEmail } = await import("../../gmail");
+        const result = await sendEmail({
+          to: triage.fromAddress,
+          subject: `Re: ${triage.subject}`,
+          body: replyText,
+          threadId: triage.threadId || undefined,
+        });
+
+        if (result.success) {
+          const reply = `✅ Reply sent to ${triage.fromAddress}`;
+          await ctx.reply(reply);
+          this.saveMessageHistory(ctx.chat.id.toString(), `/reply ${emailId}`, reply, "command").catch(() => {});
+        } else {
+          await ctx.reply(`Failed to send reply: ${result.error}`);
+        }
+      } catch (error: any) {
+        await ctx.reply("Failed to send reply. Check Gmail configuration.");
+        this.recordError(error.message);
+      }
+    });
+
     // ---- Text Messages ----
     this.bot.on("text", async (ctx) => {
       try {
@@ -435,14 +550,28 @@ class TelegramAdapter implements ChannelAdapter {
           return;
         }
 
+        const chatId = ctx.chat.id.toString();
+
+        // Add user message to conversation context
+        addToContext(chatId, "user", ctx.message.text);
+
+        // Inject conversation context for multi-turn awareness
         const message = this.normalizeTextMessage(ctx);
+        const contextPrefix = getContextPrefix(chatId);
+        if (contextPrefix) {
+          message.text = contextPrefix + message.text;
+        }
+
         const response = await processIncomingMessage(message);
 
+        // Track assistant response in context
+        addToContext(chatId, "assistant", response);
+
         // Save to message store for history
-        await this.saveMessageHistory(ctx.chat.id.toString(), ctx.message.text, response, "agent_chat");
+        await this.saveMessageHistory(chatId, ctx.message.text, response, "agent_chat");
 
         // Send response (handle long messages)
-        await this.sendLongMessage(ctx.chat.id.toString(), response);
+        await this.sendLongMessage(chatId, response);
 
         this.stats.messagesSent++;
       } catch (error: any) {
@@ -659,6 +788,71 @@ class TelegramAdapter implements ChannelAdapter {
               ctx.chat!.id.toString(),
               `Failed to clip: ${err.message}`
             );
+          }
+        }
+
+        // Nudge response actions
+        if (data.startsWith("nudge:")) {
+          const parts = data.split(":");
+          const action = parts[1]; // acted, snoozed, dismissed
+          const nudgeType = parts[2] || "unknown";
+          await ctx.answerCbQuery(action === "acted" ? "Marked as done" : action === "snoozed" ? "Snoozed 1h" : "Dismissed");
+          await ctx.editMessageReplyMarkup(undefined);
+
+          try {
+            const { getUserDate } = await import("../../utils/dates");
+            await storage.createNudgeResponse({
+              nudgeType,
+              responseType: action as any,
+              date: getUserDate(),
+            });
+          } catch {
+            // Non-critical
+          }
+        }
+
+        // Email actions
+        if (data.startsWith("email:")) {
+          const parts = data.split(":");
+          const action = parts[1]; // flag, archive
+          const emailId = parts[2] || "";
+          await ctx.answerCbQuery(action === "flag" ? "Flagged" : "Archived");
+          await ctx.editMessageReplyMarkup(undefined);
+
+          if (action === "archive" && emailId) {
+            try {
+              const { markAsRead } = await import("../../gmail");
+              await markAsRead([emailId]);
+              await this.sendLongMessage(ctx.chat!.id.toString(), "📧 Email archived (marked as read)");
+            } catch {
+              // Non-critical
+            }
+          }
+        }
+
+        // Task actions
+        if (data.startsWith("task:")) {
+          const parts = data.split(":");
+          const action = parts[1]; // done, snooze
+          const taskId = parts[2] || "";
+          await ctx.answerCbQuery(action === "done" ? "Task completed" : "Snoozed to tomorrow");
+          await ctx.editMessageReplyMarkup(undefined);
+
+          if (action === "done" && taskId) {
+            try {
+              await storage.updateTask(taskId, { status: "completed", completedAt: new Date() } as any);
+              await this.sendLongMessage(ctx.chat!.id.toString(), "✅ Task marked as done!");
+            } catch {
+              // Non-critical
+            }
+          } else if (action === "snooze" && taskId) {
+            try {
+              const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+              await storage.updateTask(taskId, { focusDate: tomorrow } as any);
+              await this.sendLongMessage(ctx.chat!.id.toString(), `📅 Task moved to ${tomorrow}`);
+            } catch {
+              // Non-critical
+            }
           }
         }
       } catch (error: any) {

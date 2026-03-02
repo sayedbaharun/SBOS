@@ -75,8 +75,29 @@ export async function executeScheduledJob(
 // ============================================================================
 
 /**
+ * Daily Intelligence Synthesis — runs at 8:45am Dubai, before morning briefing.
+ * Pulls calendar, tasks, email, life context, yesterday's outcomes.
+ * Synthesizes cross-domain insights and sends to Telegram.
+ */
+registerJobHandler("daily_intelligence", async (_agentId: string, agentSlug: string) => {
+  const { runDailyIntelligence } = await import("./intelligence-synthesizer");
+  const result = await runDailyIntelligence();
+
+  logger.info(
+    {
+      agentSlug,
+      conflicts: result.conflicts.length,
+      priorities: result.priorities.length,
+      errors: result.errors.length,
+    },
+    "Daily intelligence synthesis completed"
+  );
+});
+
+/**
  * Daily Briefing — Chief of Staff generates morning briefing.
  * Gathers system-wide activity, tasks, and produces an actionable summary.
+ * Now includes daily intelligence synthesis if available.
  */
 registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) => {
   const database = await getDb();
@@ -140,8 +161,26 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
     outcomesPrompt = "\n\nEnd the briefing by asking: 'What are your top 3 outcomes for today?'";
   }
 
+  // Pull intelligence synthesis if available
+  let intelligenceSection = "";
+  try {
+    const { getLatestIntelligence } = await import("./intelligence-synthesizer");
+    const intel = await getLatestIntelligence();
+    if (intel) {
+      intelligenceSection = `\n\n## Cross-Domain Intelligence\n${intel.synthesis}`;
+      if (intel.conflicts.length > 0) {
+        intelligenceSection += `\n\nConflicts detected: ${intel.conflicts.map((c: any) => c.description).join("; ")}`;
+      }
+      if (intel.priorities.length > 0) {
+        intelligenceSection += `\n\nTop priorities: ${intel.priorities.map((p: any) => p.item).join("; ")}`;
+      }
+    }
+  } catch {
+    // Intelligence synthesis not available — proceed without
+  }
+
   // Have the agent synthesize the briefing with personality
-  const prompt = `Generate your daily briefing for the founder. Here is the data:\n\n${briefingData.report}${activitySummary}${blockerSection}\n\nPresent this as your daily briefing, with your personality and insights. Highlight what matters most today. Flag any blockers prominently.${outcomesPrompt}`;
+  const prompt = `Generate your daily briefing for the founder. Here is the data:\n\n${briefingData.report}${activitySummary}${blockerSection}${intelligenceSection}\n\nPresent this as your daily briefing, with your personality and insights. Highlight what matters most today. Flag any blockers prominently.${outcomesPrompt}`;
 
   const result = await executeAgentChat(agentSlug, prompt, "scheduler");
 
@@ -782,6 +821,34 @@ export async function runPipelineHealthCheck(): Promise<PipelineHealthResult> {
     alerts,
   };
 }
+
+/**
+ * Email Triage — Classify unread emails and send Telegram digest.
+ * Runs 3x/day: 8am, 1pm, 6pm Dubai.
+ */
+registerJobHandler("email_triage", async (_agentId: string, agentSlug: string) => {
+  const { runEmailTriage } = await import("./email-triage");
+  const result = await runEmailTriage();
+
+  logger.info(
+    { agentSlug, triaged: result.triaged, urgent: result.urgent, errors: result.errors.length },
+    "Email triage completed"
+  );
+});
+
+/**
+ * Meeting Prep — Check for upcoming meetings and prepare briefs.
+ * Runs every 15 minutes, triggers 30min before meetings with external attendees.
+ */
+registerJobHandler("meeting_prep", async (_agentId: string, agentSlug: string) => {
+  const { checkAndPrepMeetings } = await import("./meeting-prep");
+  const result = await checkAndPrepMeetings();
+
+  logger.info(
+    { agentSlug, prepped: result.prepped, skipped: result.skipped },
+    "Meeting prep check completed"
+  );
+});
 
 /**
  * Inbox Triage — Process unclarified captures and suggest actions.

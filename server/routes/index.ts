@@ -50,6 +50,7 @@ import sessionRoutes from "./sessions";
 import externalRoutes from "./external";
 import researchRoutes from "./research";
 import reviewRoutes from "./review";
+import intelligenceRoutes from "./intelligence";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
@@ -233,6 +234,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/calendar', calendarRoutes);
   app.use('/api/drive', driveRoutes);
   app.use('/api/ticktick', ticktickRoutes);
+
+  // ============================================================================
+  // JARVIS INTELLIGENCE (Cross-Domain Intelligence Engine)
+  // Daily synthesis, email triage, meeting prep, nudge analytics
+  // ============================================================================
+  app.use('/api/intelligence', intelligenceRoutes);
 
   // ============================================================================
   // LIFE MANAGEMENT

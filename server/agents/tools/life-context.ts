@@ -136,6 +136,63 @@ export async function buildLifeContext(): Promise<string> {
           : "")
     );
 
+    // Calendar events (cross-domain enrichment)
+    try {
+      const { listEvents } = await import("../../google-calendar");
+      const dayStart = new Date();
+      const dayEnd = new Date();
+      dayEnd.setHours(23, 59, 59, 999);
+      const events = await listEvents(dayStart, dayEnd, 10);
+      if (events.length > 0) {
+        sections.push("### Calendar");
+        for (const e of events.slice(0, 5)) {
+          const time = e.start?.dateTime
+            ? new Date(e.start.dateTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dubai" })
+            : "all-day";
+          sections.push(`- ${time}: ${e.summary || "Untitled"}`);
+        }
+        if (events.length > 5) sections.push(`  ...and ${events.length - 5} more`);
+      }
+    } catch {
+      // Calendar not configured — skip
+    }
+
+    // Unread email count (cross-domain enrichment)
+    try {
+      const { getUnreadCount } = await import("../../gmail");
+      const unreadCount = await getUnreadCount();
+      if (unreadCount > 0) {
+        sections.push(`### Email\nUnread: ${unreadCount}`);
+      }
+    } catch {
+      // Gmail not configured — skip
+    }
+
+    // Active ventures summary
+    try {
+      const ventures = await storage.getVentures();
+      const active = ventures.filter((v: any) => v.status === "ongoing" || v.status === "building");
+      if (active.length > 0) {
+        sections.push("### Active Ventures");
+        sections.push(active.map((v: any) => `- ${v.name} (${v.status})`).join("\n"));
+      }
+    } catch {
+      // Non-critical
+    }
+
+    // Pending deliverables needing review
+    try {
+      const getDeliverables = (storage as any).getAgentDeliverables;
+      if (typeof getDeliverables === "function") {
+        const deliverables = await getDeliverables.call(storage, { status: "needs_review" });
+        if (deliverables && deliverables.length > 0) {
+          sections.push(`### Pending Reviews\n${deliverables.length} deliverable(s) awaiting your review`);
+        }
+      }
+    } catch {
+      // Non-critical — method may not exist
+    }
+
     const result = sections.join("\n\n");
 
     // Cache the result

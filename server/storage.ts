@@ -160,6 +160,18 @@ import {
   type EntityRelation,
   type InsertEntityRelation,
   entityRelations,
+  type DailyIntelligence,
+  type InsertDailyIntelligence,
+  dailyIntelligence,
+  type EmailTriage,
+  type InsertEmailTriage,
+  emailTriage,
+  type MeetingPrep,
+  type InsertMeetingPrep,
+  meetingPreps,
+  type NudgeResponse,
+  type InsertNudgeResponse,
+  nudgeResponses,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { eq, desc, and, or, gte, lte, not, inArray, like, sql, asc, isNull } from "drizzle-orm";
@@ -516,6 +528,29 @@ export interface IStorage {
   createResearchSubmission(data: InsertResearchSubmission): Promise<ResearchSubmission>;
   updateResearchSubmission(id: string, data: Partial<ResearchSubmission>): Promise<ResearchSubmission | undefined>;
   deleteResearchSubmission(id: string): Promise<void>;
+
+  // Jarvis Upgrade — Cross-Domain Intelligence
+  getDailyIntelligence(date: string): Promise<DailyIntelligence | undefined>;
+  getDailyIntelligenceHistory(limit?: number): Promise<DailyIntelligence[]>;
+  createDailyIntelligence(data: InsertDailyIntelligence): Promise<DailyIntelligence>;
+
+  // Email Triage
+  getEmailTriage(options: { date?: string; classification?: string; limit?: number }): Promise<EmailTriage[]>;
+  getEmailTriageById(id: string): Promise<EmailTriage | undefined>;
+  getEmailTriageByEmailId(emailId: string): Promise<EmailTriage | undefined>;
+  createEmailTriage(data: InsertEmailTriage): Promise<EmailTriage>;
+  updateEmailTriage(id: string, data: Partial<EmailTriage>): Promise<EmailTriage | undefined>;
+
+  // Meeting Preps
+  getMeetingPrep(eventId: string): Promise<MeetingPrep | undefined>;
+  getMeetingPreps(options: { date?: string; limit?: number }): Promise<MeetingPrep[]>;
+  createMeetingPrep(data: InsertMeetingPrep): Promise<MeetingPrep>;
+  updateMeetingPrep(id: string, data: Partial<MeetingPrep>): Promise<MeetingPrep | undefined>;
+
+  // Nudge Responses
+  getNudgeResponses(options: { date?: string; nudgeType?: string; limit?: number }): Promise<NudgeResponse[]>;
+  createNudgeResponse(data: InsertNudgeResponse): Promise<NudgeResponse>;
+  getNudgeResponseStats(days?: number): Promise<{ nudgeType: string; total: number; acted: number; rate: number }[]>;
 }
 
 // PostgreSQL Storage Implementation
@@ -5142,6 +5177,150 @@ export class DBStorage implements IStorage {
 
   async deleteResearchSubmission(id: string): Promise<void> {
     await this.db.delete(researchSubmissions).where(eq(researchSubmissions.id, id));
+  }
+
+  // ============================================================================
+  // JARVIS UPGRADE — Cross-Domain Intelligence
+  // ============================================================================
+
+  async getDailyIntelligence(date: string): Promise<DailyIntelligence | undefined> {
+    const [row] = await this.db.select().from(dailyIntelligence)
+      .where(eq(dailyIntelligence.date, date)).limit(1);
+    return row;
+  }
+
+  async getDailyIntelligenceHistory(limit: number = 7): Promise<DailyIntelligence[]> {
+    return await this.db.select().from(dailyIntelligence)
+      .orderBy(desc(dailyIntelligence.date))
+      .limit(limit);
+  }
+
+  async createDailyIntelligence(data: InsertDailyIntelligence): Promise<DailyIntelligence> {
+    const [row] = await this.db.insert(dailyIntelligence)
+      .values(data as any).returning();
+    return row;
+  }
+
+  // Email Triage
+  async getEmailTriage(options: { date?: string; classification?: string; limit?: number }): Promise<EmailTriage[]> {
+    const conditions: any[] = [];
+    if (options.date) {
+      const dayStart = new Date(options.date + "T00:00:00Z");
+      const dayEnd = new Date(options.date + "T23:59:59Z");
+      conditions.push(gte(emailTriage.triagedAt, dayStart));
+      conditions.push(lte(emailTriage.triagedAt, dayEnd));
+    }
+    if (options.classification) {
+      conditions.push(eq(emailTriage.classification, options.classification as any));
+    }
+    const query = this.db.select().from(emailTriage)
+      .orderBy(desc(emailTriage.triagedAt))
+      .limit(options.limit || 50);
+    if (conditions.length > 0) {
+      return await query.where(and(...conditions));
+    }
+    return await query;
+  }
+
+  async getEmailTriageById(id: string): Promise<EmailTriage | undefined> {
+    const [row] = await this.db.select().from(emailTriage)
+      .where(eq(emailTriage.id, id)).limit(1);
+    return row;
+  }
+
+  async getEmailTriageByEmailId(emailId: string): Promise<EmailTriage | undefined> {
+    const [row] = await this.db.select().from(emailTriage)
+      .where(eq(emailTriage.emailId, emailId)).limit(1);
+    return row;
+  }
+
+  async createEmailTriage(data: InsertEmailTriage): Promise<EmailTriage> {
+    const [row] = await this.db.insert(emailTriage)
+      .values(data as any).returning();
+    return row;
+  }
+
+  async updateEmailTriage(id: string, data: Partial<EmailTriage>): Promise<EmailTriage | undefined> {
+    const [row] = await this.db.update(emailTriage)
+      .set(data as any)
+      .where(eq(emailTriage.id, id)).returning();
+    return row;
+  }
+
+  // Meeting Preps
+  async getMeetingPrep(eventId: string): Promise<MeetingPrep | undefined> {
+    const [row] = await this.db.select().from(meetingPreps)
+      .where(eq(meetingPreps.eventId, eventId)).limit(1);
+    return row;
+  }
+
+  async getMeetingPreps(options: { date?: string; limit?: number }): Promise<MeetingPrep[]> {
+    const conditions: any[] = [];
+    if (options.date) {
+      const dayStart = new Date(options.date + "T00:00:00Z");
+      const dayEnd = new Date(options.date + "T23:59:59Z");
+      conditions.push(gte(meetingPreps.eventStart, dayStart));
+      conditions.push(lte(meetingPreps.eventStart, dayEnd));
+    }
+    const query = this.db.select().from(meetingPreps)
+      .orderBy(desc(meetingPreps.eventStart))
+      .limit(options.limit || 20);
+    if (conditions.length > 0) {
+      return await query.where(and(...conditions));
+    }
+    return await query;
+  }
+
+  async createMeetingPrep(data: InsertMeetingPrep): Promise<MeetingPrep> {
+    const [row] = await this.db.insert(meetingPreps)
+      .values(data as any).returning();
+    return row;
+  }
+
+  async updateMeetingPrep(id: string, data: Partial<MeetingPrep>): Promise<MeetingPrep | undefined> {
+    const [row] = await this.db.update(meetingPreps)
+      .set(data as any)
+      .where(eq(meetingPreps.id, id)).returning();
+    return row;
+  }
+
+  // Nudge Responses
+  async getNudgeResponses(options: { date?: string; nudgeType?: string; limit?: number }): Promise<NudgeResponse[]> {
+    const conditions: any[] = [];
+    if (options.date) conditions.push(eq(nudgeResponses.date, options.date));
+    if (options.nudgeType) conditions.push(eq(nudgeResponses.nudgeType, options.nudgeType));
+    const query = this.db.select().from(nudgeResponses)
+      .orderBy(desc(nudgeResponses.createdAt))
+      .limit(options.limit || 50);
+    if (conditions.length > 0) {
+      return await query.where(and(...conditions));
+    }
+    return await query;
+  }
+
+  async createNudgeResponse(data: InsertNudgeResponse): Promise<NudgeResponse> {
+    const [row] = await this.db.insert(nudgeResponses)
+      .values(data as any).returning();
+    return row;
+  }
+
+  async getNudgeResponseStats(days: number = 14): Promise<{ nudgeType: string; total: number; acted: number; rate: number }[]> {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const rows = await this.db.select({
+      nudgeType: nudgeResponses.nudgeType,
+      total: sql<number>`COUNT(*)::int`,
+      acted: sql<number>`COUNT(*) FILTER (WHERE ${nudgeResponses.responseType} = 'acted')::int`,
+    })
+      .from(nudgeResponses)
+      .where(gte(nudgeResponses.date, cutoff))
+      .groupBy(nudgeResponses.nudgeType);
+
+    return rows.map(r => ({
+      nudgeType: r.nudgeType,
+      total: r.total,
+      acted: r.acted,
+      rate: r.total > 0 ? r.acted / r.total : 0,
+    }));
   }
 
 }
