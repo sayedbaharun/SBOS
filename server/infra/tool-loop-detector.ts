@@ -21,6 +21,11 @@ export interface LoopDetectionResult {
   message?: string;
   /** Number of repetitions detected */
   count?: number;
+  guidance?: {
+    explanation: string;
+    suggestion: string;
+    pattern_detected: string;
+  };
 }
 
 interface ToolCallRecord {
@@ -125,6 +130,12 @@ export class ToolLoopDetector {
   private detectGenericRepeat(callHash: string): LoopDetectionResult {
     const count = this.history.filter((h) => h.callHash === callHash).length;
 
+    const guidance = {
+      explanation: "The same tool is being called with identical arguments repeatedly, producing no new information.",
+      suggestion: "Try a different approach or provide your final response based on what you already have.",
+      pattern_detected: "generic_repeat",
+    };
+
     if (count >= THRESHOLDS.repeatCircuitBreaker) {
       return {
         detected: true,
@@ -132,6 +143,7 @@ export class ToolLoopDetector {
         detector: "generic_repeat",
         message: `Same tool call repeated ${count} times — circuit breaker triggered`,
         count,
+        guidance,
       };
     }
     if (count >= THRESHOLDS.repeatCritical) {
@@ -141,6 +153,7 @@ export class ToolLoopDetector {
         detector: "generic_repeat",
         message: `Same tool call repeated ${count} times`,
         count,
+        guidance,
       };
     }
     if (count >= THRESHOLDS.repeatWarning) {
@@ -150,6 +163,7 @@ export class ToolLoopDetector {
         detector: "generic_repeat",
         message: `Same tool call repeated ${count} times`,
         count,
+        guidance,
       };
     }
     return { detected: false };
@@ -161,6 +175,12 @@ export class ToolLoopDetector {
     // Full hash includes result — identical full hashes mean same call + same result
     const count = this.history.filter((h) => h.fullHash === fullHash).length;
 
+    const guidance = {
+      explanation: "A resource is returning identical results on each poll — no progress is being made.",
+      suggestion: "Use the data you already have instead of polling for changes.",
+      pattern_detected: "poll_no_progress",
+    };
+
     if (count >= THRESHOLDS.pollCritical) {
       return {
         detected: true,
@@ -168,6 +188,7 @@ export class ToolLoopDetector {
         detector: "known_poll_no_progress",
         message: `Polling tool returned identical results ${count} times`,
         count,
+        guidance,
       };
     }
     if (count >= THRESHOLDS.pollWarning) {
@@ -177,6 +198,7 @@ export class ToolLoopDetector {
         detector: "known_poll_no_progress",
         message: `Polling tool returned identical results ${count} times`,
         count,
+        guidance,
       };
     }
     return { detected: false };
@@ -213,6 +235,12 @@ export class ToolLoopDetector {
       maxCycles = cycles;
     }
 
+    const guidance = {
+      explanation: "Two tools are being called in alternating fashion without convergence.",
+      suggestion: "Synthesize what you know from both tools and provide your response.",
+      pattern_detected: "ping_pong",
+    };
+
     if (maxCycles >= THRESHOLDS.pingPongCritical) {
       return {
         detected: true,
@@ -220,6 +248,7 @@ export class ToolLoopDetector {
         detector: "ping_pong",
         message: `Ping-pong pattern detected: ${maxCycles} cycles of alternating tool calls`,
         count: maxCycles,
+        guidance,
       };
     }
     if (maxCycles >= THRESHOLDS.pingPongWarning) {
@@ -229,6 +258,7 @@ export class ToolLoopDetector {
         detector: "ping_pong",
         message: `Ping-pong pattern detected: ${maxCycles} cycles of alternating tool calls`,
         count: maxCycles,
+        guidance,
       };
     }
     return { detected: false };

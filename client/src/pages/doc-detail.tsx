@@ -270,18 +270,21 @@ export default function DocDetail() {
               </div>
             )}
 
-            {doc.tags && doc.tags.length > 0 && (
-              <div className="col-span-2">
-                <p className="text-sm font-medium text-muted-foreground mb-2">Tags</p>
-                <div className="flex flex-wrap gap-2">
-                  {doc.tags.map((tag) => (
-                    <Badge key={tag} variant="outline">
-                      {tag}
-                    </Badge>
-                  ))}
+            {doc.tags && (typeof doc.tags === 'string' ? doc.tags.length > 0 : doc.tags.length > 0) && (() => {
+              const tagsArr = Array.isArray(doc.tags) ? doc.tags : (typeof doc.tags === 'string' ? doc.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : []);
+              return tagsArr.length > 0 ? (
+                <div className="col-span-2">
+                  <p className="text-sm font-medium text-muted-foreground mb-2">Tags</p>
+                  <div className="flex flex-wrap gap-2">
+                    {tagsArr.map((tag: string) => (
+                      <Badge key={tag} variant="outline">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              ) : null;
+            })()}
 
             <div>
               <p className="text-sm font-medium text-muted-foreground mb-1">Created</p>

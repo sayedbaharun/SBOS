@@ -1395,7 +1395,7 @@ export async function executeAgentChat(
           toolResults.push({
             role: "tool",
             tool_call_id: toolCall.id,
-            content: `[SYSTEM] Tool loop detected: ${loopCheck.message}. You must provide your final response now without making more tool calls.`,
+            content: `[SYSTEM] Tool loop detected: ${loopCheck.message}. You must provide your final response now without making more tool calls.${loopCheck.guidance ? `\nExplanation: ${loopCheck.guidance.explanation}\nSuggestion: ${loopCheck.guidance.suggestion}` : ''}`,
           });
           conversationMessages.push(...toolResults);
           // Force one more turn to get a final response, but with no tools
@@ -1421,7 +1421,7 @@ export async function executeAgentChat(
           toolResults[toolResults.length - 1] = {
             role: "tool",
             tool_call_id: toolCall.id,
-            content: toolResult.result + `\n\n[SYSTEM WARNING] ${loopCheck.message}. Try a different approach or provide your final response.`,
+            content: toolResult.result + `\n\n[SYSTEM WARNING] ${loopCheck.message}. Try a different approach or provide your final response.${loopCheck.guidance ? `\nExplanation: ${loopCheck.guidance.explanation}\nSuggestion: ${loopCheck.guidance.suggestion}` : ''}`,
           };
         }
       }

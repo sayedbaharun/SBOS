@@ -165,6 +165,13 @@ router.post("/search", async (req: Request, res: Response) => {
       query,
       results,
       count: results.length,
+      _search_meta: {
+        method: 'hybrid',
+        vector_weight: vectorWeight,
+        keyword_weight: Number((1 - vectorWeight).toFixed(2)),
+        result_count: results.length,
+        top_relevance: results.length > 0 ? (results[0] as unknown as Record<string, unknown>).score ?? null : null,
+      },
     });
   } catch (error) {
     logger.error({ error }, "Hybrid search failed");

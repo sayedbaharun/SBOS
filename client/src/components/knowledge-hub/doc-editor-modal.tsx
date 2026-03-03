@@ -139,7 +139,8 @@ export function DocEditorModal({ open, onClose, doc }: DocEditorModalProps) {
 
   useEffect(() => {
     if (doc) {
-      setFormData(doc);
+      const normalizedTags = Array.isArray(doc.tags) ? doc.tags : (typeof doc.tags === 'string' ? doc.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : []);
+      setFormData({ ...doc, tags: normalizedTags });
     } else {
       setFormData({
         title: "",
