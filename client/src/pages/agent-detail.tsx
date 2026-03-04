@@ -38,6 +38,13 @@ import {
   History,
   Database,
 } from "lucide-react";
+import {
+  getAgentIdentity,
+  ROLE_DOT,
+  ROLE_TEXT,
+  TIER_LABELS,
+  TIER_COLORS,
+} from "@/lib/agent-identity";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -99,34 +106,6 @@ interface AgentMemory {
 }
 
 // ── Constants ──────────────────────────────────────────
-
-const ROLE_DOT: Record<string, string> = {
-  executive: "bg-purple-500",
-  manager: "bg-blue-500",
-  specialist: "bg-emerald-500",
-  worker: "bg-amber-500",
-};
-
-const ROLE_TEXT: Record<string, string> = {
-  executive: "text-purple-600 dark:text-purple-400",
-  manager: "text-blue-600 dark:text-blue-400",
-  specialist: "text-emerald-600 dark:text-emerald-400",
-  worker: "text-amber-600 dark:text-amber-400",
-};
-
-const TIER_LABELS: Record<string, string> = {
-  top: "Opus",
-  mid: "Sonnet",
-  fast: "Haiku",
-  auto: "Auto",
-};
-
-const TIER_COLORS: Record<string, string> = {
-  top: "text-purple-500",
-  mid: "text-blue-500",
-  fast: "text-emerald-500",
-  auto: "text-muted-foreground",
-};
 
 const TASK_STATUS_ICON: Record<string, React.ElementType> = {
   pending: Circle,
@@ -546,6 +525,10 @@ function TasksTab({ slug }: { slug: string }) {
       if (!res.ok) return [];
       return res.json();
     },
+    refetchInterval: (query) => {
+      const taskList = query.state.data as AgentTask[] | undefined;
+      return taskList?.some((t) => t.status === "in_progress") ? 5000 : false;
+    },
   });
 
   if (isLoading) {
@@ -592,6 +575,19 @@ function TasksTab({ slug }: { slug: string }) {
               )}
               <div className="flex items-center gap-2 mt-1.5 text-[10px] text-muted-foreground">
                 <span className="capitalize">{task.status.replace(/_/g, " ")}</span>
+                {task.status === "in_progress" && (
+                  <>
+                    <span className="text-border">|</span>
+                    <span className="text-blue-500 font-medium">
+                      {(() => {
+                        const ms = Date.now() - new Date(task.createdAt).getTime();
+                        const m = Math.floor(ms / 60000);
+                        if (m < 60) return `${m}m`;
+                        return `${Math.floor(m / 60)}h ${m % 60}m`;
+                      })()}
+                    </span>
+                  </>
+                )}
                 {task.priority && (
                   <>
                     <span className="text-border">|</span>
@@ -852,9 +848,14 @@ export default function AgentDetailPage() {
 
       {/* ── Agent Header ── */}
       <div className="flex items-start gap-4">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/80 flex-shrink-0">
-          <Bot className="h-7 w-7 text-muted-foreground" />
-        </div>
+        {(() => {
+          const { icon: AgentIconComp, color: agentColor, bg: agentBg } = getAgentIdentity(agent.slug);
+          return (
+            <div className={`flex h-14 w-14 items-center justify-center rounded-2xl ${agentBg} flex-shrink-0`}>
+              <AgentIconComp className={`h-7 w-7 ${agentColor}`} />
+            </div>
+          );
+        })()}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-xl font-semibold tracking-tight">{agent.name}</h1>

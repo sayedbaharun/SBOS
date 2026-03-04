@@ -605,6 +605,40 @@ router.get("/admin/dead-letters", async (req: Request, res: Response) => {
   }
 });
 
+// Currently running tasks and sub-agent runs
+router.get("/admin/running", async (req: Request, res: Response) => {
+  try {
+    const database = await getDb();
+    const { storage } = await import("../storage");
+
+    const [inProgressTasks, runningSubAgents] = await Promise.all([
+      database
+        .select({
+          id: agentTasks.id,
+          title: agentTasks.title,
+          status: agentTasks.status,
+          assignedTo: agentTasks.assignedTo,
+          createdAt: agentTasks.createdAt,
+          agentName: agents.name,
+          agentSlug: agents.slug,
+        })
+        .from(agentTasks)
+        .leftJoin(agents, eq(agentTasks.assignedTo, agents.id))
+        .where(eq(agentTasks.status, "in_progress")),
+      storage.getSubAgentRuns({ status: "running" }),
+    ]);
+
+    res.json({
+      agentTasks: inProgressTasks,
+      subAgentRuns: runningSubAgents,
+      total: inProgressTasks.length + runningSubAgents.length,
+    });
+  } catch (error) {
+    logger.error({ error }, "Error fetching running tasks");
+    res.status(500).json({ error: "Failed to fetch running tasks" });
+  }
+});
+
 // Message queue stats (Project Ironclad Phase 1)
 router.get("/admin/queue-stats", async (req: Request, res: Response) => {
   try {

@@ -34,10 +34,18 @@ import {
   FileText,
   Zap,
   ChevronDown,
-  CircleDot,
   RefreshCw,
+  User,
+  Loader2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import {
+  getAgentIdentity,
+  ROLE_DOT,
+  ROLE_TEXT,
+  TIER_LABELS,
+  TIER_COLORS,
+} from "@/lib/agent-identity";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -84,37 +92,24 @@ interface ScheduleJob {
   errorCount: number;
 }
 
-type StatSheetType = "agents" | "delegations" | "schedules" | "links" | null;
+interface RunningData {
+  agentTasks: Array<{
+    id: string;
+    title: string;
+    agentName: string | null;
+    agentSlug: string | null;
+    createdAt: string;
+  }>;
+  subAgentRuns: Array<{
+    id: string;
+    name: string;
+    task: string;
+    startedAt: string;
+  }>;
+  total: number;
+}
 
-// ── Constants ──────────────────────────────────────────
-
-const ROLE_DOT: Record<string, string> = {
-  executive: "bg-purple-500",
-  manager: "bg-blue-500",
-  specialist: "bg-emerald-500",
-  worker: "bg-amber-500",
-};
-
-const ROLE_TEXT: Record<string, string> = {
-  executive: "text-purple-600 dark:text-purple-400",
-  manager: "text-blue-600 dark:text-blue-400",
-  specialist: "text-emerald-600 dark:text-emerald-400",
-  worker: "text-amber-600 dark:text-amber-400",
-};
-
-const TIER_LABELS: Record<string, string> = {
-  top: "Opus",
-  mid: "Sonnet",
-  fast: "Haiku",
-  auto: "Auto",
-};
-
-const TIER_COLORS: Record<string, string> = {
-  top: "text-purple-500",
-  mid: "text-blue-500",
-  fast: "text-emerald-500",
-  auto: "text-muted-foreground",
-};
+type StatSheetType = "agents" | "delegations" | "schedules" | "links" | "running" | null;
 
 // ── Helpers ────────────────────────────────────────────
 
@@ -135,6 +130,32 @@ function buildOrgTree(agents: Agent[]): OrgNode[] {
   return roots;
 }
 
+function formatElapsed(startedAt: string): string {
+  const ms = Date.now() - new Date(startedAt).getTime();
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+// ── Agent Icon ────────────────────────────────────────
+
+function AgentIcon({ slug, size = "sm" }: { slug: string; size?: "sm" | "md" | "lg" }) {
+  const { icon: Icon, color, bg } = getAgentIdentity(slug);
+  const sizeMap = {
+    sm: { container: "h-8 w-8", icon: "h-4 w-4" },
+    md: { container: "h-10 w-10", icon: "h-5 w-5" },
+    lg: { container: "h-14 w-14", icon: "h-7 w-7" },
+  };
+  const s = sizeMap[size];
+  return (
+    <div className={`flex ${s.container} flex-shrink-0 items-center justify-center rounded-full ${bg}`}>
+      <Icon className={`${s.icon} ${color}`} />
+    </div>
+  );
+}
+
 // ── Stat Card ──────────────────────────────────────────
 
 function StatCard({
@@ -143,12 +164,14 @@ function StatCard({
   icon: Icon,
   color,
   onClick,
+  pulse,
 }: {
   label: string;
   value: number | string;
   icon: React.ElementType;
   color: string;
   onClick?: () => void;
+  pulse?: boolean;
 }) {
   return (
     <div
@@ -158,10 +181,16 @@ function StatCard({
       }`}
     >
       <div
-        className={`flex h-9 w-9 items-center justify-center rounded-lg ${color} bg-opacity-10`}
+        className={`relative flex h-9 w-9 items-center justify-center rounded-lg ${color} bg-opacity-10`}
         style={{ backgroundColor: `color-mix(in srgb, currentColor 10%, transparent)` }}
       >
         <Icon className={`h-4.5 w-4.5 ${color}`} />
+        {pulse && (
+          <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+          </span>
+        )}
       </div>
       <div>
         <p className="text-xl font-semibold tracking-tight">{value}</p>
@@ -171,7 +200,7 @@ function StatCard({
   );
 }
 
-// ── Org Tree Node ──────────────────────────────────────
+// ── Org Tree Node (mobile fallback) ─────────────────────
 
 function OrgTreeNode({
   node,
@@ -192,7 +221,6 @@ function OrgTreeNode({
         onClick={() => onSelect(agent.slug)}
         className="group flex items-center gap-3 rounded-lg px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-all duration-150"
       >
-        {/* Expand toggle */}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -211,12 +239,8 @@ function OrgTreeNode({
           />
         </button>
 
-        {/* Avatar */}
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-muted/80">
-          <Bot className="h-4 w-4 text-muted-foreground" />
-        </div>
+        <AgentIcon slug={agent.slug} size="sm" />
 
-        {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium truncate">{agent.name}</span>
@@ -236,7 +260,6 @@ function OrgTreeNode({
           </div>
         </div>
 
-        {/* Meta counts */}
         <div className="hidden sm:flex items-center gap-3 text-[11px] text-muted-foreground">
           {agent.availableTools.length > 0 && (
             <span className="flex items-center gap-1">
@@ -255,7 +278,6 @@ function OrgTreeNode({
         <ChevronRight className="h-4 w-4 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity" />
       </div>
 
-      {/* Children */}
       {hasChildren && isExpanded && (
         <div className="mt-0.5">
           {node.children.map((child) => (
@@ -268,6 +290,173 @@ function OrgTreeNode({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Org Chart Node (desktop flowchart) ──────────────────
+
+function OrgChartNode({
+  agent,
+  onSelect,
+}: {
+  agent: Agent;
+  onSelect: (slug: string) => void;
+}) {
+  const { icon: Icon, color, bg } = getAgentIdentity(agent.slug);
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            onClick={() => onSelect(agent.slug)}
+            className="group relative flex flex-col items-center gap-1.5 cursor-pointer"
+          >
+            <div className={`flex flex-col items-center gap-1.5 rounded-xl border border-border/50 bg-card px-3 py-2.5 shadow-sm hover:border-border hover:shadow-md transition-all duration-200 min-w-[100px]`}>
+              <div className={`flex h-9 w-9 items-center justify-center rounded-full ${bg}`}>
+                <Icon className={`h-4.5 w-4.5 ${color}`} />
+              </div>
+              <div className="text-center">
+                <p className="text-[12px] font-medium leading-tight whitespace-nowrap">{agent.name}</p>
+                <div className="flex items-center justify-center gap-1 mt-0.5">
+                  <span className={`inline-flex h-1.5 w-1.5 rounded-full ${ROLE_DOT[agent.role] || "bg-zinc-400"}`} />
+                  <span className={`text-[10px] capitalize ${ROLE_TEXT[agent.role] || "text-muted-foreground"}`}>
+                    {agent.role}
+                  </span>
+                </div>
+              </div>
+              <span
+                className={`absolute top-1.5 right-1.5 inline-flex h-1.5 w-1.5 rounded-full ${
+                  agent.isActive ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"
+                }`}
+              />
+            </div>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs space-y-1">
+          <p className="font-medium">@{agent.slug}</p>
+          <p>{agent.availableTools.length} tools &middot; {TIER_LABELS[agent.modelTier] || agent.modelTier}</p>
+          {agent.schedule && Object.keys(agent.schedule).length > 0 && (
+            <p>{Object.keys(agent.schedule).length} scheduled jobs</p>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+// ── Org Chart View (desktop) ────────────────────────────
+
+function OrgChartView({
+  agents,
+  orgTree,
+  onSelect,
+}: {
+  agents: Agent[];
+  orgTree: OrgNode[];
+  onSelect: (slug: string) => void;
+}) {
+  // Separate executives (roots) from their children
+  const executives = orgTree;
+
+  // Collect all children of all executives into groups by parent
+  const childrenByParent = new Map<string, OrgNode[]>();
+  for (const exec of executives) {
+    if (exec.children.length > 0) {
+      childrenByParent.set(exec.agent.id, exec.children);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border/50 bg-card p-6 overflow-x-auto">
+      <div className="flex flex-col items-center gap-0 min-w-fit">
+        {/* Virtual root: Sayed */}
+        <div className="flex flex-col items-center">
+          <div className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-foreground/20 bg-foreground/5 px-4 py-3 shadow-sm min-w-[100px]">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-foreground/10">
+              <User className="h-4.5 w-4.5 text-foreground" />
+            </div>
+            <div className="text-center">
+              <p className="text-[12px] font-semibold leading-tight">Sayed</p>
+              <p className="text-[10px] text-muted-foreground">Founder</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Vertical connector from Sayed down */}
+        {executives.length > 0 && (
+          <div className="w-px h-6 bg-border" />
+        )}
+
+        {/* Horizontal connector bar */}
+        {executives.length > 1 && (
+          <div className="relative flex items-center justify-center w-full">
+            <div
+              className="h-px bg-border"
+              style={{
+                width: `calc(${(executives.length - 1)} * 140px)`,
+              }}
+            />
+          </div>
+        )}
+
+        {/* Executive level */}
+        {executives.length > 0 && (
+          <div className="flex items-start gap-0">
+            {executives.map((exec, i) => (
+              <div key={exec.agent.id} className="flex flex-col items-center" style={{ minWidth: "140px" }}>
+                {/* Vertical connector down from horizontal bar */}
+                <div className="w-px h-6 bg-border" />
+                <OrgChartNode agent={exec.agent} onSelect={onSelect} />
+
+                {/* Children of this executive */}
+                {exec.children.length > 0 && (
+                  <>
+                    <div className="w-px h-6 bg-border" />
+
+                    {/* Horizontal connector for children */}
+                    {exec.children.length > 1 && (
+                      <div className="relative flex items-center justify-center w-full">
+                        <div
+                          className="h-px bg-border/60"
+                          style={{
+                            width: `calc(${(exec.children.length - 1)} * 120px)`,
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex items-start gap-0">
+                      {exec.children.map((child) => (
+                        <div key={child.agent.id} className="flex flex-col items-center" style={{ minWidth: "120px" }}>
+                          <div className="w-px h-6 bg-border/60" />
+                          <OrgChartNode agent={child.agent} onSelect={onSelect} />
+
+                          {/* Third level (grandchildren) */}
+                          {child.children.length > 0 && (
+                            <>
+                              <div className="w-px h-4 bg-border/40" />
+                              <div className="flex items-start gap-0">
+                                {child.children.map((gc) => (
+                                  <div key={gc.agent.id} className="flex flex-col items-center" style={{ minWidth: "110px" }}>
+                                    <div className="w-px h-4 bg-border/40" />
+                                    <OrgChartNode agent={gc.agent} onSelect={onSelect} />
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -290,9 +479,7 @@ function AgentCard({
         {/* Header row */}
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted/80">
-              <Bot className="h-5 w-5 text-muted-foreground" />
-            </div>
+            <AgentIcon slug={agent.slug} size="md" />
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-medium">{agent.name}</h3>
@@ -402,26 +589,19 @@ function AgentCard({
 function AgentsPageSkeleton() {
   return (
     <div className="mx-auto max-w-6xl p-4 md:p-6 space-y-6">
-      {/* Header skeleton */}
       <div className="space-y-1">
         <Skeleton className="h-7 w-40" />
         <Skeleton className="h-4 w-64" />
       </div>
-
-      {/* Stats skeleton */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {Array.from({ length: 4 }).map((_, i) => (
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={i} className="h-[68px] rounded-lg" />
         ))}
       </div>
-
-      {/* Search skeleton */}
       <div className="flex items-center gap-3">
         <Skeleton className="h-9 w-72" />
         <Skeleton className="h-9 w-40" />
       </div>
-
-      {/* Cards skeleton */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {Array.from({ length: 6 }).map((_, i) => (
           <Skeleton key={i} className="h-[180px] rounded-lg" />
@@ -509,6 +689,21 @@ export default function AgentsPage() {
     },
   });
 
+  const { data: runningData } = useQuery<RunningData>({
+    queryKey: ["/api/agents/admin/running"],
+    queryFn: async () => {
+      const res = await fetch("/api/agents/admin/running", { credentials: "include" });
+      if (!res.ok) return { agentTasks: [], subAgentRuns: [], total: 0 };
+      return res.json();
+    },
+    refetchInterval: (query) => {
+      const d = query.state.data as RunningData | undefined;
+      return d && d.total > 0 ? 10000 : false;
+    },
+  });
+
+  const runningCount = runningData?.total ?? 0;
+
   const filteredAgents = useMemo(() => {
     const q = search.toLowerCase();
     return agents.filter((a) => {
@@ -574,7 +769,7 @@ export default function AgentsPage() {
       </div>
 
       {/* ── Quick Stats ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <StatCard
           label="Total Agents"
           value={agents.length}
@@ -602,6 +797,14 @@ export default function AgentsPage() {
           icon={GitBranch}
           color="text-emerald-500"
           onClick={() => setStatSheet("links")}
+        />
+        <StatCard
+          label="Running Now"
+          value={runningCount}
+          icon={Zap}
+          color="text-emerald-500"
+          onClick={() => setStatSheet("running")}
+          pulse={runningCount > 0}
         />
       </div>
 
@@ -656,7 +859,7 @@ export default function AgentsPage() {
               </TabsTrigger>
               <TabsTrigger value="tree" className="h-7 px-2.5 text-[11px] gap-1.5">
                 <Network className="h-3 w-3" />
-                Org Tree
+                Org Chart
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -673,15 +876,22 @@ export default function AgentsPage() {
           ))}
         </div>
       ) : (
-        <div className="rounded-lg border border-border/50 bg-card p-2">
-          {orgTree.map((node) => (
-            <OrgTreeNode
-              key={node.agent.id}
-              node={node}
-              onSelect={handleSelect}
-            />
-          ))}
-        </div>
+        <>
+          {/* Desktop: visual org chart */}
+          <div className="hidden lg:block">
+            <OrgChartView agents={agents} orgTree={orgTree} onSelect={handleSelect} />
+          </div>
+          {/* Mobile: indented tree */}
+          <div className="lg:hidden rounded-lg border border-border/50 bg-card p-2">
+            {orgTree.map((node) => (
+              <OrgTreeNode
+                key={node.agent.id}
+                node={node}
+                onSelect={handleSelect}
+              />
+            ))}
+          </div>
+        </>
       )}
 
       {/* ── Stat Detail Sheet ── */}
@@ -693,6 +903,7 @@ export default function AgentsPage() {
               {statSheet === "delegations" && "Active Delegations"}
               {statSheet === "schedules" && "Scheduled Jobs"}
               {statSheet === "links" && "Delegation Links"}
+              {statSheet === "running" && "Running Now"}
             </SheetTitle>
           </SheetHeader>
 
@@ -705,9 +916,7 @@ export default function AgentsPage() {
                   onClick={() => { setStatSheet(null); handleSelect(a.slug); }}
                   className="flex items-center gap-3 rounded-lg border border-border/50 p-3 cursor-pointer hover:bg-muted/50 transition-colors"
                 >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted/80">
-                    <Bot className="h-4 w-4 text-muted-foreground" />
-                  </div>
+                  <AgentIcon slug={a.slug} size="sm" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{a.name}</p>
                     <p className="text-[11px] text-muted-foreground">
@@ -836,6 +1045,63 @@ export default function AgentsPage() {
                     </div>
                   </div>
                 ))}
+
+            {/* ── Running Now ── */}
+            {statSheet === "running" && (() => {
+              if (!runningData || runningData.total === 0) {
+                return (
+                  <p className="text-sm text-muted-foreground py-8 text-center">
+                    No tasks running right now.
+                  </p>
+                );
+              }
+              return (
+                <>
+                  {runningData.agentTasks.map((t: RunningData["agentTasks"][number]) => (
+                    <div
+                      key={t.id}
+                      onClick={() => {
+                        if (t.agentSlug) {
+                          setStatSheet(null);
+                          handleSelect(t.agentSlug);
+                        }
+                      }}
+                      className="flex items-center gap-3 rounded-lg border border-border/50 p-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                    >
+                      {t.agentSlug && <AgentIcon slug={t.agentSlug} size="sm" />}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{t.title}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {t.agentName || "Unknown agent"}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-blue-500">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        {formatElapsed(t.createdAt)}
+                      </div>
+                    </div>
+                  ))}
+                  {runningData.subAgentRuns.map((r: RunningData["subAgentRuns"][number]) => (
+                    <div
+                      key={r.id}
+                      className="flex items-center gap-3 rounded-lg border border-border/50 p-3"
+                    >
+                      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-violet-500/10">
+                        <Zap className="h-4 w-4 text-violet-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{r.name}</p>
+                        <p className="text-[11px] text-muted-foreground truncate">{r.task}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-blue-500">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        {formatElapsed(r.startedAt)}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              );
+            })()}
           </div>
         </SheetContent>
       </Sheet>
