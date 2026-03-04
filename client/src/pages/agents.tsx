@@ -417,25 +417,18 @@ function OrgChartView({
                           <div className="w-px h-4 bg-border/60" />
                           <OrgChartNode agent={child.agent} onSelect={onSelect} />
 
-                          {/* Grandchildren */}
+                          {/* Grandchildren — vertical stack with connector */}
                           {child.children.length > 0 && (
                             <>
-                              <div className="w-px h-4 bg-border/40" />
-                              {child.children.length > 1 && (
-                                <div className="w-full flex">
-                                  {child.children.map((_, i) => (
-                                    <div key={i} className="flex-1 flex justify-center">
-                                      <div className={`flex-1 ${i > 0 ? "border-t border-border/40" : ""}`} />
-                                      <div className={`flex-1 ${i < child.children.length - 1 ? "border-t border-border/40" : ""}`} />
+                              <div className="w-px h-3 bg-border/40" />
+                              <div className="border-l border-border/40 ml-0 pl-4 flex flex-col">
+                                {child.children.map((gc, gcIdx) => (
+                                  <div key={gc.agent.id} className="flex items-center relative">
+                                    {/* Horizontal stub */}
+                                    <div className="absolute -left-4 w-4 h-px bg-border/40" />
+                                    <div className={gcIdx < child.children.length - 1 ? "mb-1.5" : ""}>
+                                      <OrgChartNode agent={gc.agent} onSelect={onSelect} />
                                     </div>
-                                  ))}
-                                </div>
-                              )}
-                              <div className="w-full flex">
-                                {child.children.map((gc) => (
-                                  <div key={gc.agent.id} className="flex-1 flex flex-col items-center">
-                                    <div className="w-px h-4 bg-border/40" />
-                                    <OrgChartNode agent={gc.agent} onSelect={onSelect} />
                                   </div>
                                 ))}
                               </div>
