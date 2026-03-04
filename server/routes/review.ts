@@ -163,11 +163,16 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
 
     const promotedTo: Array<{ type: string; id: string }> = [];
 
+    logger.info({ taskId: id, resultType: result.type, resultKeys: Object.keys(result) }, "Approving deliverable");
+
     switch (result.type) {
       case "document": {
+        if (!result.title) {
+          return res.status(400).json({ error: "Document deliverable missing title", result });
+        }
         const doc = await storage.createDoc({
           title: result.title,
-          body: result.body,
+          body: result.body || "",
           type: result.docType || "page",
           domain: result.domain,
           ventureId: result.ventureId || undefined,
@@ -249,9 +254,9 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
 
     logger.info({ taskId: id, promotedTo }, "Deliverable approved");
     res.json({ success: true, promotedTo });
-  } catch (error) {
-    logger.error({ error }, "Error approving deliverable");
-    res.status(500).json({ error: "Failed to approve deliverable" });
+  } catch (error: any) {
+    logger.error({ err: error, message: error?.message, stack: error?.stack }, "Error approving deliverable");
+    res.status(500).json({ error: "Failed to approve deliverable", detail: error?.message });
   }
 });
 
