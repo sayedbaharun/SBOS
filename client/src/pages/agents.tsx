@@ -698,9 +698,11 @@ export default function AgentsPage() {
 
   const runningCount = runningData?.total ?? 0;
 
+  const activeAgents = useMemo(() => agents.filter((a) => a.isActive), [agents]);
+
   const filteredAgents = useMemo(() => {
     const q = search.toLowerCase();
-    return agents.filter((a) => {
+    return activeAgents.filter((a) => {
       const matchesSearch =
         !q ||
         a.name.toLowerCase().includes(q) ||
@@ -710,7 +712,7 @@ export default function AgentsPage() {
       const matchesRole = roleFilter === "all" || a.role === roleFilter;
       return matchesSearch && matchesRole;
     });
-  }, [agents, search, roleFilter]);
+  }, [activeAgents, search, roleFilter]);
 
   const orgTree = useMemo(() => buildOrgTree(filteredAgents), [filteredAgents]);
 
@@ -766,7 +768,7 @@ export default function AgentsPage() {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <StatCard
           label="Total Agents"
-          value={agents.length}
+          value={activeAgents.length}
           icon={Bot}
           color="text-foreground"
           onClick={() => setStatSheet("agents")}
@@ -787,7 +789,7 @@ export default function AgentsPage() {
         />
         <StatCard
           label="Delegation Links"
-          value={agents.reduce((sum, a) => sum + a.canDelegateTo.length, 0)}
+          value={activeAgents.reduce((sum, a) => sum + a.canDelegateTo.length, 0)}
           icon={GitBranch}
           color="text-emerald-500"
           onClick={() => setStatSheet("links")}
@@ -873,7 +875,7 @@ export default function AgentsPage() {
         <>
           {/* Desktop: visual org chart */}
           <div className="hidden lg:block">
-            <OrgChartView agents={agents} orgTree={orgTree} onSelect={handleSelect} />
+            <OrgChartView agents={activeAgents} orgTree={orgTree} onSelect={handleSelect} />
           </div>
           {/* Mobile: indented tree */}
           <div className="lg:hidden rounded-lg border border-border/50 bg-card p-2">
@@ -904,7 +906,7 @@ export default function AgentsPage() {
           <div className="mt-4 space-y-2">
             {/* ── All Agents ── */}
             {statSheet === "agents" &&
-              agents.map((a) => (
+              activeAgents.map((a) => (
                 <div
                   key={a.id}
                   onClick={() => { setStatSheet(null); handleSelect(a.slug); }}
@@ -940,8 +942,8 @@ export default function AgentsPage() {
                 );
               }
               return active.map((d) => {
-                const assignee = agents.find((a) => a.id === d.assignedTo);
-                const assigner = agents.find((a) => a.id === d.assignedBy);
+                const assignee = activeAgents.find((a) => a.id === d.assignedTo);
+                const assigner = activeAgents.find((a) => a.id === d.assignedBy);
                 return (
                   <div
                     key={d.id}
@@ -1011,7 +1013,7 @@ export default function AgentsPage() {
 
             {/* ── Delegation Links ── */}
             {statSheet === "links" &&
-              agents
+              activeAgents
                 .filter((a) => a.canDelegateTo.length > 0)
                 .map((a) => (
                   <div
@@ -1024,7 +1026,7 @@ export default function AgentsPage() {
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {a.canDelegateTo.map((targetSlug) => {
-                        const target = agents.find((t) => t.slug === targetSlug);
+                        const target = activeAgents.find((t) => t.slug === targetSlug);
                         return (
                           <span
                             key={targetSlug}
