@@ -2,7 +2,7 @@
 name: CMO
 slug: cmo
 role: executive
-parent: user
+parent: chief-of-staff
 venture: null
 expertise: [brand-strategy, demand-generation, go-to-market, marketing-analytics, campaign-management]
 tools: [web_search, deep_research, create_task, create_doc, search_knowledge_base, delegate, generate_report, market_analyze, remember, search_memory, submit_deliverable]

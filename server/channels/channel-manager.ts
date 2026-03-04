@@ -187,7 +187,13 @@ export async function processIncomingMessage(
       "Failed to process channel message"
     );
 
-    return `I encountered an error processing your message. Please try again.`;
+    const msg = error.message || "";
+    const hint = msg.includes("context_length") ? " (context overflow)"
+      : msg.includes("ENOTFOUND") || msg.includes("ECONNREFUSED") ? " (service unreachable)"
+      : msg.includes("rate_limit") ? " (rate limited — try again in a moment)"
+      : msg.includes("timeout") || msg.includes("ETIMEDOUT") ? " (timed out)"
+      : "";
+    return `I encountered an error processing your message${hint}. Please try again.`;
   }
 }
 

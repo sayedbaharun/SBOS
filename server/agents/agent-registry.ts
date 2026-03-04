@@ -349,12 +349,28 @@ export async function seedFromTemplates(
       .limit(1);
 
     if (existing) {
-      // Update existing agent's soul, schedule, tools, etc. from template
+      // Resolve parentId for existing agent update
+      let updateParentId: string | null = null;
+      if (frontmatter.parent && frontmatter.parent !== "user") {
+        const [parentRow] = await database
+          .select({ id: agents.id })
+          .from(agents)
+          .where(eq(agents.slug, frontmatter.parent))
+          .limit(1);
+        if (parentRow) {
+          updateParentId = parentRow.id;
+        }
+      }
+
+      // Update existing agent's soul, schedule, tools, hierarchy, etc. from template
       const soul = `---\n${buildYamlBlock(frontmatter)}\n---\n\n${body}`.trim();
       try {
         await database
           .update(agents)
           .set({
+            name: frontmatter.name,
+            role: frontmatter.role,
+            parentId: updateParentId,
             soul,
             expertise: frontmatter.expertise,
             availableTools: frontmatter.tools,

@@ -2,7 +2,7 @@
 name: Venture Architect
 slug: venture-architect
 role: specialist
-parent: head-of-products
+parent: cto
 venture: null
 expertise: [venture-planning, roadmap-design, phase-definition, execution-strategy, resource-allocation]
 tools: [create_task, create_project, create_phase, create_doc, search_knowledge_base, list_tasks, list_projects, get_venture_summary]

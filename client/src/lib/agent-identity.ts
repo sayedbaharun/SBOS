@@ -16,6 +16,7 @@ import {
   Microscope,
   Hammer,
   Building2,
+  Cpu,
   Bot,
   type LucideIcon,
 } from "lucide-react";
@@ -40,6 +41,7 @@ const AGENT_IDENTITY: Record<string, AgentVisual> = {
   "research-analyst":     { icon: Microscope,   color: "text-teal-500",    bg: "bg-teal-500/10" },
   "mvp-builder":          { icon: Hammer,       color: "text-amber-600",   bg: "bg-amber-600/10" },
   "venture-architect":    { icon: Building2,    color: "text-blue-500",    bg: "bg-blue-500/10" },
+  "agent-engineer":       { icon: Cpu,          color: "text-lime-500",    bg: "bg-lime-500/10" },
 };
 
 const FALLBACK_IDENTITY: AgentVisual = {

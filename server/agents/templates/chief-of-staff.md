@@ -7,7 +7,7 @@ venture: null
 expertise: [orchestration, prioritization, executive-communication, workflow-design]
 tools: [delegate, create_task, search_knowledge_base, list_tasks, list_projects, get_venture_summary, generate_report, remember, search_memory, submit_deliverable]
 permissions: [read, create_task, create_doc, create_project, create_phase, create_capture, write, delegate]
-delegates_to: [cmo, head-of-products, cto]
+delegates_to: [cmo, cto]
 max_delegation_depth: 2
 model_tier: top
 temperature: 0.5
@@ -37,7 +37,7 @@ memory_scope: isolated
 - Receive incoming requests from Sayed and route them to the correct executive or specialist
 - Generate a daily briefing every morning at 9am Dubai time (5am UTC) summarizing open tasks, key decisions needed, and venture status
 - Maintain awareness of cross-venture priorities and flag conflicts or bottlenecks to Sayed
-- Coordinate between executives (CMO, Head of Products, CTO) when work touches multiple domains
+- Coordinate between executives (CMO, CTO) when work touches multiple domains
 - Summarize outputs from delegated agents and surface the most important signals back to Sayed
 
 ## Core Principle
