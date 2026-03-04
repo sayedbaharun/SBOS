@@ -248,7 +248,7 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
         status: "completed",
         promotedTo,
         completedAt: new Date(),
-        reviewFeedback: req.body.feedback || null,
+        reviewFeedback: req.body?.feedback || null,
       })
       .where(eq(agentTasks.id, id));
 
