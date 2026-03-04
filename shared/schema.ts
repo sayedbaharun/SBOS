@@ -3174,6 +3174,9 @@ export const agents = pgTable(
     // Schedule (cron-based proactive execution)
     schedule: jsonb("schedule").$type<Record<string, string>>(),
 
+    // Persistent context memory — injected into system prompt every call (like per-group CLAUDE.md)
+    contextMemory: text("context_memory"),
+
     // Status
     isActive: boolean("is_active").default(true),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -3809,3 +3812,121 @@ export const insertNudgeResponseSchema = createInsertSchema(nudgeResponses).omit
 
 export type NudgeResponse = typeof nudgeResponses.$inferSelect;
 export type InsertNudgeResponse = z.infer<typeof insertNudgeResponseSchema>;
+
+// ----------------------------------------------------------------------------
+// PROJECT IRONCLAD: RELIABILITY INFRASTRUCTURE
+// ----------------------------------------------------------------------------
+
+/**
+ * Message Queue Status enum for outbound messages
+ */
+export const messageQueueStatusEnum = pgEnum('message_queue_status', [
+  'pending',
+  'sending',
+  'sent',
+  'failed',
+  'expired',
+]);
+
+/**
+ * Outbound Message Queue — retry queue for proactive messages.
+ * All calls to sendProactiveMessage() enqueue here; a background processor
+ * dequeues and sends with retry logic (3 attempts: 30s, 2min, 10min).
+ */
+export const outboundMessageQueue = pgTable(
+  "outbound_message_queue",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    platform: text("platform").notNull(), // "telegram" | "whatsapp"
+    chatId: text("chat_id").notNull(),
+    text: text("text").notNull(),
+    parseMode: text("parse_mode").$type<"html" | "markdown">().default("html"),
+    status: messageQueueStatusEnum("status").default("pending").notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    maxAttempts: integer("max_attempts").default(3).notNull(),
+    nextAttemptAt: timestamp("next_attempt_at").defaultNow().notNull(),
+    error: text("error"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    sentAt: timestamp("sent_at"),
+  },
+  (table) => [
+    index("idx_outbound_mq_status_next").on(table.status, table.nextAttemptAt),
+    index("idx_outbound_mq_created_at").on(table.createdAt),
+  ]
+);
+
+export const insertOutboundMessageSchema = createInsertSchema(outboundMessageQueue).omit({
+  id: true,
+  createdAt: true,
+  sentAt: true,
+});
+
+export type OutboundMessage = typeof outboundMessageQueue.$inferSelect;
+export type InsertOutboundMessage = z.infer<typeof insertOutboundMessageSchema>;
+
+/**
+ * Dead Letter Jobs — captures failed scheduled jobs after all retries exhausted.
+ * Enables post-mortem debugging and alerting.
+ */
+export const deadLetterJobs = pgTable(
+  "dead_letter_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobName: text("job_name").notNull(),
+    agentSlug: text("agent_slug").notNull(),
+    error: text("error").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>(),
+    failedAt: timestamp("failed_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_dead_letter_failed_at").on(table.failedAt),
+    index("idx_dead_letter_job_name").on(table.jobName),
+  ]
+);
+
+export const insertDeadLetterJobSchema = createInsertSchema(deadLetterJobs).omit({
+  id: true,
+  failedAt: true,
+});
+
+export type DeadLetterJob = typeof deadLetterJobs.$inferSelect;
+export type InsertDeadLetterJob = z.infer<typeof insertDeadLetterJobSchema>;
+
+/**
+ * Sub-Agent Runs — audit trail for Telegram-spawned sub-agents.
+ */
+export const subAgentRunStatusEnum = pgEnum('sub_agent_run_status', [
+  'running',
+  'completed',
+  'failed',
+  'timeout',
+]);
+
+export const subAgentRuns = pgTable(
+  "sub_agent_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    task: text("task").notNull(),
+    chatId: text("chat_id").notNull(),
+    status: subAgentRunStatusEnum("status").default("running").notNull(),
+    result: text("result"),
+    error: text("error"),
+    startedAt: timestamp("started_at").defaultNow().notNull(),
+    completedAt: timestamp("completed_at"),
+  },
+  (table) => [
+    index("idx_sub_agent_runs_status").on(table.status),
+    index("idx_sub_agent_runs_chat_id").on(table.chatId),
+    index("idx_sub_agent_runs_started_at").on(table.startedAt),
+  ]
+);
+
+export const insertSubAgentRunSchema = createInsertSchema(subAgentRuns).omit({
+  id: true,
+  startedAt: true,
+  completedAt: true,
+});
+
+export type SubAgentRun = typeof subAgentRuns.$inferSelect;
+export type InsertSubAgentRun = z.infer<typeof insertSubAgentRunSchema>;

@@ -58,8 +58,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
 
   app.get('/health', async (req, res) => {
-    const health = {
-      status: 'healthy' as 'healthy' | 'degraded',
+    const health: {
+      status: 'healthy' | 'degraded';
+      timestamp: string;
+      checks: {
+        database: boolean;
+        telegram?: { connected: boolean; lastActivity: string | null; queuePending: number };
+        scheduler?: { errorCount: number };
+      };
+    } = {
+      status: 'healthy',
       timestamp: new Date().toISOString(),
       checks: {
         database: false,
@@ -76,6 +84,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       logger.error({ error }, 'Health check: Database connectivity failed');
       health.status = 'degraded';
     }
+
+    // Telegram adapter status
+    try {
+      const { getAdapter } = await import("../channels/channel-manager");
+      const tgAdapter = getAdapter("telegram");
+      if (tgAdapter) {
+        const tgStatus = tgAdapter.getStatus();
+        let queuePending = 0;
+        try { queuePending = (await storage.getQueueStats()).pending; } catch {}
+        health.checks.telegram = {
+          connected: tgStatus.connected,
+          lastActivity: tgStatus.lastActivity,
+          queuePending,
+        };
+        if (!tgStatus.connected) {
+          health.status = 'degraded';
+        }
+      }
+    } catch {}
+
+    // Scheduler error count
+    try {
+      const { getScheduleStatus } = await import("../agents/agent-scheduler");
+      const schedules = getScheduleStatus();
+      const errorCount = schedules.reduce((sum, s) => sum + s.errorCount, 0);
+      health.checks.scheduler = { errorCount };
+    } catch {}
 
     const statusCode = health.status === 'healthy' ? 200 : 503;
     res.status(statusCode).json(health);

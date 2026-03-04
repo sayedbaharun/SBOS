@@ -89,6 +89,16 @@ export function validateEnvironment(): ValidationResult {
     warnings.push('AUTHORIZED_TELEGRAM_CHAT_IDS not configured - all Telegram chats will be allowed (security risk)');
   }
 
+  // Telegram Webhook URL validation (Project Ironclad)
+  if (process.env.TELEGRAM_WEBHOOK_URL) {
+    if (!process.env.TELEGRAM_WEBHOOK_URL.startsWith('https://')) {
+      warnings.push('TELEGRAM_WEBHOOK_URL must use HTTPS — Telegram requires secure webhooks');
+    }
+    if (!process.env.TELEGRAM_WEBHOOK_SECRET) {
+      warnings.push('TELEGRAM_WEBHOOK_SECRET not set — webhook requests will not be validated (security risk)');
+    }
+  }
+
   // Session Secret - required in production, optional in development
   const isProduction = process.env.NODE_ENV === 'production';
   if (!process.env.SESSION_SECRET) {

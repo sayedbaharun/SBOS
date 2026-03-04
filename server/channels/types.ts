@@ -51,15 +51,30 @@ export interface OutgoingMessage {
 // CHANNEL ADAPTER INTERFACE
 // ============================================================================
 
+export interface ChannelCapabilities {
+  /** Can the adapter edit previously sent messages */
+  supportsEditing: boolean;
+  /** Does the adapter support inline keyboard buttons */
+  supportsInlineKeyboards: boolean;
+  /** Can the adapter stream partial responses */
+  supportsStreaming: boolean;
+  /** Maximum message length in characters */
+  maxMessageLength: number;
+}
+
 export interface ChannelAdapter {
   /** Platform name */
   platform: "telegram" | "whatsapp";
+  /** Platform capabilities */
+  capabilities: ChannelCapabilities;
   /** Start the adapter (begin listening for messages) */
   start(): Promise<void>;
   /** Stop the adapter gracefully */
   stop(): Promise<void>;
   /** Send a message to a chat */
   sendMessage(msg: OutgoingMessage): Promise<void>;
+  /** Edit a previously sent message (if supported) */
+  editMessage?(chatId: string, messageId: string, text: string, parseMode?: "html" | "markdown"): Promise<void>;
   /** Check if the adapter is connected and healthy */
   isConnected(): boolean;
   /** Get adapter status info */

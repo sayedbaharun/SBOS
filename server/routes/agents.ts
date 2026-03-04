@@ -592,6 +592,31 @@ router.post("/admin/channels/send", async (req: Request, res: Response) => {
 // ============================================================================
 
 // Get all scheduled jobs status
+// Dead letter jobs — failed scheduled jobs (Project Ironclad Phase 2)
+router.get("/admin/dead-letters", async (req: Request, res: Response) => {
+  try {
+    const { storage } = await import("../storage");
+    const limit = parseInt(String(req.query.limit) || "50", 10);
+    const deadLetters = await storage.getDeadLetterJobs(limit);
+    res.json(deadLetters);
+  } catch (error) {
+    logger.error({ error }, "Error fetching dead letter jobs");
+    res.status(500).json({ error: "Failed to fetch dead letter jobs" });
+  }
+});
+
+// Message queue stats (Project Ironclad Phase 1)
+router.get("/admin/queue-stats", async (req: Request, res: Response) => {
+  try {
+    const { storage } = await import("../storage");
+    const stats = await storage.getQueueStats();
+    res.json(stats);
+  } catch (error) {
+    logger.error({ error }, "Error fetching queue stats");
+    res.status(500).json({ error: "Failed to fetch queue stats" });
+  }
+});
+
 router.get("/admin/schedules", async (req: Request, res: Response) => {
   try {
     const { getScheduleStatus } = await import("../agents/agent-scheduler");

@@ -1113,6 +1113,11 @@ function buildSystemPrompt(agent: Agent, delegationContext?: DelegationContext):
     prompt += `\n\nUse the \`delegate\` tool to assign sub-tasks to your team members when their expertise is needed.`;
   }
 
+  // Inject persistent context memory if set (per-agent CLAUDE.md equivalent)
+  if (agent.contextMemory) {
+    prompt += `\n\n## Persistent Context\n${agent.contextMemory}`;
+  }
+
   prompt += `\n\nCurrent date/time: ${new Date().toISOString()}`;
 
   // Proactive recall instruction

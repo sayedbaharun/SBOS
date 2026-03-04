@@ -44,3 +44,8 @@ export {
   type ServiceCheck,
   type ServiceHealthMonitorOptions,
 } from "./telegram-resilience";
+
+export {
+  startMessageQueueProcessor,
+  stopMessageQueueProcessor,
+} from "./message-queue";

@@ -110,6 +110,12 @@ function getContextPrefix(chatId: string): string {
 
 class TelegramAdapter implements ChannelAdapter {
   platform = "telegram" as const;
+  capabilities = {
+    supportsEditing: true,
+    supportsInlineKeyboards: true,
+    supportsStreaming: false, // Telegram doesn't support true streaming, but we can edit messages
+    maxMessageLength: 4096,
+  };
   public bot: Telegraf | null = null;
   private connected = false;
   private startedAt: Date | null = null;
@@ -516,6 +522,91 @@ class TelegramAdapter implements ChannelAdapter {
       }
     });
 
+    // ---- Sub-Agent Commands (Project Ironclad Phase 4) ----
+    this.bot.command("spawn", async (ctx) => {
+      try {
+        const args = ctx.message.text.replace(/^\/spawn\s*/, "").trim();
+        // Parse: /spawn <name> "<task>" or /spawn <name> <task>
+        const quoteMatch = args.match(/^(\S+)\s+"([^"]+)"$/);
+        const simpleMatch = args.match(/^(\S+)\s+(.+)$/);
+        const match = quoteMatch || simpleMatch;
+
+        if (!match) {
+          await ctx.reply('Usage: /spawn <name> "<task>"\nExample: /spawn researcher "What is UAE AI agency market size?"');
+          return;
+        }
+
+        const name = match[1];
+        const task = match[2];
+
+        const { spawnSubAgent } = await import("../../agents/sub-agent");
+        const runId = await spawnSubAgent({
+          name,
+          task,
+          chatId: ctx.chat.id.toString(),
+        });
+
+        await ctx.reply(`🚀 Spawning sub-agent <b>${name}</b>\n\n<b>Task:</b> ${task}\n<b>Run ID:</b> <code>${runId.slice(0, 8)}</code>\n\nI'll send the result when it's done (5min timeout).`, { parse_mode: "HTML" });
+      } catch (error: any) {
+        await ctx.reply("Failed to spawn sub-agent: " + error.message);
+        this.recordError(error.message);
+      }
+    });
+
+    this.bot.command("subagents", async (ctx) => {
+      try {
+        const runs = await storage.getSubAgentRuns({ chatId: ctx.chat.id.toString(), limit: 10 });
+        if (runs.length === 0) {
+          await ctx.reply("No sub-agent runs found. Use /spawn to create one.");
+          return;
+        }
+
+        const statusIcon: Record<string, string> = { running: "⏳", completed: "✅", failed: "❌", timeout: "⏰" };
+        const lines = runs.map((r, i) =>
+          `${i + 1}. ${statusIcon[r.status] || "❓"} <b>${r.name}</b> — ${r.task.slice(0, 60)}${r.task.length > 60 ? "..." : ""}\n   <code>${r.id.slice(0, 8)}</code> • ${r.status}`
+        );
+
+        await ctx.reply(`📋 <b>Recent Sub-Agents</b>\n\n${lines.join("\n\n")}`, { parse_mode: "HTML" });
+      } catch (error: any) {
+        await ctx.reply("Failed to list sub-agents: " + error.message);
+        this.recordError(error.message);
+      }
+    });
+
+    this.bot.command("subagent", async (ctx) => {
+      try {
+        const idPrefix = ctx.message.text.replace(/^\/subagent\s*/, "").trim();
+        if (!idPrefix) {
+          await ctx.reply("Usage: /subagent <id>");
+          return;
+        }
+
+        // Find by prefix match
+        const runs = await storage.getSubAgentRuns({ chatId: ctx.chat.id.toString(), limit: 50 });
+        const run = runs.find(r => r.id.startsWith(idPrefix));
+
+        if (!run) {
+          await ctx.reply("Sub-agent run not found. Use /subagents to list.");
+          return;
+        }
+
+        const statusIcon: Record<string, string> = { running: "⏳", completed: "✅", failed: "❌", timeout: "⏰" };
+        let text = `${statusIcon[run.status] || "❓"} <b>${run.name}</b>\n\n<b>Task:</b> ${run.task}\n<b>Status:</b> ${run.status}\n<b>Started:</b> ${run.startedAt.toISOString()}`;
+
+        if (run.result) {
+          text += `\n\n<b>Result:</b>\n${run.result.slice(0, 3000)}`;
+        }
+        if (run.error) {
+          text += `\n\n<b>Error:</b> ${run.error}`;
+        }
+
+        await this.sendLongMessage(ctx.chat.id.toString(), text, "html");
+      } catch (error: any) {
+        await ctx.reply("Failed to get sub-agent: " + error.message);
+        this.recordError(error.message);
+      }
+    });
+
     // ---- Text Messages ----
     this.bot.on("text", async (ctx) => {
       try {
@@ -562,7 +653,12 @@ class TelegramAdapter implements ChannelAdapter {
           message.text = contextPrefix + message.text;
         }
 
+        // Partial streaming: send "thinking" placeholder, then edit with real response
+        const thinkingMsg = await ctx.reply("💭 Thinking...");
+        const startTime = Date.now();
+
         const response = await processIncomingMessage(message);
+        const elapsed = Date.now() - startTime;
 
         // Track assistant response in context
         addToContext(chatId, "assistant", response);
@@ -570,8 +666,24 @@ class TelegramAdapter implements ChannelAdapter {
         // Save to message store for history
         await this.saveMessageHistory(chatId, ctx.message.text, response, "agent_chat");
 
-        // Send response (handle long messages)
-        await this.sendLongMessage(chatId, response);
+        // If response is short enough and came within 5s, just edit the thinking message
+        if (response.length <= 4000 && elapsed < 30_000) {
+          try {
+            await this.bot!.telegram.editMessageText(
+              chatId,
+              thinkingMsg.message_id,
+              undefined,
+              response
+            );
+          } catch {
+            // Fallback if edit fails
+            await this.sendLongMessage(chatId, response);
+          }
+        } else {
+          // Delete thinking message and send full response
+          try { await this.bot!.telegram.deleteMessage(chatId, thinkingMsg.message_id); } catch {}
+          await this.sendLongMessage(chatId, response);
+        }
 
         this.stats.messagesSent++;
       } catch (error: any) {
@@ -1035,6 +1147,27 @@ class TelegramAdapter implements ChannelAdapter {
 
     for (const chunk of chunks) {
       await this.bot.telegram.sendMessage(chatId, chunk);
+    }
+  }
+
+  /**
+   * Edit a previously sent message (used for partial streaming pattern).
+   */
+  async editMessage(chatId: string, messageId: string, text: string, parseMode?: "html" | "markdown"): Promise<void> {
+    if (!this.bot) return;
+    try {
+      await this.bot.telegram.editMessageText(
+        chatId,
+        parseInt(messageId, 10),
+        undefined,
+        text,
+        { parse_mode: parseMode === "markdown" ? "MarkdownV2" : undefined }
+      );
+    } catch (error: any) {
+      // Telegram returns error if message content unchanged — ignore
+      if (!error.message?.includes("message is not modified")) {
+        throw error;
+      }
     }
   }
 

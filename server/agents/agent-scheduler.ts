@@ -116,7 +116,21 @@ function registerJob(agent: Agent, jobName: string, cronExpression: string): voi
     );
 
     try {
-      await executeScheduledJob(agent.id, agent.slug, jobName);
+      // Retry with FAST_BACKOFF (3 attempts: 500ms, 750ms, 1.1s)
+      const { retryWithPolicy, FAST_BACKOFF } = await import("../infra/backoff");
+      await retryWithPolicy(
+        () => executeScheduledJob(agent.id, agent.slug, jobName),
+        {
+          policy: FAST_BACKOFF,
+          maxAttempts: 3,
+          onRetry: (err: unknown, attempt: number, delayMs: number) => {
+            logger.warn(
+              { agentSlug: agent.slug, jobName, attempt: attempt + 1, delayMs, error: (err as Error).message },
+              "Scheduled job failed, retrying"
+            );
+          },
+        }
+      );
       job.lastRun = new Date();
       job.runCount++;
 
@@ -128,8 +142,28 @@ function registerJob(agent: Agent, jobName: string, cronExpression: string): voi
       job.errorCount++;
       logger.error(
         { agentSlug: agent.slug, jobName, error: error.message },
-        "Scheduled agent job failed"
+        "Scheduled agent job failed after all retries"
       );
+
+      // Dead letter + Telegram alert (Project Ironclad Phase 2)
+      try {
+        const { storage } = await import("../storage");
+        await storage.createDeadLetterJob({
+          jobName,
+          agentSlug: agent.slug,
+          error: error.message || String(error),
+          payload: { agentId: agent.id, cronExpression },
+        });
+
+        const { sendProactiveMessage } = await import("../channels/channel-manager");
+        const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+        const alertText = `⚠️ <b>Dead Letter Alert</b>\n\nJob <code>${jobName}</code> for agent <code>${agent.slug}</code> failed after 3 retries.\n\nError: ${error.message}\n\nCheck <code>/api/admin/dead-letters</code> for details.`;
+        for (const chatId of getAuthorizedChatIds()) {
+          await sendProactiveMessage("telegram", chatId, alertText);
+        }
+      } catch (dlErr: any) {
+        logger.error({ error: dlErr.message }, "Failed to create dead letter entry");
+      }
     }
   });
 

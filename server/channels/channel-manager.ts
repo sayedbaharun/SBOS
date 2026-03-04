@@ -193,11 +193,43 @@ export async function processIncomingMessage(
 
 /**
  * Send a proactive message via a specific channel.
+ * Messages are enqueued for reliable delivery with retry logic.
+ * Use sendProactiveMessageDirect() for bypass (used by queue processor).
  */
 export async function sendProactiveMessage(
   platform: string,
   chatId: string,
   text: string
+): Promise<void> {
+  try {
+    const { storage } = await import("../storage");
+    await storage.enqueueMessage({
+      platform,
+      chatId,
+      text,
+      parseMode: "html",
+      status: "pending",
+      attempts: 0,
+      maxAttempts: 3,
+      nextAttemptAt: new Date(),
+    });
+    logger.debug({ platform, chatId }, "Proactive message enqueued");
+  } catch (err: any) {
+    // Fallback to direct send if queue fails (DB down, etc.)
+    logger.warn({ error: err.message }, "Queue enqueue failed, falling back to direct send");
+    await sendProactiveMessageDirect(platform, chatId, text, "html");
+  }
+}
+
+/**
+ * Send a proactive message directly (bypasses queue).
+ * Used by the queue processor and as fallback.
+ */
+export async function sendProactiveMessageDirect(
+  platform: string,
+  chatId: string,
+  text: string,
+  parseMode: "html" | "markdown" = "html"
 ): Promise<void> {
   const adapter = adapters.get(platform);
   if (!adapter) {
@@ -208,7 +240,7 @@ export async function sendProactiveMessage(
   await adapter.sendMessage({
     chatId,
     text,
-    parseMode: "html",
+    parseMode,
   });
 
   // Log proactive outgoing message

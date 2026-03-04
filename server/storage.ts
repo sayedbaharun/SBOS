@@ -172,6 +172,15 @@ import {
   type NudgeResponse,
   type InsertNudgeResponse,
   nudgeResponses,
+  type OutboundMessage,
+  type InsertOutboundMessage,
+  outboundMessageQueue,
+  type DeadLetterJob,
+  type InsertDeadLetterJob,
+  deadLetterJobs,
+  type SubAgentRun,
+  type InsertSubAgentRun,
+  subAgentRuns,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { eq, desc, and, or, gte, lte, not, inArray, like, sql, asc, isNull } from "drizzle-orm";
@@ -551,6 +560,24 @@ export interface IStorage {
   getNudgeResponses(options: { date?: string; nudgeType?: string; limit?: number }): Promise<NudgeResponse[]>;
   createNudgeResponse(data: InsertNudgeResponse): Promise<NudgeResponse>;
   getNudgeResponseStats(days?: number): Promise<{ nudgeType: string; total: number; acted: number; rate: number }[]>;
+
+  // Outbound Message Queue (Project Ironclad)
+  enqueueMessage(data: InsertOutboundMessage): Promise<OutboundMessage>;
+  dequeueMessages(limit?: number): Promise<OutboundMessage[]>;
+  markMessageSent(id: string): Promise<void>;
+  markMessageFailed(id: string, error: string, nextAttemptAt?: Date): Promise<void>;
+  expireStaleMessages(maxAgeHours?: number): Promise<number>;
+  getQueueStats(): Promise<{ pending: number; sending: number; failed: number }>;
+
+  // Dead Letter Jobs (Project Ironclad)
+  createDeadLetterJob(data: InsertDeadLetterJob): Promise<DeadLetterJob>;
+  getDeadLetterJobs(limit?: number): Promise<DeadLetterJob[]>;
+
+  // Sub-Agent Runs (Project Ironclad)
+  createSubAgentRun(data: InsertSubAgentRun): Promise<SubAgentRun>;
+  updateSubAgentRun(id: string, data: Partial<SubAgentRun>): Promise<SubAgentRun | undefined>;
+  getSubAgentRuns(options?: { chatId?: string; status?: string; limit?: number }): Promise<SubAgentRun[]>;
+  getSubAgentRun(id: string): Promise<SubAgentRun | undefined>;
 }
 
 // PostgreSQL Storage Implementation
@@ -5321,6 +5348,160 @@ export class DBStorage implements IStorage {
       acted: r.acted,
       rate: r.total > 0 ? r.acted / r.total : 0,
     }));
+  }
+
+  // ==========================================================================
+  // PROJECT IRONCLAD: Message Queue
+  // ==========================================================================
+
+  async enqueueMessage(data: InsertOutboundMessage): Promise<OutboundMessage> {
+    const [row] = await this.db.insert(outboundMessageQueue)
+      .values(data as any).returning();
+    return row;
+  }
+
+  async dequeueMessages(limit: number = 10): Promise<OutboundMessage[]> {
+    const now = new Date();
+    const rows = await this.db.select()
+      .from(outboundMessageQueue)
+      .where(
+        and(
+          eq(outboundMessageQueue.status, "pending"),
+          lte(outboundMessageQueue.nextAttemptAt, now)
+        )
+      )
+      .orderBy(asc(outboundMessageQueue.nextAttemptAt))
+      .limit(limit);
+
+    // Mark as sending to prevent double-pickup
+    if (rows.length > 0) {
+      const ids = rows.map((r: OutboundMessage) => r.id);
+      await this.db.update(outboundMessageQueue)
+        .set({ status: "sending" as const })
+        .where(inArray(outboundMessageQueue.id, ids));
+    }
+
+    return rows;
+  }
+
+  async markMessageSent(id: string): Promise<void> {
+    await this.db.update(outboundMessageQueue)
+      .set({ status: "sent" as const, sentAt: new Date() })
+      .where(eq(outboundMessageQueue.id, id));
+  }
+
+  async markMessageFailed(id: string, error: string, nextAttemptAt?: Date): Promise<void> {
+    const [msg] = await this.db.select()
+      .from(outboundMessageQueue)
+      .where(eq(outboundMessageQueue.id, id));
+    if (!msg) return;
+
+    const newAttempts = (msg.attempts || 0) + 1;
+    const isFinal = newAttempts >= msg.maxAttempts;
+
+    await this.db.update(outboundMessageQueue)
+      .set({
+        status: isFinal ? ("failed" as const) : ("pending" as const),
+        attempts: newAttempts,
+        error,
+        nextAttemptAt: isFinal ? undefined : (nextAttemptAt || new Date()),
+      })
+      .where(eq(outboundMessageQueue.id, id));
+  }
+
+  async expireStaleMessages(maxAgeHours: number = 2): Promise<number> {
+    const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+    const result = await this.db.update(outboundMessageQueue)
+      .set({ status: "expired" as const })
+      .where(
+        and(
+          or(
+            eq(outboundMessageQueue.status, "pending"),
+            eq(outboundMessageQueue.status, "sending")
+          ),
+          lte(outboundMessageQueue.createdAt, cutoff)
+        )
+      )
+      .returning();
+    return result.length;
+  }
+
+  async getQueueStats(): Promise<{ pending: number; sending: number; failed: number }> {
+    const rows = await this.db.select({
+      status: outboundMessageQueue.status,
+      count: sql<number>`COUNT(*)::int`,
+    })
+      .from(outboundMessageQueue)
+      .where(
+        or(
+          eq(outboundMessageQueue.status, "pending"),
+          eq(outboundMessageQueue.status, "sending"),
+          eq(outboundMessageQueue.status, "failed")
+        )
+      )
+      .groupBy(outboundMessageQueue.status);
+
+    const stats = { pending: 0, sending: 0, failed: 0 };
+    for (const r of rows) {
+      if (r.status === "pending") stats.pending = r.count;
+      else if (r.status === "sending") stats.sending = r.count;
+      else if (r.status === "failed") stats.failed = r.count;
+    }
+    return stats;
+  }
+
+  // ==========================================================================
+  // PROJECT IRONCLAD: Dead Letter Jobs
+  // ==========================================================================
+
+  async createDeadLetterJob(data: InsertDeadLetterJob): Promise<DeadLetterJob> {
+    const [row] = await this.db.insert(deadLetterJobs)
+      .values(data as any).returning();
+    return row;
+  }
+
+  async getDeadLetterJobs(limit: number = 50): Promise<DeadLetterJob[]> {
+    return this.db.select()
+      .from(deadLetterJobs)
+      .orderBy(desc(deadLetterJobs.failedAt))
+      .limit(limit);
+  }
+
+  // ==========================================================================
+  // PROJECT IRONCLAD: Sub-Agent Runs
+  // ==========================================================================
+
+  async createSubAgentRun(data: InsertSubAgentRun): Promise<SubAgentRun> {
+    const [row] = await this.db.insert(subAgentRuns)
+      .values(data as any).returning();
+    return row;
+  }
+
+  async updateSubAgentRun(id: string, data: Partial<SubAgentRun>): Promise<SubAgentRun | undefined> {
+    const [row] = await this.db.update(subAgentRuns)
+      .set(data as any)
+      .where(eq(subAgentRuns.id, id))
+      .returning();
+    return row;
+  }
+
+  async getSubAgentRuns(options: { chatId?: string; status?: string; limit?: number } = {}): Promise<SubAgentRun[]> {
+    const conditions = [];
+    if (options.chatId) conditions.push(eq(subAgentRuns.chatId, options.chatId));
+    if (options.status) conditions.push(eq(subAgentRuns.status, options.status as any));
+
+    return this.db.select()
+      .from(subAgentRuns)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(subAgentRuns.startedAt))
+      .limit(options.limit || 20);
+  }
+
+  async getSubAgentRun(id: string): Promise<SubAgentRun | undefined> {
+    const [row] = await this.db.select()
+      .from(subAgentRuns)
+      .where(eq(subAgentRuns.id, id));
+    return row;
   }
 
 }

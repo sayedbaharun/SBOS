@@ -270,6 +270,12 @@ app.use((req, res, next) => {
   // So this must be registered first to ensure Telegram POSTs reach the handler
   if (process.env.TELEGRAM_WEBHOOK_URL && process.env.TELEGRAM_BOT_TOKEN) {
     const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+
+    // Dedup: track recent update_ids to prevent double-processing on webhook retries
+    const recentUpdateIds = new Map<number, number>(); // update_id -> timestamp
+    const DEDUP_MAX_SIZE = 1000;
+    const DEDUP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
     app.post('/api/telegram/webhook', async (req, res) => {
       try {
         // Validate secret token if configured
@@ -282,6 +288,28 @@ app.use((req, res, next) => {
           }
         }
 
+        const update = req.body;
+        const updateId = update?.update_id;
+
+        // Dedup check
+        if (updateId && recentUpdateIds.has(updateId)) {
+          log(`Telegram webhook: duplicate update_id=${updateId}, ignoring`);
+          res.status(200).json({ ok: true });
+          return;
+        }
+
+        // Track this update_id
+        if (updateId) {
+          recentUpdateIds.set(updateId, Date.now());
+          // Evict old entries
+          if (recentUpdateIds.size > DEDUP_MAX_SIZE) {
+            const now = Date.now();
+            Array.from(recentUpdateIds.entries()).forEach(([id, ts]) => {
+              if (now - ts > DEDUP_TTL_MS) recentUpdateIds.delete(id);
+            });
+          }
+        }
+
         // Dynamically get the adapter's bot (it's initialized in the listen callback)
         const { telegramAdapter } = await import('./channels/adapters/telegram-adapter');
         const bot = telegramAdapter.bot;
@@ -291,8 +319,7 @@ app.use((req, res, next) => {
           return;
         }
 
-        const update = req.body;
-        log(`Telegram webhook: update_id=${update.update_id}, has_message=${!!update.message}, text="${update.message?.text || 'N/A'}", chat_id=${update.message?.chat?.id || 'N/A'}`);
+        log(`Telegram webhook: update_id=${updateId}, has_message=${!!update.message}, text="${update.message?.text || 'N/A'}", chat_id=${update.message?.chat?.id || 'N/A'}`);
         await bot.handleUpdate(update);
         res.status(200).json({ ok: true });
       } catch (err) {
@@ -417,6 +444,15 @@ app.use((req, res, next) => {
         log('Channel adapters setup skipped:', String(channelError));
       }
 
+      // Start outbound message queue processor (Project Ironclad)
+      try {
+        const { startMessageQueueProcessor } = await import('./infra/message-queue');
+        startMessageQueueProcessor();
+        log('✓ Outbound message queue processor started');
+      } catch (mqError) {
+        log('Message queue processor setup skipped:', String(mqError));
+      }
+
       // Initialize nudge engine (event-driven proactive notifications)
       try {
         const { scheduleNudgeEngine } = await import('./automations/nudge-engine');
@@ -478,22 +514,40 @@ app.use((req, res, next) => {
     const gracefulShutdown = async () => {
       log('Shutting down gracefully...');
 
-      // Stop SB-OS automations
+      // 10s hard timeout to prevent hanging
+      const shutdownTimeout = setTimeout(() => {
+        log('Shutdown timeout reached (10s), forcing exit');
+        process.exit(1);
+      }, 10_000);
+
+      // Stop message queue processor
       try {
-        // Automations use node-cron which doesn't need explicit cleanup
-        log('Automations stopped');
+        const { stopMessageQueueProcessor } = await import('./infra/message-queue');
+        stopMessageQueueProcessor();
+        log('Message queue processor stopped');
       } catch (error) {
-        log('Error stopping automations:', String(error));
+        log('Error stopping message queue:', String(error));
       }
 
-      if (telegramBot) {
-        try {
-          await telegramBot.stop();
-          log('Telegram bot stopped');
-        } catch (error) {
-          log('Error stopping Telegram bot:', String(error));
-        }
+      // Stop all channel adapters (Telegram, etc.)
+      try {
+        const { stopAllAdapters } = await import('./channels/channel-manager');
+        await stopAllAdapters();
+        log('Channel adapters stopped');
+      } catch (error) {
+        log('Error stopping channel adapters:', String(error));
       }
+
+      // Stop agent scheduler
+      try {
+        const { stopAllJobs } = await import('./agents/agent-scheduler');
+        stopAllJobs();
+        log('Agent scheduler stopped');
+      } catch (error) {
+        log('Error stopping agent scheduler:', String(error));
+      }
+
+      clearTimeout(shutdownTimeout);
       process.exit(0);
     };
 
