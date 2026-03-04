@@ -13,6 +13,7 @@ import { eq } from "drizzle-orm";
 import { logger } from "../logger";
 import { agents, type Agent } from "@shared/schema";
 import { executeScheduledJob, type ScheduledJobHandler } from "./scheduled-jobs";
+import { msgHeader, formatMessage } from "../infra/telegram-format";
 
 // Lazy DB
 let db: any = null;
@@ -157,7 +158,11 @@ function registerJob(agent: Agent, jobName: string, cronExpression: string): voi
 
         const { sendProactiveMessage } = await import("../channels/channel-manager");
         const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
-        const alertText = `⚠️ <b>Dead Letter Alert</b>\n\nJob <code>${jobName}</code> for agent <code>${agent.slug}</code> failed after 3 retries.\n\nError: ${error.message}\n\nCheck <code>/api/admin/dead-letters</code> for details.`;
+        const alertText = formatMessage({
+          header: msgHeader("⚠️", "Dead Letter Alert"),
+          body: `Job <code>${jobName}</code> for agent <code>${agent.slug}</code> failed after 3 retries.\n\nError: ${error.message}`,
+          cta: "<code>/api/admin/dead-letters</code> for details.",
+        });
         for (const chatId of getAuthorizedChatIds()) {
           await sendProactiveMessage("telegram", chatId, alertText);
         }

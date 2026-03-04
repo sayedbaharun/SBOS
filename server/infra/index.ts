@@ -49,3 +49,12 @@ export {
   startMessageQueueProcessor,
   stopMessageQueueProcessor,
 } from "./message-queue";
+
+export {
+  escapeHtml,
+  msgHeader,
+  msgSection,
+  msgStats,
+  msgTruncate,
+  formatMessage,
+} from "./telegram-format";

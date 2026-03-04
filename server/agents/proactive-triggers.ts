@@ -12,6 +12,7 @@ import { storage } from "../storage";
 import { executeAgentChat } from "./agent-runtime";
 import { messageBus } from "./message-bus";
 import { getUserDate } from "../utils/dates";
+import { msgHeader, msgSection, msgTruncate, formatMessage, escapeHtml } from "../infra/telegram-format";
 
 // ============================================================================
 // EVENT TYPES
@@ -56,7 +57,10 @@ Assess this urgent email. Should Sayed respond immediately? Is there a business 
     const { sendProactiveMessage } = await import("../channels/channel-manager");
     const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
 
-    const message = `🚨 CoS Assessment — Urgent Email\n\nFrom: ${from}\nRe: ${subject}\n\n${result.response.slice(0, 600)}`;
+    const message = formatMessage({
+      header: msgHeader("🚨", "CoS Assessment — Urgent Email"),
+      body: `<b>${escapeHtml(from)}</b>\nRe: ${escapeHtml(subject)}\n\n${msgTruncate(escapeHtml(result.response), 600)}`,
+    });
     for (const chatId of getAuthorizedChatIds()) {
       await sendProactiveMessage("telegram", chatId, message);
     }
@@ -93,7 +97,10 @@ async function handleDeadlineApproaching(event: ProactiveEvent): Promise<void> {
       const { sendProactiveMessage } = await import("../channels/channel-manager");
       const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
 
-      const message = `⏰ Deadline Alert — 24h\n\n${alerts.join("\n\n")}`;
+      const message = formatMessage({
+        header: msgHeader("⏰", "Deadline Alert — 24h"),
+        sections: alerts.map(a => escapeHtml(a)),
+      });
       for (const chatId of getAuthorizedChatIds()) {
         await sendProactiveMessage("telegram", chatId, message);
       }
@@ -116,7 +123,11 @@ async function handleCalendarConflict(event: ProactiveEvent): Promise<void> {
     const { sendProactiveMessage } = await import("../channels/channel-manager");
     const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
 
-    const message = `📅 Calendar Conflicts Detected\n\n${conflicts.map((c: any) => `- ${c.description}`).join("\n")}`;
+    const conflictItems = conflicts.map((c: any) => escapeHtml(c.description));
+    const message = formatMessage({
+      header: msgHeader("📅", "Calendar Conflicts"),
+      sections: [msgSection("⚠️", "Overlaps", conflictItems)],
+    });
     for (const chatId of getAuthorizedChatIds()) {
       await sendProactiveMessage("telegram", chatId, message);
     }

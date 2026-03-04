@@ -12,6 +12,7 @@
 
 import { logger } from "../logger";
 import { storage } from "../storage";
+import { msgHeader, msgTruncate, formatMessage, escapeHtml } from "../infra/telegram-format";
 
 /**
  * Check for upcoming meetings and prepare briefs.
@@ -189,7 +190,10 @@ async function sendPrepNotification(brief: string, title: string, minutesUntil: 
     const { sendProactiveMessage } = await import("../channels/channel-manager");
     const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
 
-    const message = `📋 Meeting Prep — ${Math.round(minutesUntil)}min\n\n${title}\n\n${brief}`;
+    const message = formatMessage({
+      header: msgHeader("📋", `Meeting in ${Math.round(minutesUntil)}min`),
+      body: `<b>${escapeHtml(title)}</b>\n\n${msgTruncate(escapeHtml(brief))}`,
+    });
 
     for (const chatId of getAuthorizedChatIds()) {
       await sendProactiveMessage("telegram", chatId, message);

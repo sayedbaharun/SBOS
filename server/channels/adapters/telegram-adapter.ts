@@ -1119,10 +1119,15 @@ class TelegramAdapter implements ChannelAdapter {
   ): Promise<void> {
     if (!this.bot) return;
 
+    // Map parse mode to Telegram API values
+    const tgParseMode = parseMode === "html" ? "HTML"
+      : parseMode === "markdown" ? "MarkdownV2"
+      : undefined;
+
     const maxLen = 4000; // Leave buffer below 4096 limit
     if (text.length <= maxLen) {
       await this.bot.telegram.sendMessage(chatId, text, {
-        parse_mode: parseMode === "markdown" ? "MarkdownV2" : undefined,
+        parse_mode: tgParseMode,
       });
       return;
     }
@@ -1146,7 +1151,9 @@ class TelegramAdapter implements ChannelAdapter {
     }
 
     for (const chunk of chunks) {
-      await this.bot.telegram.sendMessage(chatId, chunk);
+      await this.bot.telegram.sendMessage(chatId, chunk, {
+        parse_mode: tgParseMode,
+      });
     }
   }
 
@@ -1161,7 +1168,7 @@ class TelegramAdapter implements ChannelAdapter {
         parseInt(messageId, 10),
         undefined,
         text,
-        { parse_mode: parseMode === "markdown" ? "MarkdownV2" : undefined }
+        { parse_mode: parseMode === "html" ? "HTML" : parseMode === "markdown" ? "MarkdownV2" : undefined }
       );
     } catch (error: any) {
       // Telegram returns error if message content unchanged — ignore

@@ -8,6 +8,7 @@
 
 import { logger } from "../logger";
 import { executeAgentChat } from "./agent-runtime";
+import { msgHeader, msgTruncate, formatMessage, escapeHtml as escHtml } from "../infra/telegram-format";
 
 export interface SubAgentOptions {
   name: string;
@@ -83,7 +84,10 @@ async function executeSubAgent(
     });
 
     // Send result to Telegram via queue
-    const responseText = `🤖 <b>Sub-Agent Complete</b>\n\n<b>Task:</b> ${escapeHtml(task)}\n\n${result.response}`;
+    const responseText = formatMessage({
+      header: msgHeader("🤖", "Sub-Agent Complete"),
+      body: `<b>Task:</b> ${escapeHtml(task)}\n\n${msgTruncate(escHtml(result.response))}`,
+    });
     const targetChatIds = chatId ? [chatId] : getAuthorizedChatIds();
     for (const cid of targetChatIds) {
       await sendProactiveMessage("telegram", cid, responseText);
@@ -99,7 +103,10 @@ async function executeSubAgent(
     });
 
     // Notify about failure
-    const errorText = `❌ <b>Sub-Agent Failed</b>\n\n<b>Task:</b> ${escapeHtml(task)}\n<b>Error:</b> ${escapeHtml(error.message)}`;
+    const errorText = formatMessage({
+      header: msgHeader("❌", "Sub-Agent Failed"),
+      body: `<b>Task:</b> ${escapeHtml(task)}\n<b>Error:</b> ${escHtml(error.message)}`,
+    });
     const targetChatIds = chatId ? [chatId] : getAuthorizedChatIds();
     for (const cid of targetChatIds) {
       await sendProactiveMessage("telegram", cid, errorText);

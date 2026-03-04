@@ -9,6 +9,7 @@
 import { logger } from "../logger";
 import { storage } from "../storage";
 import { getUserDate } from "../utils/dates";
+import { msgHeader, msgSection, msgStats, formatMessage, escapeHtml } from "../infra/telegram-format";
 
 interface TriagedEmail {
   emailId: string;
@@ -107,7 +108,11 @@ export async function runEmailTriage(): Promise<{
     // Send immediate notification for urgent emails
     const urgentEmails = classifications.filter(c => c.classification === "urgent");
     for (const urgent of urgentEmails) {
-      const urgentMsg = `🚨 Urgent Email\n\nFrom: ${urgent.from}\nSubject: ${urgent.subject}\n\n${urgent.summary}\n\nSuggested: ${urgent.suggestedAction}`;
+      const urgentMsg = formatMessage({
+        header: msgHeader("🚨", "Urgent Email"),
+        body: `<b>${escapeHtml(urgent.from.split("<")[0].trim())}</b>\n${escapeHtml(urgent.subject)}\n\n${escapeHtml(urgent.summary)}`,
+        cta: `→ ${escapeHtml(urgent.suggestedAction)}`,
+      });
       for (const chatId of getAuthorizedChatIds()) {
         await sendProactiveMessage("telegram", chatId, urgentMsg);
       }
@@ -189,37 +194,36 @@ Return JSON: { "emails": [{ "index": 0, "classification": "...", "summary": "...
 }
 
 function formatTriageDigest(classifications: TriagedEmail[]): string {
-  const lines: string[] = ["📧 Email Triage\n"];
-
   const counts: Record<string, number> = {};
   for (const c of classifications) {
     counts[c.classification] = (counts[c.classification] || 0) + 1;
   }
 
-  const summary: string[] = [];
-  if (counts.urgent) summary.push(`🔴 ${counts.urgent} urgent`);
-  if (counts.action_needed) summary.push(`🟡 ${counts.action_needed} action needed`);
-  if (counts.informational) summary.push(`🔵 ${counts.informational} info`);
-  if (counts.delegatable) summary.push(`🟢 ${counts.delegatable} delegatable`);
-  if (counts.spam) summary.push(`⚪ ${counts.spam} spam`);
-  lines.push(summary.join(" | "));
+  const statsBar = msgStats([
+    { emoji: "🔴", count: counts.urgent || 0, label: "urgent" },
+    { emoji: "🟡", count: counts.action_needed || 0, label: "action" },
+    { emoji: "🔵", count: counts.informational || 0, label: "info" },
+  ]);
 
-  // Show urgent + action_needed details
+  // Show urgent + action_needed details as sections
+  const sections: string[] = [];
   const actionable = classifications.filter(
     c => c.classification === "urgent" || c.classification === "action_needed"
   );
-  if (actionable.length > 0) {
-    lines.push("");
-    for (const c of actionable) {
-      const icon = c.classification === "urgent" ? "🔴" : "🟡";
-      lines.push(`${icon} ${c.from.split("<")[0].trim()}`);
-      lines.push(`  ${c.subject}`);
-      lines.push(`  → ${c.suggestedAction}`);
-    }
+
+  for (const c of actionable) {
+    const icon = c.classification === "urgent" ? "🔴" : "🟡";
+    sections.push(
+      `${icon} <b>${escapeHtml(c.from.split("<")[0].trim())}</b>\n  ${escapeHtml(c.subject)}\n  → ${escapeHtml(c.suggestedAction)}`
+    );
   }
 
-  lines.push("\nUse /emails to see full triage.");
-  return lines.join("\n");
+  return formatMessage({
+    header: msgHeader("📧", "Email Triage"),
+    stats: statsBar,
+    sections: sections.length > 0 ? sections : undefined,
+    cta: "/emails for full triage",
+  });
 }
 
 /**

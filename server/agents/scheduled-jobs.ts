@@ -14,6 +14,7 @@ import { executeAgentChat } from "./agent-runtime";
 import { getAllAgentActivity } from "./conversation-manager";
 import { messageBus } from "./message-bus";
 import { getUserDate } from "../utils/dates";
+import { msgHeader, msgSection, msgTruncate, formatMessage, escapeHtml } from "../infra/telegram-format";
 
 // Lazy DB
 let db: any = null;
@@ -193,7 +194,11 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
     const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
     const chatIds = getAuthorizedChatIds();
     for (const chatId of chatIds) {
-      await sendProactiveMessage("telegram", chatId, `☀️ Daily Briefing\n\n${result.response}`);
+      await sendProactiveMessage("telegram", chatId, formatMessage({
+        header: msgHeader("☀️", "Daily Briefing"),
+        body: msgTruncate(escapeHtml(result.response)),
+        cta: "/today for outcomes · /tasks for full list",
+      }));
     }
   } catch {
     // Telegram not configured — skip
@@ -224,7 +229,10 @@ registerJobHandler("weekly_report", async (agentId: string, agentSlug: string) =
     const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
     const chatIds = getAuthorizedChatIds();
     for (const chatId of chatIds) {
-      await sendProactiveMessage("telegram", chatId, `Weekly Report\n\n${result.response}`);
+      await sendProactiveMessage("telegram", chatId, formatMessage({
+        header: msgHeader("📊", "Weekly Report"),
+        body: msgTruncate(escapeHtml(result.response)),
+      }));
     }
   } catch {
     // Telegram not configured — skip
@@ -401,24 +409,31 @@ registerJobHandler("morning_checkin", async (_agentId: string, agentSlug: string
   const outcomes = day.top3Outcomes as Array<{ text: string; completed: boolean }> | null;
   const outcomesSet = outcomes?.some((o: any) => o.text);
 
-  // Build message with only missing items
-  let message = `Still to do: ${missing.join(", ")}\n\nJust text me what you've completed, or say "morning done" to check everything off!`;
+  // Build sections
+  const sections: string[] = [];
+  sections.push(msgSection("⬜", "Still To Do", missing));
 
   if (!outcomesSet) {
-    message += "\n\nWhat are your top 3 outcomes for today?";
+    sections.push("What are your top 3 outcomes for today?");
   }
 
   // Append system health issues if any
   const healthIssues = await runSystemHealthCheck();
   if (healthIssues.length > 0) {
-    message += "\n\n⚠️ System Issues:\n" + healthIssues.map(i => `- ${i}`).join("\n");
+    sections.push(msgSection("⚠️", "System Issues", healthIssues));
   }
+
+  const message = formatMessage({
+    header: msgHeader("☀️", "Morning Check-in"),
+    sections,
+    cta: 'Text what you\'ve completed, or "morning done" to check off all.',
+  });
 
   try {
     const { sendProactiveMessage } = await import("../channels/channel-manager");
     const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
     for (const chatId of getAuthorizedChatIds()) {
-      await sendProactiveMessage("telegram", chatId, `☀️ Morning Check-in\n\n${message}`);
+      await sendProactiveMessage("telegram", chatId, message);
     }
   } catch {
     // Telegram not configured — skip
@@ -469,41 +484,40 @@ registerJobHandler("evening_review", async (_agentId: string, agentSlug: string)
     return;
   }
 
-  // Build summary of only incomplete items
-  const sections: string[] = [];
+  // Build formatted sections
+  const msgSections: string[] = [];
 
   // Outcomes progress (only if there are incomplete ones)
   if (outcomesWithText.length > 0 && !allOutcomesDone) {
     const completed = outcomesWithText.filter((o: any) => o.completed).length;
-    sections.push(`Outcomes: ${completed}/${outcomesWithText.length} completed`);
-    for (const o of outcomesWithText) {
-      if (!o.completed) sections.push(`  ⬜ ${o.text}`);
-    }
+    const incompleteItems = outcomesWithText
+      .filter((o: any) => !o.completed)
+      .map((o: any) => `⬜ ${escapeHtml(o.text)} — incomplete`);
+    msgSections.push(msgSection("🎯", `Outcomes ${completed}/${outcomesWithText.length}`, incompleteItems));
   }
 
   // Only show open tasks
   if (todayInProgress.length > 0) {
-    sections.push(`\nStill open: ${todayInProgress.length}`);
-    for (const t of todayInProgress.slice(0, 5)) {
-      sections.push(`  ⬜ ${t.title}`);
-    }
+    const openItems = todayInProgress.slice(0, 5).map((t: any) => escapeHtml(t.title));
+    msgSections.push(msgSection("⬜", `${todayInProgress.length} Still Open`, openItems));
   }
 
   // Completed tasks summary (brief)
   if (todayCompleted.length > 0) {
-    sections.push(`\n✅ ${todayCompleted.length} task${todayCompleted.length > 1 ? "s" : ""} completed today`);
+    msgSections.push(`✅ ${todayCompleted.length} task${todayCompleted.length > 1 ? "s" : ""} closed today.`);
   }
-
-  const summaryData = sections.join("\n");
-
-  let message = `🌙 Evening Review\n\n${summaryData}\n\n`;
-  message += "How was your day? Reply with a quick reflection — or just say 'done' to close the day.";
 
   // Append system health issues if any
   const healthIssues = await runSystemHealthCheck();
   if (healthIssues.length > 0) {
-    message += "\n\n⚠️ System Issues:\n" + healthIssues.map(i => `- ${i}`).join("\n");
+    msgSections.push(msgSection("⚠️", "System Issues", healthIssues));
   }
+
+  const message = formatMessage({
+    header: msgHeader("🌙", "Evening Review"),
+    sections: msgSections,
+    cta: "How was today? A quick reflection closes the loop.",
+  });
 
   try {
     const { sendProactiveMessage } = await import("../channels/channel-manager");
@@ -570,7 +584,10 @@ registerJobHandler("weekly_report_cos", async (agentId: string, agentSlug: strin
     const { sendProactiveMessage } = await import("../channels/channel-manager");
     const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
     for (const chatId of getAuthorizedChatIds()) {
-      await sendProactiveMessage("telegram", chatId, `📊 Weekly Report\n\n${result.response}`);
+      await sendProactiveMessage("telegram", chatId, formatMessage({
+        header: msgHeader("📊", "Weekly Report"),
+        body: msgTruncate(escapeHtml(result.response)),
+      }));
     }
   } catch {
     // Telegram not configured — skip
@@ -604,7 +621,11 @@ registerJobHandler("pipeline_health_check", async (_agentId: string, agentSlug: 
 
   if (result.alerts.length > 0) {
     // Send consolidated Telegram alert
-    const alertMessage = `Pipeline Health Alert\n\n${result.alerts.map((a) => `- ${a}`).join("\n")}\n\nRun GET /api/health/pipeline for full status.`;
+    const alertMessage = formatMessage({
+      header: msgHeader("🔧", "Pipeline Health Alert"),
+      sections: [msgSection("⚠️", "Issues", result.alerts.map(a => escapeHtml(a)))],
+      cta: "<code>GET /api/health/pipeline</code> for full status.",
+    });
 
     try {
       const { sendProactiveMessage } = await import("../channels/channel-manager");

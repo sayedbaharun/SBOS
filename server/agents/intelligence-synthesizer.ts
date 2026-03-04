@@ -11,6 +11,7 @@
 import { logger } from "../logger";
 import { storage } from "../storage";
 import { getUserDate } from "../utils/dates";
+import { msgHeader, msgSection, msgStats, msgTruncate, formatMessage, escapeHtml } from "../infra/telegram-format";
 
 // ============================================================================
 // DATA GATHERING
@@ -502,47 +503,47 @@ function formatTelegramSynthesis(
   tasks: { dueToday: any[]; overdue: any[] },
   emails: { unreadCount: number }
 ): string {
-  const lines: string[] = [];
-  lines.push("🧠 Morning Intelligence Brief\n");
+  const statsBar = msgStats([
+    { emoji: "📅", count: events.length, label: "events" },
+    { emoji: "📋", count: tasks.dueToday.length, label: "tasks" },
+    { emoji: "🔥", count: tasks.overdue.length, label: "overdue" },
+    { emoji: "📧", count: emails.unreadCount, label: "unread" },
+  ]);
 
-  // Quick stats
-  const stats: string[] = [];
-  if (events.length > 0) stats.push(`📅 ${events.length} events`);
-  stats.push(`📋 ${tasks.dueToday.length} tasks due`);
-  if (tasks.overdue.length > 0) stats.push(`🔥 ${tasks.overdue.length} overdue`);
-  if (emails.unreadCount > 0) stats.push(`📧 ${emails.unreadCount} unread`);
-  lines.push(stats.join(" | "));
+  const sections: string[] = [];
 
   // Conflicts
   if (conflicts.length > 0) {
-    lines.push("\n⚠️ Conflicts:");
-    for (const c of conflicts) {
-      lines.push(`  ${c.severity === "high" ? "🔴" : "🟡"} ${c.description}`);
-    }
+    const items = conflicts.map((c) =>
+      `${c.severity === "high" ? "🔴" : "🟡"} ${escapeHtml(c.description)}`
+    );
+    sections.push(msgSection("⚠️", "Conflicts", items));
   }
 
   // Priorities
   if (result.priorities.length > 0) {
-    lines.push("\n🎯 Top Priorities:");
-    for (const p of result.priorities.slice(0, 3)) {
-      lines.push(`  ${p.urgency === "high" ? "🔴" : p.urgency === "medium" ? "🟡" : "🟢"} ${p.item}`);
-    }
+    const items = result.priorities.slice(0, 3).map((p: any) => {
+      const icon = p.urgency === "high" ? "🔴" : p.urgency === "medium" ? "🟡" : "🟢";
+      return `${icon} ${escapeHtml(p.item)}`;
+    });
+    sections.push(msgSection("🎯", "Priorities", items));
   }
 
   // Blind spots
   if (result.blindSpots.length > 0) {
-    lines.push("\n👁️ Watch For:");
-    for (const b of result.blindSpots.slice(0, 2)) {
-      lines.push(`  ${b.area}: ${b.suggestion}`);
-    }
+    const items = result.blindSpots.slice(0, 2).map((b: any) =>
+      `${escapeHtml(b.area)} — ${escapeHtml(b.suggestion)}`
+    );
+    sections.push(msgSection("👁️", "Watch For", items));
   }
 
-  // Full synthesis (truncated)
-  if (result.synthesis.length > 0) {
-    lines.push(`\n${result.synthesis.slice(0, 800)}`);
-  }
-
-  return lines.join("\n");
+  return formatMessage({
+    header: msgHeader("🧠", "Morning Intelligence"),
+    stats: statsBar,
+    sections,
+    body: result.synthesis ? msgTruncate(escapeHtml(result.synthesis), 800) : undefined,
+    cta: "/today for outcomes · /tasks for full list",
+  });
 }
 
 /**

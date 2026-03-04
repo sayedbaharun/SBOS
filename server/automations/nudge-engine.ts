@@ -15,6 +15,7 @@ import cron from "node-cron";
 import { storage } from "../storage";
 import { logger } from "../logger";
 import { getUserDate } from "../utils/dates";
+import { msgHeader, msgSection, formatMessage, escapeHtml } from "../infra/telegram-format";
 
 // Track last run time for system health monitoring
 export let lastNudgeRunAt: Date | null = null;
@@ -68,7 +69,11 @@ async function checkHealthNudge(today: string): Promise<NudgeResult | null> {
     if (!todayEntry) {
       return {
         type: "health_missing",
-        message: "🏥 No health data logged today. How did you sleep? Energy level? A quick update keeps your health battery accurate.\n\nJust say: \"slept 7h good, energy 4\"",
+        message: formatMessage({
+          header: msgHeader("🏥", "Health Update Missing"),
+          body: "No health data logged. A quick update keeps your metrics current.",
+          cta: 'Say: "slept 7h good, energy 4"',
+        }),
         priority: "medium",
       };
     }
@@ -94,14 +99,17 @@ async function checkTaskDeadlines(today: string): Promise<NudgeResult | null> {
     });
 
     if (overdue.length > 0) {
-      const taskList = overdue
+      const taskItems = overdue
         .slice(0, 3)
-        .map((t: any) => `  - ${t.title} [${t.priority}]`)
-        .join("\n");
+        .map((t: any) => `${escapeHtml(t.title)} <code>${t.priority}</code>`);
 
       return {
         type: "task_deadlines",
-        message: `🔥 ${overdue.length} task${overdue.length > 1 ? "s" : ""} due today or overdue:\n${taskList}\n\nUse /tasks to see your full list.`,
+        message: formatMessage({
+          header: msgHeader("🔥", `${overdue.length} Task${overdue.length > 1 ? "s" : ""} Due`),
+          sections: [msgSection("📋", "Overdue", taskItems)],
+          cta: "/done to complete · /tasks for full list",
+        }),
         priority: "high",
       };
     }
@@ -132,14 +140,17 @@ async function checkP0Tasks(today: string): Promise<NudgeResult | null> {
     );
 
     if (p0NotStarted.length > 0) {
-      const taskList = p0NotStarted
+      const taskItems = p0NotStarted
         .slice(0, 3)
-        .map((t: any) => `  - ${t.title}`)
-        .join("\n");
+        .map((t: any) => `${escapeHtml(t.title)} <code>P0</code> — not started`);
 
       return {
         type: "p0_not_started",
-        message: `⚡ ${p0NotStarted.length} P0 task${p0NotStarted.length > 1 ? "s" : ""} not started:\n${taskList}\n\nThese are your highest-priority items for today.`,
+        message: formatMessage({
+          header: msgHeader("⚡", `${p0NotStarted.length} P0 Task${p0NotStarted.length > 1 ? "s" : ""} Unstarted`),
+          sections: [msgSection("🎯", "Highest Priority", taskItems)],
+          cta: "/tasks to take action",
+        }),
         priority: "high",
       };
     }
@@ -167,7 +178,11 @@ async function checkNutritionNudge(today: string): Promise<NudgeResult | null> {
     if (!nutrition || nutrition.length === 0) {
       return {
         type: "nutrition_missing",
-        message: "🍽️ No meals logged today. Tracking helps optimize your nutrition.\n\nJust say: \"lunch chicken rice 600 cal 40g protein\"",
+        message: formatMessage({
+          header: msgHeader("🍽️", "No Meals Logged"),
+          body: "Tracking keeps your nutrition data accurate.",
+          cta: 'Say: "lunch chicken rice 600 cal 40g protein"',
+        }),
         priority: "low",
       };
     }
@@ -195,7 +210,16 @@ async function checkEveningReminder(today: string): Promise<NudgeResult | null> 
     if (!hasEvening) {
       return {
         type: "evening_reminder",
-        message: "🌙 Time to wind down. Quick evening review?\n\n- How did today go?\n- What's tomorrow's top priority?\n- Anything to capture?\n\nOpen /today or just tell me here.",
+        message: formatMessage({
+          header: msgHeader("🌙", "Wind Down"),
+          body: "Time for a quick evening review.",
+          sections: [msgSection("📝", "Reflect", [
+            "How did today go?",
+            "What's tomorrow's top priority?",
+            "Anything to capture?",
+          ])],
+          cta: "/today or just tell me here",
+        }),
         priority: "low",
       };
     }
