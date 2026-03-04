@@ -452,19 +452,9 @@ export async function runDailyIntelligence(): Promise<{
     allErrors.push(`Storage: ${err.message}`);
   }
 
-  // Send to Telegram
-  try {
-    const { sendProactiveMessage } = await import("../channels/channel-manager");
-    const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
-
-    const telegramMessage = formatTelegramSynthesis(result, conflicts, calendarResult.events, tasksResult, emailsResult);
-
-    for (const chatId of getAuthorizedChatIds()) {
-      await sendProactiveMessage("telegram", chatId, telegramMessage);
-    }
-  } catch {
-    // Telegram not configured — skip
-  }
+  // Note: Telegram notification removed — intelligence is now sent as part of
+  // the unified daily_briefing handler in scheduled-jobs.ts.
+  // The data is still stored in daily_intelligence table for API access.
 
   logger.info(
     {

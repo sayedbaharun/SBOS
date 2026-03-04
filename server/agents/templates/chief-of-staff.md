@@ -12,15 +12,13 @@ max_delegation_depth: 2
 model_tier: top
 temperature: 0.5
 schedule:
-  daily_intelligence: "45 4 * * *"
   daily_briefing: "0 5 * * *"
   morning_checkin: "0 6 * * *"
   email_triage: "0 4,9,14 * * *"
-  meeting_prep: "*/15 * * * *"
   evening_review: "0 14 * * *"
   weekly_report_cos: "0 12 * * 5"
   session_log_extraction: "0 22 * * *"
-  pipeline_health_check: "0 * * * *"
+  pipeline_health_check: "0 */6 * * *"
   memory_consolidation: "0 23 * * *"
 memory_scope: isolated
 ---
