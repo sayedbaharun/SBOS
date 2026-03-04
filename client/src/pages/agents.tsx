@@ -317,8 +317,8 @@ function OrgChartNode({
               <div className={`flex h-6 w-6 items-center justify-center rounded-full ${bg}`}>
                 <Icon className={`h-3.5 w-3.5 ${color}`} />
               </div>
-              <div className="text-left">
-                <p className="text-[11px] font-medium leading-tight whitespace-nowrap">{agent.name}</p>
+              <div className="text-left max-w-[80px]">
+                <p className="text-[11px] font-medium leading-tight truncate">{agent.name}</p>
                 <span className={`text-[9px] capitalize ${ROLE_TEXT[agent.role] || "text-muted-foreground"}`}>
                   {agent.role}
                 </span>
@@ -346,7 +346,6 @@ function OrgChartNode({
 // ── Org Chart View (desktop) ────────────────────────────
 
 function OrgChartView({
-  agents,
   orgTree,
   onSelect,
 }: {
@@ -354,87 +353,88 @@ function OrgChartView({
   orgTree: OrgNode[];
   onSelect: (slug: string) => void;
 }) {
-  // Separate executives (roots) from their children
   const executives = orgTree;
 
-  // Collect all children of all executives into groups by parent
-  const childrenByParent = new Map<string, OrgNode[]>();
-  for (const exec of executives) {
-    if (exec.children.length > 0) {
-      childrenByParent.set(exec.agent.id, exec.children);
-    }
-  }
-
   return (
-    <div className="rounded-lg border border-border/50 bg-card p-4 overflow-x-auto">
-      <div className="flex flex-col items-center gap-0 min-w-fit">
+    <div className="rounded-lg border border-border/50 bg-card p-6">
+      <div className="flex flex-col items-center">
         {/* Virtual root: Sayed */}
-        <div className="flex flex-col items-center">
-          <div className="flex items-center gap-1.5 rounded-lg border-2 border-foreground/20 bg-foreground/5 px-2.5 py-1.5 shadow-sm">
-            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-foreground/10">
-              <User className="h-3.5 w-3.5 text-foreground" />
-            </div>
-            <div>
-              <p className="text-[11px] font-semibold leading-tight">Sayed</p>
-              <p className="text-[9px] text-muted-foreground">Founder</p>
-            </div>
+        <div className="flex items-center gap-1.5 rounded-lg border-2 border-foreground/20 bg-foreground/5 px-2.5 py-1.5 shadow-sm">
+          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-foreground/10">
+            <User className="h-3.5 w-3.5 text-foreground" />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold leading-tight">Sayed</p>
+            <p className="text-[9px] text-muted-foreground">Founder</p>
           </div>
         </div>
 
-        {/* Vertical connector from Sayed down */}
-        {executives.length > 0 && (
-          <div className="w-px h-3 bg-border" />
-        )}
+        {/* Vertical connector from Sayed */}
+        {executives.length > 0 && <div className="w-px h-4 bg-border" />}
 
-        {/* Horizontal connector bar */}
+        {/* Horizontal connector spanning from first to last executive */}
         {executives.length > 1 && (
-          <div className="relative flex items-center justify-center w-full">
-            <div
-              className="h-px bg-border"
-              style={{
-                width: `calc(${(executives.length - 1)} * 130px)`,
-              }}
-            />
+          <div className="w-full flex">
+            {executives.map((_, i) => (
+              <div key={i} className="flex-1 flex justify-center">
+                {/* Left half of connector */}
+                <div className={`flex-1 ${i > 0 ? "border-t border-border" : ""}`} />
+                {/* Right half of connector */}
+                <div className={`flex-1 ${i < executives.length - 1 ? "border-t border-border" : ""}`} />
+              </div>
+            ))}
           </div>
         )}
 
-        {/* Executive level */}
+        {/* Executive level — each gets flex-1 */}
         {executives.length > 0 && (
-          <div className="flex items-start gap-0">
+          <div className="w-full flex">
             {executives.map((exec) => (
-              <div key={exec.agent.id} className="flex flex-col items-center" style={{ minWidth: "130px" }}>
-                <div className="w-px h-3 bg-border" />
+              <div key={exec.agent.id} className="flex-1 flex flex-col items-center">
+                <div className="w-px h-4 bg-border" />
                 <OrgChartNode agent={exec.agent} onSelect={onSelect} />
 
                 {/* Children of this executive */}
                 {exec.children.length > 0 && (
                   <>
-                    <div className="w-px h-3 bg-border" />
+                    <div className="w-px h-4 bg-border/70" />
 
+                    {/* Horizontal connector for children */}
                     {exec.children.length > 1 && (
-                      <div className="relative flex items-center justify-center w-full">
-                        <div
-                          className="h-px bg-border/60"
-                          style={{
-                            width: `calc(${(exec.children.length - 1)} * 110px)`,
-                          }}
-                        />
+                      <div className="w-full flex">
+                        {exec.children.map((_, i) => (
+                          <div key={i} className="flex-1 flex justify-center">
+                            <div className={`flex-1 ${i > 0 ? "border-t border-border/60" : ""}`} />
+                            <div className={`flex-1 ${i < exec.children.length - 1 ? "border-t border-border/60" : ""}`} />
+                          </div>
+                        ))}
                       </div>
                     )}
 
-                    <div className="flex items-start gap-0">
+                    <div className="w-full flex">
                       {exec.children.map((child) => (
-                        <div key={child.agent.id} className="flex flex-col items-center" style={{ minWidth: "110px" }}>
-                          <div className="w-px h-3 bg-border/60" />
+                        <div key={child.agent.id} className="flex-1 flex flex-col items-center">
+                          <div className="w-px h-4 bg-border/60" />
                           <OrgChartNode agent={child.agent} onSelect={onSelect} />
 
+                          {/* Grandchildren */}
                           {child.children.length > 0 && (
                             <>
-                              <div className="w-px h-3 bg-border/40" />
-                              <div className="flex items-start gap-0">
+                              <div className="w-px h-4 bg-border/40" />
+                              {child.children.length > 1 && (
+                                <div className="w-full flex">
+                                  {child.children.map((_, i) => (
+                                    <div key={i} className="flex-1 flex justify-center">
+                                      <div className={`flex-1 ${i > 0 ? "border-t border-border/40" : ""}`} />
+                                      <div className={`flex-1 ${i < child.children.length - 1 ? "border-t border-border/40" : ""}`} />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="w-full flex">
                                 {child.children.map((gc) => (
-                                  <div key={gc.agent.id} className="flex flex-col items-center" style={{ minWidth: "100px" }}>
-                                    <div className="w-px h-3 bg-border/40" />
+                                  <div key={gc.agent.id} className="flex-1 flex flex-col items-center">
+                                    <div className="w-px h-4 bg-border/40" />
                                     <OrgChartNode agent={gc.agent} onSelect={onSelect} />
                                   </div>
                                 ))}
