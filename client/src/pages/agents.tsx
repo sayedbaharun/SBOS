@@ -9,6 +9,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -60,12 +66,25 @@ interface OrgNode {
 
 interface DelegationLog {
   id: string;
+  title: string;
   status: string;
+  assignedBy: string;
+  assignedTo: string;
+  createdAt: string;
+  completedAt: string | null;
+  deliverableType: string | null;
 }
 
 interface ScheduleJob {
-  id: string;
+  agentSlug: string;
+  jobName: string;
+  cronExpression: string;
+  lastRun: string | null;
+  runCount: number;
+  errorCount: number;
 }
+
+type StatSheetType = "agents" | "delegations" | "schedules" | "links" | null;
 
 // ── Constants ──────────────────────────────────────────
 
@@ -123,14 +142,21 @@ function StatCard({
   value,
   icon: Icon,
   color,
+  onClick,
 }: {
   label: string;
   value: number | string;
   icon: React.ElementType;
   color: string;
+  onClick?: () => void;
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border/50 bg-card px-4 py-3">
+    <div
+      onClick={onClick}
+      className={`flex items-center gap-3 rounded-lg border border-border/50 bg-card px-4 py-3 transition-all duration-150 ${
+        onClick ? "cursor-pointer hover:border-border hover:shadow-sm" : ""
+      }`}
+    >
       <div
         className={`flex h-9 w-9 items-center justify-center rounded-lg ${color} bg-opacity-10`}
         style={{ backgroundColor: `color-mix(in srgb, currentColor 10%, transparent)` }}
@@ -432,6 +458,7 @@ export default function AgentsPage() {
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"grid" | "tree">("grid");
   const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [statSheet, setStatSheet] = useState<StatSheetType>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -553,24 +580,28 @@ export default function AgentsPage() {
           value={agents.length}
           icon={Bot}
           color="text-foreground"
+          onClick={() => setStatSheet("agents")}
         />
         <StatCard
           label="Active Delegations"
           value={activeDelegations}
           icon={Activity}
           color="text-blue-500"
+          onClick={() => setStatSheet("delegations")}
         />
         <StatCard
           label="Scheduled Jobs"
           value={schedules.length}
           icon={Clock}
           color="text-amber-500"
+          onClick={() => setStatSheet("schedules")}
         />
         <StatCard
           label="Delegation Links"
           value={agents.reduce((sum, a) => sum + a.canDelegateTo.length, 0)}
           icon={GitBranch}
           color="text-emerald-500"
+          onClick={() => setStatSheet("links")}
         />
       </div>
 
@@ -652,6 +683,162 @@ export default function AgentsPage() {
           ))}
         </div>
       )}
+
+      {/* ── Stat Detail Sheet ── */}
+      <Sheet open={statSheet !== null} onOpenChange={(open) => !open && setStatSheet(null)}>
+        <SheetContent className="overflow-y-auto sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle>
+              {statSheet === "agents" && "All Agents"}
+              {statSheet === "delegations" && "Active Delegations"}
+              {statSheet === "schedules" && "Scheduled Jobs"}
+              {statSheet === "links" && "Delegation Links"}
+            </SheetTitle>
+          </SheetHeader>
+
+          <div className="mt-4 space-y-2">
+            {/* ── All Agents ── */}
+            {statSheet === "agents" &&
+              agents.map((a) => (
+                <div
+                  key={a.id}
+                  onClick={() => { setStatSheet(null); handleSelect(a.slug); }}
+                  className="flex items-center gap-3 rounded-lg border border-border/50 p-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted/80">
+                    <Bot className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{a.name}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      @{a.slug} &middot;{" "}
+                      <span className={`capitalize ${ROLE_TEXT[a.role] || ""}`}>{a.role}</span> &middot;{" "}
+                      <span className={TIER_COLORS[a.modelTier] || ""}>{TIER_LABELS[a.modelTier] || a.modelTier}</span>
+                    </p>
+                  </div>
+                  <span
+                    className={`inline-flex h-2 w-2 rounded-full ${
+                      a.isActive ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"
+                    }`}
+                  />
+                </div>
+              ))}
+
+            {/* ── Active Delegations ── */}
+            {statSheet === "delegations" && (() => {
+              const active = delegationLog.filter(
+                (d) => d.status === "pending" || d.status === "in_progress"
+              );
+              if (active.length === 0) {
+                return (
+                  <p className="text-sm text-muted-foreground py-8 text-center">
+                    No active delegations right now.
+                  </p>
+                );
+              }
+              return active.map((d) => {
+                const assignee = agents.find((a) => a.id === d.assignedTo);
+                const assigner = agents.find((a) => a.id === d.assignedBy);
+                return (
+                  <div
+                    key={d.id}
+                    className="rounded-lg border border-border/50 p-3 space-y-1.5"
+                  >
+                    <p className="text-sm font-medium">{d.title}</p>
+                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <Badge
+                        variant={d.status === "in_progress" ? "default" : "secondary"}
+                        className="text-[10px] h-5"
+                      >
+                        {d.status}
+                      </Badge>
+                      {d.deliverableType && (
+                        <Badge variant="outline" className="text-[10px] h-5">
+                          {d.deliverableType}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {assigner?.name || d.assignedBy} &rarr; {assignee?.name || "Unknown"}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground/60">
+                      {new Date(d.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                );
+              });
+            })()}
+
+            {/* ── Scheduled Jobs ── */}
+            {statSheet === "schedules" && (() => {
+              if (schedules.length === 0) {
+                return (
+                  <p className="text-sm text-muted-foreground py-8 text-center">
+                    No scheduled jobs configured.
+                  </p>
+                );
+              }
+              return schedules.map((s, i) => (
+                <div
+                  key={`${s.agentSlug}-${s.jobName}-${i}`}
+                  onClick={() => { setStatSheet(null); handleSelect(s.agentSlug); }}
+                  className="rounded-lg border border-border/50 p-3 space-y-1 cursor-pointer hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">{s.jobName}</p>
+                    <code className="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground font-mono">
+                      {s.cronExpression}
+                    </code>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Agent: @{s.agentSlug}
+                  </p>
+                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
+                    <span>{s.runCount} runs</span>
+                    {s.errorCount > 0 && (
+                      <span className="text-red-500">{s.errorCount} errors</span>
+                    )}
+                    {s.lastRun && (
+                      <span>Last: {new Date(s.lastRun).toLocaleString()}</span>
+                    )}
+                  </div>
+                </div>
+              ));
+            })()}
+
+            {/* ── Delegation Links ── */}
+            {statSheet === "links" &&
+              agents
+                .filter((a) => a.canDelegateTo.length > 0)
+                .map((a) => (
+                  <div
+                    key={a.id}
+                    className="rounded-lg border border-border/50 p-3 space-y-2"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{a.name}</span>
+                      <span className="text-[11px] text-muted-foreground">@{a.slug}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {a.canDelegateTo.map((targetSlug) => {
+                        const target = agents.find((t) => t.slug === targetSlug);
+                        return (
+                          <span
+                            key={targetSlug}
+                            onClick={() => { setStatSheet(null); handleSelect(targetSlug); }}
+                            className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-1 text-[11px] cursor-pointer hover:bg-muted transition-colors"
+                          >
+                            <GitBranch className="h-3 w-3 text-muted-foreground" />
+                            {target?.name || targetSlug}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
