@@ -311,23 +311,20 @@ function OrgChartNode({
         <TooltipTrigger asChild>
           <div
             onClick={() => onSelect(agent.slug)}
-            className="group relative flex flex-col items-center gap-1.5 cursor-pointer"
+            className="group relative flex flex-col items-center cursor-pointer"
           >
-            <div className={`flex flex-col items-center gap-1.5 rounded-xl border border-border/50 bg-card px-3 py-2.5 shadow-sm hover:border-border hover:shadow-md transition-all duration-200 min-w-[100px]`}>
-              <div className={`flex h-9 w-9 items-center justify-center rounded-full ${bg}`}>
-                <Icon className={`h-4.5 w-4.5 ${color}`} />
+            <div className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-card px-2 py-1.5 shadow-sm hover:border-border hover:shadow-md transition-all duration-200">
+              <div className={`flex h-6 w-6 items-center justify-center rounded-full ${bg}`}>
+                <Icon className={`h-3.5 w-3.5 ${color}`} />
               </div>
-              <div className="text-center">
-                <p className="text-[12px] font-medium leading-tight whitespace-nowrap">{agent.name}</p>
-                <div className="flex items-center justify-center gap-1 mt-0.5">
-                  <span className={`inline-flex h-1.5 w-1.5 rounded-full ${ROLE_DOT[agent.role] || "bg-zinc-400"}`} />
-                  <span className={`text-[10px] capitalize ${ROLE_TEXT[agent.role] || "text-muted-foreground"}`}>
-                    {agent.role}
-                  </span>
-                </div>
+              <div className="text-left">
+                <p className="text-[11px] font-medium leading-tight whitespace-nowrap">{agent.name}</p>
+                <span className={`text-[9px] capitalize ${ROLE_TEXT[agent.role] || "text-muted-foreground"}`}>
+                  {agent.role}
+                </span>
               </div>
               <span
-                className={`absolute top-1.5 right-1.5 inline-flex h-1.5 w-1.5 rounded-full ${
+                className={`absolute top-1 right-1 inline-flex h-1.5 w-1.5 rounded-full ${
                   agent.isActive ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"
                 }`}
               />
@@ -369,24 +366,24 @@ function OrgChartView({
   }
 
   return (
-    <div className="rounded-lg border border-border/50 bg-card p-6 overflow-x-auto">
+    <div className="rounded-lg border border-border/50 bg-card p-4 overflow-x-auto">
       <div className="flex flex-col items-center gap-0 min-w-fit">
         {/* Virtual root: Sayed */}
         <div className="flex flex-col items-center">
-          <div className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-foreground/20 bg-foreground/5 px-4 py-3 shadow-sm min-w-[100px]">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-foreground/10">
-              <User className="h-4.5 w-4.5 text-foreground" />
+          <div className="flex items-center gap-1.5 rounded-lg border-2 border-foreground/20 bg-foreground/5 px-2.5 py-1.5 shadow-sm">
+            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-foreground/10">
+              <User className="h-3.5 w-3.5 text-foreground" />
             </div>
-            <div className="text-center">
-              <p className="text-[12px] font-semibold leading-tight">Sayed</p>
-              <p className="text-[10px] text-muted-foreground">Founder</p>
+            <div>
+              <p className="text-[11px] font-semibold leading-tight">Sayed</p>
+              <p className="text-[9px] text-muted-foreground">Founder</p>
             </div>
           </div>
         </div>
 
         {/* Vertical connector from Sayed down */}
         {executives.length > 0 && (
-          <div className="w-px h-6 bg-border" />
+          <div className="w-px h-3 bg-border" />
         )}
 
         {/* Horizontal connector bar */}
@@ -395,7 +392,7 @@ function OrgChartView({
             <div
               className="h-px bg-border"
               style={{
-                width: `calc(${(executives.length - 1)} * 140px)`,
+                width: `calc(${(executives.length - 1)} * 130px)`,
               }}
             />
           </div>
@@ -404,24 +401,22 @@ function OrgChartView({
         {/* Executive level */}
         {executives.length > 0 && (
           <div className="flex items-start gap-0">
-            {executives.map((exec, i) => (
-              <div key={exec.agent.id} className="flex flex-col items-center" style={{ minWidth: "140px" }}>
-                {/* Vertical connector down from horizontal bar */}
-                <div className="w-px h-6 bg-border" />
+            {executives.map((exec) => (
+              <div key={exec.agent.id} className="flex flex-col items-center" style={{ minWidth: "130px" }}>
+                <div className="w-px h-3 bg-border" />
                 <OrgChartNode agent={exec.agent} onSelect={onSelect} />
 
                 {/* Children of this executive */}
                 {exec.children.length > 0 && (
                   <>
-                    <div className="w-px h-6 bg-border" />
+                    <div className="w-px h-3 bg-border" />
 
-                    {/* Horizontal connector for children */}
                     {exec.children.length > 1 && (
                       <div className="relative flex items-center justify-center w-full">
                         <div
                           className="h-px bg-border/60"
                           style={{
-                            width: `calc(${(exec.children.length - 1)} * 120px)`,
+                            width: `calc(${(exec.children.length - 1)} * 110px)`,
                           }}
                         />
                       </div>
@@ -429,18 +424,17 @@ function OrgChartView({
 
                     <div className="flex items-start gap-0">
                       {exec.children.map((child) => (
-                        <div key={child.agent.id} className="flex flex-col items-center" style={{ minWidth: "120px" }}>
-                          <div className="w-px h-6 bg-border/60" />
+                        <div key={child.agent.id} className="flex flex-col items-center" style={{ minWidth: "110px" }}>
+                          <div className="w-px h-3 bg-border/60" />
                           <OrgChartNode agent={child.agent} onSelect={onSelect} />
 
-                          {/* Third level (grandchildren) */}
                           {child.children.length > 0 && (
                             <>
-                              <div className="w-px h-4 bg-border/40" />
+                              <div className="w-px h-3 bg-border/40" />
                               <div className="flex items-start gap-0">
                                 {child.children.map((gc) => (
-                                  <div key={gc.agent.id} className="flex flex-col items-center" style={{ minWidth: "110px" }}>
-                                    <div className="w-px h-4 bg-border/40" />
+                                  <div key={gc.agent.id} className="flex flex-col items-center" style={{ minWidth: "100px" }}>
+                                    <div className="w-px h-3 bg-border/40" />
                                     <OrgChartNode agent={gc.agent} onSelect={onSelect} />
                                   </div>
                                 ))}

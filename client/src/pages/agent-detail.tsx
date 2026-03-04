@@ -1,33 +1,18 @@
-import { useState, useRef, useEffect, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useRoute, useLocation } from "wouter";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import {
   ArrowLeft,
   Bot,
   Brain,
   ChevronRight,
   Clock,
-  FileText,
   GitBranch,
   Loader2,
-  MessageSquare,
-  Send,
   Shield,
-  Sparkles,
   Target,
   Wrench,
   Zap,
@@ -66,24 +51,6 @@ interface Agent {
   createdAt: string;
 }
 
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  metadata: Record<string, unknown> | null;
-  createdAt: string;
-}
-
-interface ChatResponse {
-  response: string;
-  agentId: string;
-  agentSlug: string;
-  actions: unknown[];
-  delegations: unknown[];
-  tokensUsed: number;
-  model: string;
-}
-
 interface AgentTask {
   id: string;
   title: string;
@@ -105,6 +72,14 @@ interface AgentMemory {
   updatedAt: string;
 }
 
+interface ConversationMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
 // ── Constants ──────────────────────────────────────────
 
 const TASK_STATUS_ICON: Record<string, React.ElementType> = {
@@ -121,249 +96,9 @@ const TASK_STATUS_COLOR: Record<string, string> = {
   failed: "text-red-500",
 };
 
-// ── Chat Bubble ────────────────────────────────────────
-
-function ChatBubble({ message }: { message: ChatMessage }) {
-  const isUser = message.role === "user";
-  const time = new Date(message.createdAt).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  return (
-    <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
-      <div
-        className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full mt-0.5 ${
-          isUser ? "bg-foreground text-background" : "bg-muted"
-        }`}
-      >
-        {isUser ? (
-          <span className="text-[10px] font-semibold">SB</span>
-        ) : (
-          <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-        )}
-      </div>
-      <div className={`max-w-[80%] space-y-1 ${isUser ? "items-end" : ""}`}>
-        <div
-          className={`rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
-            isUser
-              ? "bg-foreground text-background rounded-br-sm"
-              : "bg-zinc-100 text-zinc-900 dark:bg-muted/60 dark:text-foreground rounded-bl-sm"
-          }`}
-        >
-          <p className="whitespace-pre-wrap">{message.content}</p>
-        </div>
-        <p className={`text-[10px] text-muted-foreground/60 px-1 ${isUser ? "text-right" : ""}`}>
-          {time}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ── Chat Panel ─────────────────────────────────────────
-
-function ChatPanel({ slug, agentName }: { slug: string; agentName: string }) {
-  const queryClient = useQueryClient();
-  const [message, setMessage] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const { data: conversations = [], isLoading: loadingConversations } = useQuery<ChatMessage[]>({
-    queryKey: ["/api/agents", slug, "conversations"],
-    queryFn: async () => {
-      const res = await fetch(`/api/agents/${slug}/conversations`, {
-        credentials: "include",
-      });
-      if (!res.ok) return [];
-      return res.json();
-    },
-  });
-
-  const sendMutation = useMutation<ChatResponse, Error, string>({
-    mutationFn: async (msg: string) => {
-      const res = await fetch(`/api/agents/${slug}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ message: msg }),
-      });
-      if (!res.ok) throw new Error("Failed to send message");
-      return res.json();
-    },
-    onMutate: async (msg) => {
-      // Optimistic update: add user message immediately
-      const optimisticMessage: ChatMessage = {
-        id: `temp-${Date.now()}`,
-        role: "user",
-        content: msg,
-        metadata: null,
-        createdAt: new Date().toISOString(),
-      };
-      queryClient.setQueryData<ChatMessage[]>(
-        ["/api/agents", slug, "conversations"],
-        (old = []) => [...old, optimisticMessage]
-      );
-    },
-    onSuccess: (data) => {
-      // Add assistant response
-      const assistantMessage: ChatMessage = {
-        id: `resp-${Date.now()}`,
-        role: "assistant",
-        content: data.response,
-        metadata: {
-          model: data.model,
-          tokensUsed: data.tokensUsed,
-          actions: data.actions,
-          delegations: data.delegations,
-        },
-        createdAt: new Date().toISOString(),
-      };
-      queryClient.setQueryData<ChatMessage[]>(
-        ["/api/agents", slug, "conversations"],
-        (old = []) => [...old, assistantMessage]
-      );
-    },
-    onError: () => {
-      // Remove optimistic message on error
-      queryClient.invalidateQueries({
-        queryKey: ["/api/agents", slug, "conversations"],
-      });
-    },
-  });
-
-  // Scroll to bottom on new messages
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [conversations, sendMutation.isPending]);
-
-  const handleSend = () => {
-    const trimmed = message.trim();
-    if (!trimmed || sendMutation.isPending) return;
-    setMessage("");
-    sendMutation.mutate(trimmed);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  // Get last response metadata
-  const lastAssistantMsg = useMemo(() => {
-    const assistantMsgs = conversations.filter((m) => m.role === "assistant");
-    return assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1] : null;
-  }, [conversations]);
-
-  const lastMeta = lastAssistantMsg?.metadata as { model?: string; tokensUsed?: number } | null;
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Chat header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
-        <div className="flex items-center gap-2">
-          <MessageSquare className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Chat</span>
-        </div>
-        {lastMeta && (
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-            {lastMeta.model && <span>{lastMeta.model}</span>}
-            {lastMeta.tokensUsed != null && <span>{lastMeta.tokensUsed} tokens</span>}
-          </div>
-        )}
-      </div>
-
-      {/* Messages */}
-      <ScrollArea ref={scrollRef} className="flex-1 px-4">
-        <div className="py-4 space-y-4">
-          {loadingConversations ? (
-            <div className="space-y-4">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className={`flex gap-2.5 ${i % 2 === 0 ? "flex-row-reverse" : ""}`}>
-                  <Skeleton className="h-7 w-7 rounded-full flex-shrink-0" />
-                  <Skeleton className={`h-14 rounded-xl ${i % 2 === 0 ? "w-48" : "w-64"}`} />
-                </div>
-              ))}
-            </div>
-          ) : conversations.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/50 mb-3">
-                <Sparkles className="h-5 w-5 text-muted-foreground/60" />
-              </div>
-              <p className="text-sm font-medium text-foreground mb-1">
-                Start a conversation
-              </p>
-              <p className="text-[12px] text-muted-foreground max-w-[220px]">
-                Send a message to {agentName} and see how they respond.
-              </p>
-            </div>
-          ) : (
-            conversations
-              .filter((m) => m.role !== "system")
-              .map((msg) => <ChatBubble key={msg.id} message={msg} />)
-          )}
-
-          {/* Typing indicator */}
-          {sendMutation.isPending && (
-            <div className="flex gap-2.5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted flex-shrink-0">
-                <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-              </div>
-              <div className="rounded-xl bg-muted/60 px-4 py-3 rounded-bl-sm">
-                <div className="flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "300ms" }} />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </ScrollArea>
-
-      {/* Input */}
-      <div className="border-t border-border/50 p-3">
-        {sendMutation.isError && (
-          <p className="text-[11px] text-red-500 mb-2 px-1">
-            Failed to send message. Please try again.
-          </p>
-        )}
-        <div className="flex items-center gap-2">
-          <Input
-            ref={inputRef}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={`Message ${agentName}...`}
-            className="h-9 text-[13px]"
-            disabled={sendMutation.isPending}
-          />
-          <Button
-            size="sm"
-            className="h-9 w-9 p-0 flex-shrink-0"
-            onClick={handleSend}
-            disabled={!message.trim() || sendMutation.isPending}
-          >
-            {sendMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Overview Tab ───────────────────────────────────────
 
 function OverviewTab({ agent }: { agent: Agent }) {
-  // Trim soul to first 300 chars for excerpt
   const soulExcerpt = agent.soul
     ? agent.soul.length > 300
       ? agent.soul.slice(0, 300) + "..."
@@ -374,7 +109,6 @@ function OverviewTab({ agent }: { agent: Agent }) {
 
   return (
     <div className="space-y-6 py-1">
-      {/* Soul / Personality */}
       {soulExcerpt && (
         <div className="space-y-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -386,7 +120,6 @@ function OverviewTab({ agent }: { agent: Agent }) {
         </div>
       )}
 
-      {/* Expertise */}
       {agent.expertise && agent.expertise.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -405,7 +138,6 @@ function OverviewTab({ agent }: { agent: Agent }) {
         </div>
       )}
 
-      {/* Tools */}
       {agent.availableTools.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -426,7 +158,6 @@ function OverviewTab({ agent }: { agent: Agent }) {
         </div>
       )}
 
-      {/* Permissions */}
       {agent.actionPermissions.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -446,7 +177,6 @@ function OverviewTab({ agent }: { agent: Agent }) {
         </div>
       )}
 
-      {/* Delegates */}
       {agent.canDelegateTo.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -466,7 +196,6 @@ function OverviewTab({ agent }: { agent: Agent }) {
         </div>
       )}
 
-      {/* Schedule */}
       {scheduleEntries.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -491,7 +220,6 @@ function OverviewTab({ agent }: { agent: Agent }) {
         </div>
       )}
 
-      {/* Model Info */}
       <div className="space-y-2">
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Model Configuration
@@ -671,7 +399,7 @@ function MemoryTab({ slug }: { slug: string }) {
 // ── Activity Tab ───────────────────────────────────────
 
 function ActivityTab({ slug }: { slug: string }) {
-  const { data: conversations = [], isLoading } = useQuery<ChatMessage[]>({
+  const { data: conversations = [], isLoading } = useQuery<ConversationMessage[]>({
     queryKey: ["/api/agents", slug, "conversations"],
     queryFn: async () => {
       const res = await fetch(`/api/agents/${slug}/conversations`, {
@@ -682,9 +410,8 @@ function ActivityTab({ slug }: { slug: string }) {
     },
   });
 
-  // Group by date
   const grouped = useMemo(() => {
-    const groups: Record<string, ChatMessage[]> = {};
+    const groups: Record<string, ConversationMessage[]> = {};
     const filtered = conversations.filter((m) => m.role !== "system");
     for (const msg of filtered) {
       const date = new Date(msg.createdAt).toLocaleDateString();
@@ -778,14 +505,9 @@ function DetailSkeleton() {
           <Skeleton className="h-4 w-56" />
         </div>
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        <div className="lg:col-span-3 space-y-4">
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-64 w-full rounded-lg" />
-        </div>
-        <div className="lg:col-span-2">
-          <Skeleton className="h-96 w-full rounded-lg" />
-        </div>
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-64 w-full rounded-lg" />
       </div>
     </div>
   );
@@ -885,65 +607,42 @@ export default function AgentDetailPage() {
         </div>
       </div>
 
-      {/* ── Two Column Layout ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Left: Info Tabs */}
-        <div className="lg:col-span-3">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="w-full justify-start h-9 bg-muted/30 border border-border/30">
-              <TabsTrigger value="overview" className="text-[12px] gap-1.5 h-7">
-                <Brain className="h-3 w-3" />
-                Overview
-              </TabsTrigger>
-              <TabsTrigger value="tasks" className="text-[12px] gap-1.5 h-7">
-                <Target className="h-3 w-3" />
-                Tasks
-              </TabsTrigger>
-              <TabsTrigger value="memory" className="text-[12px] gap-1.5 h-7">
-                <Database className="h-3 w-3" />
-                Memory
-              </TabsTrigger>
-              <TabsTrigger value="activity" className="text-[12px] gap-1.5 h-7">
-                <History className="h-3 w-3" />
-                Activity
-              </TabsTrigger>
-              {/* Chat tab on mobile */}
-              <TabsTrigger value="chat" className="text-[12px] gap-1.5 h-7 lg:hidden">
-                <MessageSquare className="h-3 w-3" />
-                Chat
-              </TabsTrigger>
-            </TabsList>
+      {/* ── Info Tabs (full width) ── */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="w-full justify-start h-9 bg-muted/30 border border-border/30">
+          <TabsTrigger value="overview" className="text-[12px] gap-1.5 h-7">
+            <Brain className="h-3 w-3" />
+            Overview
+          </TabsTrigger>
+          <TabsTrigger value="tasks" className="text-[12px] gap-1.5 h-7">
+            <Target className="h-3 w-3" />
+            Tasks
+          </TabsTrigger>
+          <TabsTrigger value="memory" className="text-[12px] gap-1.5 h-7">
+            <Database className="h-3 w-3" />
+            Memory
+          </TabsTrigger>
+          <TabsTrigger value="activity" className="text-[12px] gap-1.5 h-7">
+            <History className="h-3 w-3" />
+            Activity
+          </TabsTrigger>
+        </TabsList>
 
-            <div className="mt-4">
-              <TabsContent value="overview" className="mt-0">
-                <OverviewTab agent={agent} />
-              </TabsContent>
-              <TabsContent value="tasks" className="mt-0">
-                <TasksTab slug={slug} />
-              </TabsContent>
-              <TabsContent value="memory" className="mt-0">
-                <MemoryTab slug={slug} />
-              </TabsContent>
-              <TabsContent value="activity" className="mt-0">
-                <ActivityTab slug={slug} />
-              </TabsContent>
-              {/* Mobile chat tab content */}
-              <TabsContent value="chat" className="mt-0 lg:hidden">
-                <div className="rounded-lg border border-border/50 bg-card h-[500px]">
-                  <ChatPanel slug={slug} agentName={agent.name} />
-                </div>
-              </TabsContent>
-            </div>
-          </Tabs>
+        <div className="mt-4">
+          <TabsContent value="overview" className="mt-0">
+            <OverviewTab agent={agent} />
+          </TabsContent>
+          <TabsContent value="tasks" className="mt-0">
+            <TasksTab slug={slug} />
+          </TabsContent>
+          <TabsContent value="memory" className="mt-0">
+            <MemoryTab slug={slug} />
+          </TabsContent>
+          <TabsContent value="activity" className="mt-0">
+            <ActivityTab slug={slug} />
+          </TabsContent>
         </div>
-
-        {/* Right: Chat (desktop only) */}
-        <div className="hidden lg:block lg:col-span-2">
-          <div className="rounded-lg border border-border/50 bg-card h-[600px] sticky top-6">
-            <ChatPanel slug={slug} agentName={agent.name} />
-          </div>
-        </div>
-      </div>
+      </Tabs>
     </div>
   );
 }
