@@ -479,7 +479,7 @@ server.registerTool(
     }),
   },
   async ({ title, body, type, domain, ventureId, tags }) => {
-    const doc = await storage.createDoc({
+    const { doc, created } = await storage.createDocIfNotExists({
       title,
       body,
       type: (type as any) ?? 'page',
@@ -492,7 +492,9 @@ server.registerTool(
       content: [
         {
           type: 'text' as const,
-          text: `Document created: #${doc.id} "${doc.title}" [${doc.type}] [${doc.domain}]`,
+          text: created
+            ? `Document created: #${doc.id} "${doc.title}" [${doc.type}] [${doc.domain}]`
+            : `Document already exists: #${doc.id} "${doc.title}" — skipped duplicate`,
         },
       ],
     };

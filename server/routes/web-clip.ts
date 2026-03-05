@@ -23,8 +23,8 @@ router.post("/clip-url", async (req: Request, res: Response) => {
     // Extract content from URL
     const clipped = await clipUrl(url);
 
-    // Create doc record
-    const doc = await storage.createDoc({
+    // Create doc record (dedup by title)
+    const { doc, created } = await storage.createDocIfNotExists({
       title: clipped.title,
       body: clipped.body,
       type: type || "reference",
@@ -35,10 +35,12 @@ router.post("/clip-url", async (req: Request, res: Response) => {
       metadata: clipped.metadata,
     });
 
-    // Trigger embedding in background (fire-and-forget)
-    processDocumentNow(doc.id).catch((err) =>
-      logger.debug({ err: err.message, docId: doc.id }, "Background embedding after clip failed (non-critical)")
-    );
+    // Trigger embedding in background (only for new docs)
+    if (created) {
+      processDocumentNow(doc.id).catch((err) =>
+        logger.debug({ err: err.message, docId: doc.id }, "Background embedding after clip failed (non-critical)")
+      );
+    }
 
     logger.info({ docId: doc.id, url, title: clipped.title }, "Web clip created");
 

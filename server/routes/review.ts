@@ -170,7 +170,7 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
         if (!result.title) {
           return res.status(400).json({ error: "Document deliverable missing title", result });
         }
-        const doc = await storage.createDoc({
+        const { doc } = await storage.createDocIfNotExists({
           title: result.title,
           body: result.body || "",
           type: result.docType || "page",
@@ -194,7 +194,7 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
           });
           promotedTo.push({ type: "task", id: String(newTask.id) });
         } else if (result.suggestedAction === "create_doc") {
-          const doc = await storage.createDoc({
+          const { doc } = await storage.createDocIfNotExists({
             title: result.title,
             body: `## Summary\n${result.summary}\n\n## Rationale\n${result.rationale}`,
             type: "research",
@@ -226,7 +226,7 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
       case "code": {
         const lang = result.language || "typescript";
         const body = `${result.description ? `${result.description}\n\n` : ""}\`\`\`${lang}\n${result.code}\n\`\`\``;
-        const doc = await storage.createDoc({
+        const { doc } = await storage.createDocIfNotExists({
           title: result.title,
           body,
           type: "tech_doc",

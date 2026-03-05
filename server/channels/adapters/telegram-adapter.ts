@@ -383,7 +383,7 @@ class TelegramAdapter implements ChannelAdapter {
         const { processDocumentNow } = await import("../../embedding-jobs");
         const clipped = await clipUrl(url);
 
-        const doc = await storage.createDoc({
+        const { doc, created } = await storage.createDocIfNotExists({
           title: clipped.title,
           body: clipped.body,
           type: "reference",
@@ -393,9 +393,13 @@ class TelegramAdapter implements ChannelAdapter {
           metadata: clipped.metadata,
         });
 
-        processDocumentNow(doc.id).catch(() => {});
+        if (created) {
+          processDocumentNow(doc.id).catch(() => {});
+        }
 
-        await ctx.reply(`📎 Clipped: "${clipped.title}"\nWords: ${clipped.metadata.wordCount}\nSaved to Knowledge Hub.`);
+        await ctx.reply(created
+          ? `📎 Clipped: "${clipped.title}"\nWords: ${clipped.metadata.wordCount}\nSaved to Knowledge Hub.`
+          : `📎 Already exists: "${clipped.title}" — skipped duplicate.`);
 
         this.logCommandConversation(`/clip ${url}`, `Clipped "${clipped.title}" (${clipped.metadata.wordCount} words)`).catch(() => {});
       } catch (error: any) {
@@ -879,7 +883,7 @@ class TelegramAdapter implements ChannelAdapter {
             const { processDocumentNow } = await import("../../embedding-jobs");
             const clipped = await clipUrl(url);
 
-            const doc = await storage.createDoc({
+            const { doc, created } = await storage.createDocIfNotExists({
               title: clipped.title,
               body: clipped.body,
               type: "reference",
@@ -889,11 +893,15 @@ class TelegramAdapter implements ChannelAdapter {
               metadata: clipped.metadata,
             });
 
-            processDocumentNow(doc.id).catch(() => {});
+            if (created) {
+              processDocumentNow(doc.id).catch(() => {});
+            }
 
             await this.sendLongMessage(
               ctx.chat!.id.toString(),
-              `📎 Clipped: "${clipped.title}"\nWords: ${clipped.metadata.wordCount}\nSaved to Knowledge Hub.`
+              created
+                ? `📎 Clipped: "${clipped.title}"\nWords: ${clipped.metadata.wordCount}\nSaved to Knowledge Hub.`
+                : `📎 Already exists: "${clipped.title}" — skipped duplicate.`
             );
           } catch (err: any) {
             await this.sendLongMessage(

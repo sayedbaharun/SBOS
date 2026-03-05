@@ -770,7 +770,7 @@ async function executeTool(
       }
 
       case "create_doc": {
-        const doc = await storage.createDoc({
+        const { doc, created } = await storage.createDocIfNotExists({
           title: args.title,
           body: args.body,
           type: args.type || "page",
@@ -779,7 +779,9 @@ async function executeTool(
         });
 
         return {
-          result: `Created document: "${doc.title}" (ID: ${doc.id})`,
+          result: created
+            ? `Created document: "${doc.title}" (ID: ${doc.id})`
+            : `Document already exists: "${doc.title}" (ID: ${doc.id})`,
           action: {
             actionType: "create_doc",
             entityType: "doc",
@@ -986,7 +988,7 @@ async function executeTool(
         const { clipUrl } = await import("../web-clipper");
         const clipped = await clipUrl(args.url);
 
-        const doc = await storage.createDoc({
+        const { doc, created } = await storage.createDocIfNotExists({
           title: clipped.title,
           body: clipped.body,
           type: args.type || "reference",
@@ -997,11 +999,13 @@ async function executeTool(
           metadata: clipped.metadata,
         });
 
-        // Trigger embedding in background
-        const { processDocumentNow } = await import("../embedding-jobs");
-        processDocumentNow(doc.id).catch((err: any) =>
-          logger.debug({ err: err.message }, "Background embedding failed (non-critical)")
-        );
+        // Trigger embedding in background (only for new docs)
+        if (created) {
+          const { processDocumentNow } = await import("../embedding-jobs");
+          processDocumentNow(doc.id).catch((err: any) =>
+            logger.debug({ err: err.message }, "Background embedding failed (non-critical)")
+          );
+        }
 
         return {
           result: `Clipped "${clipped.title}" to knowledge base (doc ID: ${doc.id}). Embedding will be generated shortly.`,

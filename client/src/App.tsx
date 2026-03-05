@@ -42,6 +42,7 @@ import PeoplePage from "@/pages/people";
 import VentureLab from "@/pages/venture-lab";
 import ResearchInbox from "@/pages/research-inbox";
 import ReviewQueue from "@/pages/review-queue";
+import LiveTasks from "@/pages/live-tasks";
 import SettingsExternalAgents from "@/pages/settings-external-agents";
 import NotFound from "@/pages/not-found";
 import MobileQuickActions from "@/components/mobile/mobile-quick-actions";
@@ -95,6 +96,7 @@ function Router() {
             <Route path="/tasks" component={AllTasks} />
             <Route path="/research-inbox" component={ResearchInbox} />
             <Route path="/review" component={ReviewQueue} />
+            <Route path="/live-tasks" component={LiveTasks} />
             <Route path="/settings/external-agents" component={SettingsExternalAgents} />
             <Route path="/agents" component={AgentsPage} />
             <Route path="/agents/delegation-log" component={DelegationLogPage} />

@@ -25,6 +25,7 @@ import {
   Bot,
   ShoppingCart,
   ClipboardCheck,
+  Activity,
 } from "lucide-react";
 import NavSection, { NavItemConfig } from "./nav-section";
 import VenturesNavSection from "./ventures-nav-section";
@@ -136,6 +137,11 @@ const navigationSections: Array<{ label: string; items: NavItemConfig[]; default
         href: "/review",
         icon: ClipboardCheck,
         label: "Review",
+      },
+      {
+        href: "/live-tasks",
+        icon: Activity,
+        label: "Live Tasks",
       },
       {
         href: "/research-inbox",

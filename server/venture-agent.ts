@@ -631,7 +631,7 @@ Start by greeting Sayed and asking Stage 1 questions (skip any you already know 
         }
 
         case "create_document": {
-          const doc = await storage.createDoc({
+          const { doc, created } = await storage.createDocIfNotExists({
             title: args.title,
             body: args.body,
             type: args.type || 'page',
@@ -642,7 +642,9 @@ Start by greeting Sayed and asking Stage 1 questions (skip any you already know 
           });
 
           return {
-            result: `Created document: "${doc.title}" (ID: ${doc.id})`,
+            result: created
+              ? `Created document: "${doc.title}" (ID: ${doc.id})`
+              : `Document already exists: "${doc.title}" (ID: ${doc.id})`,
             action: {
               ventureId: this.ventureId,
               userId: this.userId,

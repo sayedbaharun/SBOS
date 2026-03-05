@@ -321,6 +321,8 @@ export interface IStorage {
   getDocChildren(parentId: string | null, ventureId?: string): Promise<Doc[]>;
   getDocTree(ventureId: string): Promise<Doc[]>;
   createDoc(data: InsertDoc): Promise<Doc>;
+  findDocByTitle(title: string): Promise<Doc | null>;
+  createDocIfNotExists(data: InsertDoc): Promise<{ doc: Doc; created: boolean }>;
   updateDoc(id: string, data: Partial<InsertDoc>): Promise<Doc | undefined>;
   deleteDoc(id: string): Promise<void>;
   deleteDocRecursive(id: string): Promise<void>;
@@ -1849,6 +1851,24 @@ export class DBStorage implements IStorage {
     }
 
     return updatedDoc!;
+  }
+
+  async findDocByTitle(title: string): Promise<Doc | null> {
+    const [doc] = await this.db
+      .select()
+      .from(docs)
+      .where(eq(docs.title, title))
+      .limit(1);
+    return doc || null;
+  }
+
+  async createDocIfNotExists(data: InsertDoc): Promise<{ doc: Doc; created: boolean }> {
+    const existing = await this.findDocByTitle(data.title);
+    if (existing) {
+      return { doc: existing, created: false };
+    }
+    const doc = await this.createDoc(data);
+    return { doc, created: true };
   }
 
   async updateDoc(id: string, updates: Partial<InsertDoc>): Promise<Doc | undefined> {

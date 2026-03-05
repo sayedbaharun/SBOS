@@ -553,7 +553,7 @@ registerJobHandler("weekly_report_cos", async (agentId: string, agentSlug: strin
 
   // Save as Knowledge Hub doc
   try {
-    await storage.createDoc({
+    await storage.createDocIfNotExists({
       title: `Weekly Report — ${todayStr}`,
       content: result.response,
       type: "note",
