@@ -865,3 +865,164 @@ registerJobHandler("inbox_triage", async (agentId: string, agentSlug: string) =>
 
   logger.info({ agentSlug }, "Inbox triage completed");
 });
+
+// ============================================================================
+// LIBRARIAN — Knowledge Extraction & Audit
+// ============================================================================
+
+/**
+ * Knowledge Extraction — Mine agent conversations from the last 48h
+ * and extract learnings, decisions, patterns into the Knowledge Hub.
+ * Runs daily at 10pm UTC.
+ */
+registerJobHandler("knowledge_extraction", async (_agentId: string, _agentSlug: string) => {
+  const database = await getDb();
+
+  // 1. Query conversations from the last 48 hours (user + assistant only)
+  const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
+  const recentConversations = await database
+    .select({
+      id: agentConversations.id,
+      agentId: agentConversations.agentId,
+      role: agentConversations.role,
+      content: agentConversations.content,
+      createdAt: agentConversations.createdAt,
+    })
+    .from(agentConversations)
+    .innerJoin(agents, eq(agents.id, agentConversations.agentId))
+    .where(
+      sql`${agentConversations.createdAt} > ${cutoff} AND ${agentConversations.role} IN ('user', 'assistant')`
+    )
+    .orderBy(agentConversations.createdAt);
+
+  if (recentConversations.length === 0) {
+    logger.info("Knowledge extraction: no conversations in the last 48h, skipping");
+    return;
+  }
+
+  // 2. Group by agent and build summaries
+  const byAgent = new Map<string, { agentId: string; messages: { role: string; content: string }[] }>();
+  for (const row of recentConversations) {
+    const key = row.agentId;
+    if (!byAgent.has(key)) {
+      byAgent.set(key, { agentId: key, messages: [] });
+    }
+    byAgent.get(key)!.messages.push({ role: row.role, content: row.content });
+  }
+
+  // 3. Build extraction prompt with conversation summaries
+  const summaries: string[] = [];
+  const entries = Array.from(byAgent.entries());
+  for (const [agentId, data] of entries) {
+    // Look up agent name
+    const [agentRow] = await database.select({ name: agents.name, slug: agents.slug }).from(agents).where(eq(agents.id, agentId));
+    const agentName = agentRow?.name || agentRow?.slug || agentId;
+    const convoText = data.messages
+      .map((m: { role: string; content: string }) => `[${m.role}]: ${m.content.slice(0, 1000)}`)
+      .join("\n");
+    summaries.push(`### ${agentName}\n${convoText}`);
+  }
+
+  const extractionPrompt = `You are running your scheduled knowledge extraction job. Below are conversation summaries from the last 48 hours across all agents. Your job:
+
+1. **Extract small learnings/observations** → Use the \`remember\` tool (shared scope). These are facts, preferences, patterns.
+2. **Extract decisions** → Create or update a "Decision Register" doc per venture via \`create_doc\`. Include who decided, context, rationale.
+3. **Spot cross-venture patterns** → Submit via \`submit_deliverable\` as type \`recommendation\` for Sayed's review.
+4. **Create synthesis docs or playbooks** → Submit via \`submit_deliverable\` as type \`document\` for review.
+
+IMPORTANT: Before creating ANY document, search the Knowledge Hub first with \`search_knowledge_base\` to avoid duplication. Update existing docs when possible.
+
+## Conversations (last 48h)
+
+${summaries.join("\n\n---\n\n")}
+
+---
+
+Process these conversations now. Extract what's valuable, discard what's noise. Focus on actionable knowledge, not status updates.`;
+
+  // 4. Execute through the Librarian agent
+  await executeAgentChat("librarian", extractionPrompt, "scheduler");
+
+  logger.info(
+    { agentsScanned: byAgent.size, totalMessages: recentConversations.length },
+    "Knowledge extraction completed"
+  );
+});
+
+/**
+ * Knowledge Audit — Scan the Knowledge Hub for stale, orphaned, and duplicate docs.
+ * Runs Wednesdays at 10am UTC.
+ */
+registerJobHandler("knowledge_audit", async (_agentId: string, _agentSlug: string) => {
+  const { storage } = await import("../storage");
+
+  // 1. Get all docs
+  const allDocs = await storage.getDocs({ status: "active" });
+
+  if (allDocs.length === 0) {
+    logger.info("Knowledge audit: no active docs found, skipping");
+    return;
+  }
+
+  const now = new Date();
+  const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+
+  // 2. Find stale docs (not updated in 90+ days)
+  const staleDocs = allDocs.filter((d: any) => {
+    const updated = d.updatedAt ? new Date(d.updatedAt) : d.createdAt ? new Date(d.createdAt) : null;
+    return updated && updated < ninetyDaysAgo;
+  });
+
+  // 3. Find orphaned docs (no venture, no project, no tags)
+  const orphanedDocs = allDocs.filter(
+    (d: any) => !d.ventureId && !d.projectId && (!d.tags || d.tags.trim() === "")
+  );
+
+  // 4. Find potential duplicates (similar titles)
+  const potentialDupes: { docA: string; docB: string; titleA: string; titleB: string }[] = [];
+  for (let i = 0; i < allDocs.length; i++) {
+    for (let j = i + 1; j < allDocs.length; j++) {
+      const a = (allDocs[i] as any).title?.toLowerCase().trim() || "";
+      const b = (allDocs[j] as any).title?.toLowerCase().trim() || "";
+      if (a && b && (a === b || a.includes(b) || b.includes(a))) {
+        potentialDupes.push({
+          docA: String((allDocs[i] as any).id),
+          docB: String((allDocs[j] as any).id),
+          titleA: (allDocs[i] as any).title,
+          titleB: (allDocs[j] as any).title,
+        });
+      }
+    }
+  }
+
+  // 5. Build audit prompt for the Librarian
+  const auditPrompt = `You are running your scheduled knowledge audit. Here are the findings:
+
+## KB Health Summary
+- **Total active docs**: ${allDocs.length}
+- **Stale docs (90+ days)**: ${staleDocs.length}
+- **Orphaned docs (no venture/project/tags)**: ${orphanedDocs.length}
+- **Potential duplicates**: ${potentialDupes.length}
+
+## Stale Docs
+${staleDocs.length > 0 ? staleDocs.slice(0, 20).map((d: any) => `- "${d.title}" (ID: ${d.id}, last updated: ${d.updatedAt || d.createdAt})`).join("\n") : "None found."}
+
+## Orphaned Docs
+${orphanedDocs.length > 0 ? orphanedDocs.slice(0, 20).map((d: any) => `- "${d.title}" (ID: ${d.id}, type: ${d.type || "unknown"})`).join("\n") : "None found."}
+
+## Potential Duplicates
+${potentialDupes.length > 0 ? potentialDupes.slice(0, 10).map((d) => `- "${d.titleA}" (${d.docA}) ↔ "${d.titleB}" (${d.docB})`).join("\n") : "None found."}
+
+---
+
+Generate a structured audit report and submit it via \`submit_deliverable\` as type \`document\` titled "Knowledge Hub Audit Report — ${now.toISOString().split("T")[0]}".
+
+Include recommendations for each stale doc (archive, update, or keep), suggested tags/ventures for orphaned docs, and merge recommendations for duplicates.`;
+
+  await executeAgentChat("librarian", auditPrompt, "scheduler");
+
+  logger.info(
+    { totalDocs: allDocs.length, stale: staleDocs.length, orphaned: orphanedDocs.length, dupes: potentialDupes.length },
+    "Knowledge audit completed"
+  );
+});
