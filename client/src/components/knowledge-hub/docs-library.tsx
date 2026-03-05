@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { MoreVertical, FileText } from "lucide-react";
 import {
   DropdownMenu,
@@ -41,6 +42,9 @@ interface DocsLibraryProps {
   onEdit: (doc: Doc) => void;
   onDelete: (docId: string) => void;
   onDuplicate: (doc: Doc) => void;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (docId: string) => void;
+  selectMode?: boolean;
 }
 
 export function DocsLibrary({
@@ -51,6 +55,9 @@ export function DocsLibrary({
   onEdit,
   onDelete,
   onDuplicate,
+  selectedIds,
+  onToggleSelect,
+  selectMode = false,
 }: DocsLibraryProps) {
   const [, setLocation] = useLocation();
 
@@ -80,15 +87,27 @@ export function DocsLibrary({
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {docs.map((doc) => (
-          <DocCard
-            key={doc.id}
-            doc={doc}
-            ventureName={getVentureName(doc.ventureId)}
-            projectName={getProjectName(doc.projectId)}
-            onEdit={onEdit}
-            onDelete={onDelete}
-            onDuplicate={onDuplicate}
-          />
+          <div key={doc.id} className="relative">
+            {selectMode && (
+              <div
+                className="absolute top-2 left-2 z-10"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Checkbox
+                  checked={selectedIds?.has(doc.id) || false}
+                  onCheckedChange={() => onToggleSelect?.(doc.id)}
+                />
+              </div>
+            )}
+            <DocCard
+              doc={doc}
+              ventureName={getVentureName(doc.ventureId)}
+              projectName={getProjectName(doc.projectId)}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onDuplicate={onDuplicate}
+            />
+          </div>
         ))}
       </div>
     );
@@ -101,9 +120,17 @@ export function DocsLibrary({
           <div
             key={doc.id}
             className="border rounded-lg p-4 hover:bg-accent cursor-pointer transition-colors"
-            onClick={() => setLocation(`/knowledge/${doc.id}`)}
+            onClick={() => selectMode ? onToggleSelect?.(doc.id) : setLocation(`/knowledge/${doc.id}`)}
           >
             <div className="flex items-start justify-between">
+              {selectMode && (
+                <div className="mr-3 mt-0.5" onClick={(e) => e.stopPropagation()}>
+                  <Checkbox
+                    checked={selectedIds?.has(doc.id) || false}
+                    onCheckedChange={() => onToggleSelect?.(doc.id)}
+                  />
+                </div>
+              )}
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
                   <h3 className="font-semibold">{doc.title}</h3>
@@ -185,6 +212,7 @@ export function DocsLibrary({
       <Table>
         <TableHeader>
           <TableRow>
+            {selectMode && <TableHead className="w-[40px]"></TableHead>}
             <TableHead>Title</TableHead>
             <TableHead>Type</TableHead>
             <TableHead>Domain</TableHead>
@@ -200,8 +228,16 @@ export function DocsLibrary({
             <TableRow
               key={doc.id}
               className="cursor-pointer"
-              onClick={() => setLocation(`/knowledge/${doc.id}`)}
+              onClick={() => selectMode ? onToggleSelect?.(doc.id) : setLocation(`/knowledge/${doc.id}`)}
             >
+              {selectMode && (
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  <Checkbox
+                    checked={selectedIds?.has(doc.id) || false}
+                    onCheckedChange={() => onToggleSelect?.(doc.id)}
+                  />
+                </TableCell>
+              )}
               <TableCell className="font-medium">{doc.title}</TableCell>
               <TableCell>
                 <Badge variant="outline" className="text-xs capitalize">

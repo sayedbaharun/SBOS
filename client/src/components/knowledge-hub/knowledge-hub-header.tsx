@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { BookOpen, Plus, Search, Grid3x3, List, Table, LinkIcon } from "lucide-react";
+import { BookOpen, Plus, Search, Grid3x3, List, Table, LinkIcon, CheckSquare } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 interface KnowledgeHubHeaderProps {
@@ -10,6 +10,8 @@ interface KnowledgeHubHeaderProps {
   onSearch: (query: string) => void;
   viewMode: "grid" | "list" | "table";
   onViewModeChange: (mode: "grid" | "list" | "table") => void;
+  onToggleSelectMode?: () => void;
+  selectMode?: boolean;
 }
 
 export function KnowledgeHubHeader({
@@ -18,6 +20,8 @@ export function KnowledgeHubHeader({
   onSearch,
   viewMode,
   onViewModeChange,
+  onToggleSelectMode,
+  selectMode = false,
 }: KnowledgeHubHeaderProps) {
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -39,6 +43,15 @@ export function KnowledgeHubHeader({
           </p>
         </div>
         <div className="flex gap-2 w-full sm:w-auto">
+          <Button
+            onClick={onToggleSelectMode}
+            size="sm"
+            variant={selectMode ? "secondary" : "outline"}
+            className="flex-1 sm:flex-initial"
+          >
+            <CheckSquare className="h-4 w-4 mr-2" />
+            Select
+          </Button>
           <Button onClick={onClipUrl} size="sm" variant="outline" className="flex-1 sm:flex-initial">
             <LinkIcon className="h-4 w-4 mr-2" />
             Clip URL

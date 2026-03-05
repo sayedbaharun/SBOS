@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BookOpen, Cloud, Sparkles, FileUp, Loader2 } from "lucide-react";
+import { BookOpen, Cloud, Sparkles, FileUp, Loader2, Trash2, CheckSquare, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -64,6 +64,9 @@ export default function KnowledgeHub() {
   const [clipUrl, setClipUrl] = useState("");
   const [clipVentureId, setClipVentureId] = useState<string>("");
   const [clipTags, setClipTags] = useState("");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 
   // Fetch all docs
   const { data: allDocs = [], isLoading } = useQuery<Doc[]>({
@@ -105,6 +108,54 @@ export default function KnowledgeHub() {
       });
     },
   });
+
+  // Bulk delete mutation
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      await Promise.all(ids.map((id) => apiRequest("DELETE", `/api/docs/${id}`)));
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/docs"] });
+      toast({
+        title: "Documents deleted",
+        description: `${selectedIds.size} document(s) deleted successfully.`,
+      });
+      setSelectedIds(new Set());
+      setSelectMode(false);
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleToggleSelect = (docId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(docId)) {
+        next.delete(docId);
+      } else {
+        next.add(docId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === displayedDocs.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(displayedDocs.map((d) => d.id)));
+    }
+  };
+
+  const confirmBulkDelete = () => {
+    bulkDeleteMutation.mutate(Array.from(selectedIds));
+    setBulkDeleteDialogOpen(false);
+  };
 
   // Clip URL mutation
   const clipMutation = useMutation({
@@ -232,7 +283,49 @@ export default function KnowledgeHub() {
         onSearch={setSearchQuery}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
+        selectMode={selectMode}
+        onToggleSelectMode={() => {
+          setSelectMode(!selectMode);
+          if (selectMode) setSelectedIds(new Set());
+        }}
       />
+
+      {/* Select mode bar */}
+      {selectMode && (
+        <div className="flex items-center gap-3 bg-muted/60 border rounded-lg px-4 py-2.5">
+          <Button variant="ghost" size="sm" onClick={handleSelectAll}>
+            <CheckSquare className="h-4 w-4 mr-1.5" />
+            {selectedIds.size === displayedDocs.length ? "Deselect All" : "Select All"}
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            {selectedIds.size} selected
+          </span>
+          <div className="flex-1" />
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={selectedIds.size === 0 || bulkDeleteMutation.isPending}
+            onClick={() => setBulkDeleteDialogOpen(true)}
+          >
+            {bulkDeleteMutation.isPending ? (
+              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4 mr-1.5" />
+            )}
+            Delete ({selectedIds.size})
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setSelectMode(false);
+              setSelectedIds(new Set());
+            }}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
 
       <Tabs defaultValue="local" className="w-full">
         <TabsList className="mb-4">
@@ -270,6 +363,9 @@ export default function KnowledgeHub() {
                 onEdit={handleEditDoc}
                 onDelete={handleDeleteDoc}
                 onDuplicate={handleDuplicateDoc}
+                selectMode={selectMode}
+                selectedIds={selectedIds}
+                onToggleSelect={handleToggleSelect}
               />
             </div>
 
@@ -412,6 +508,24 @@ export default function KnowledgeHub() {
             </AlertDialogCancel>
             <AlertDialogAction onClick={confirmDelete} className="bg-destructive">
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <AlertDialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.size} Documents</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {selectedIds.size} document(s)? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmBulkDelete} className="bg-destructive">
+              Delete {selectedIds.size} Documents
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
