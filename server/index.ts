@@ -393,7 +393,9 @@ app.use((req, res, next) => {
     }
 
     // Initialize SB-OS automations
-    try {
+    if (process.env.DISABLE_CRONS === 'true') {
+      log('⏸ SB-OS automations DISABLED (DISABLE_CRONS=true) — no crons, no agent scheduler, no nudges');
+    } else try {
       const { scheduleDailyDayCreation } = await import('./automations/daily-day-creation');
       const { scheduleWeeklyPlanningReminder } = await import('./automations/weekly-planning-reminder');
       const { scheduleDailyReflectionReminder } = await import('./automations/daily-reflection-reminder');
