@@ -164,8 +164,11 @@ All orchestrator responses use envelope format: `{ data, _meta, _guidance }`. Er
 
 - **Venture record**: ID `de2a8490`, type `saas`, status `ongoing`
 - **Project**: "Agency Platform (hikmadigital.com)" — P0, in_progress
-- **3 phases**: Foundation (done), Agent System (done), Launch & Distribution (in_progress)
-- **14 tasks tracked**: 8 completed, 6 upcoming
+- **4 phases**: Foundation (done), Agent System (done), Launch & Distribution (in_progress), Scale & Optimize (not_started)
+- **24 tasks tracked**: 9 completed, 15 upcoming (3 P0 blockers, 8 P1, 4 P2)
+- **P0 blockers**: Switch Stripe to live keys, E2E payment flow test, Top up OpenRouter credits
+- **Distribution breakdown**: SEO audit, LinkedIn presence, Google Ads, Cold outreach (replaced single vague task)
+- **Phase 4 tasks**: WhatsApp Business API, Sentry error tracking, Conversion funnel analytics, Client success playbook
 - **Agents with Hikma context**: CMO (distribution_check), Growth Specialist (growth_opportunities), SEO Specialist (seo_audit), Social Media Manager (content_queue), Content Strategist (content_calendar), Research Analyst (upstream_feature_scan), Venture Architect (venture_health)
 
 ---
