@@ -13,6 +13,7 @@ model_tier: mid
 temperature: 0.5
 schedule:
   tech_review: "0 10 * * 3"
+  architecture_health: "0 10 * * 1"
 memory_scope: isolated
 ---
 

@@ -8,7 +8,7 @@
 
 import { eq, gte, sql } from "drizzle-orm";
 import { logger } from "../logger";
-import { agents, agentConversations, sessionLogs, type Agent } from "@shared/schema";
+import { agents, agentConversations, sessionLogs, tasks, ventures, projects, deadLetterJobs, agentCompactionEvents, type Agent } from "@shared/schema";
 import { dailyBriefing, weeklySummary, ventureStatus } from "./tools/report-generator";
 import { executeAgentChat } from "./agent-runtime";
 import { getAllAgentActivity } from "./conversation-manager";
@@ -864,6 +864,369 @@ registerJobHandler("inbox_triage", async (agentId: string, agentSlug: string) =>
   await executeAgentChat(agentSlug, prompt, "scheduler");
 
   logger.info({ agentSlug }, "Inbox triage completed");
+});
+
+// ============================================================================
+// PROJECT HEALTH — MVP Builder checks for stalled projects/tasks
+// ============================================================================
+
+/**
+ * Project Health — MVP Builder identifies blocked/stalled tasks and projects.
+ * Runs MWF at 12pm Dubai. Queries tasks stuck >7 days, feeds to MVP Builder.
+ */
+registerJobHandler("project_health", async (_agentId: string, _agentSlug: string) => {
+  const database = await getDb();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+  // Find stale in-progress tasks (no update in 7+ days)
+  const staleTasks = await database
+    .select({
+      id: tasks.id,
+      title: tasks.title,
+      status: tasks.status,
+      priority: tasks.priority,
+      updatedAt: tasks.updatedAt,
+      projectId: tasks.projectId,
+    })
+    .from(tasks)
+    .where(
+      sql`${tasks.status} = 'in_progress' AND ${tasks.updatedAt} < ${sevenDaysAgo}`
+    );
+
+  // Find stale in-progress projects
+  const staleProjects = await database
+    .select({
+      id: projects.id,
+      name: projects.name,
+      status: projects.status,
+      updatedAt: projects.updatedAt,
+      ventureId: projects.ventureId,
+    })
+    .from(projects)
+    .where(
+      sql`${projects.status} = 'in_progress' AND ${projects.updatedAt} < ${sevenDaysAgo}`
+    );
+
+  // Find on-hold tasks
+  const blockedTasks = await database
+    .select({
+      id: tasks.id,
+      title: tasks.title,
+      status: tasks.status,
+      priority: tasks.priority,
+    })
+    .from(tasks)
+    .where(eq(tasks.status, "on_hold"));
+
+  const prompt = `You are running your scheduled project health check. Here are the findings:
+
+## Stale In-Progress Tasks (no update in 7+ days): ${staleTasks.length}
+${staleTasks.length > 0 ? staleTasks.map((t: any) => `- [${t.priority || "P2"}] "${t.title}" (ID: ${t.id}, last updated: ${t.updatedAt})`).join("\n") : "None found — all tasks are progressing."}
+
+## Stale In-Progress Projects (no update in 7+ days): ${staleProjects.length}
+${staleProjects.length > 0 ? staleProjects.map((p: any) => `- "${p.name}" (ID: ${p.id}, last updated: ${p.updatedAt})`).join("\n") : "None found."}
+
+## On-Hold Tasks: ${blockedTasks.length}
+${blockedTasks.length > 0 ? blockedTasks.map((t: any) => `- [${t.priority || "P2"}] "${t.title}" (ID: ${t.id})`).join("\n") : "None found."}
+
+---
+
+For each stalled item:
+1. If it can be unblocked, create an unblock task with \`create_task\`
+2. If it needs CTO attention, flag it clearly
+3. If it should be deprioritized or cancelled, recommend that
+
+Be practical — focus on what moves the needle.`;
+
+  await executeAgentChat("mvp-builder", prompt, "scheduler");
+
+  logger.info(
+    { staleTasks: staleTasks.length, staleProjects: staleProjects.length, blockedTasks: blockedTasks.length },
+    "Project health check completed"
+  );
+});
+
+// ============================================================================
+// VENTURE HEALTH — Venture Architect reviews all ventures
+// ============================================================================
+
+/**
+ * Venture Health — Venture Architect reviews all ventures for status vs plan.
+ * Runs Thursdays at 2pm Dubai. Queries ventures with project/task counts.
+ */
+registerJobHandler("venture_health", async (_agentId: string, _agentSlug: string) => {
+  const database = await getDb();
+
+  // Get all ventures with project and task counts
+  const allVentures = await database
+    .select({
+      id: ventures.id,
+      name: ventures.name,
+      status: ventures.status,
+      domain: ventures.domain,
+      oneLiner: ventures.oneLiner,
+      updatedAt: ventures.updatedAt,
+    })
+    .from(ventures);
+
+  // Get project counts per venture
+  const projectCounts = await database
+    .select({
+      ventureId: projects.ventureId,
+      count: sql<number>`COUNT(*)::int`,
+      activeCount: sql<number>`COUNT(*) FILTER (WHERE ${projects.status} = 'in_progress')::int`,
+    })
+    .from(projects)
+    .groupBy(projects.ventureId);
+
+  // Get task counts per venture
+  const taskCounts = await database
+    .select({
+      ventureId: tasks.ventureId,
+      total: sql<number>`COUNT(*)::int`,
+      done: sql<number>`COUNT(*) FILTER (WHERE ${tasks.status} = 'completed')::int`,
+      inProgress: sql<number>`COUNT(*) FILTER (WHERE ${tasks.status} = 'in_progress')::int`,
+    })
+    .from(tasks)
+    .groupBy(tasks.ventureId);
+
+  const projectMap = new Map<string, any>(projectCounts.map((p: any) => [p.ventureId, p]));
+  const taskMap = new Map<string, any>(taskCounts.map((t: any) => [t.ventureId, t]));
+
+  const ventureSummaries = allVentures.map((v: any) => {
+    const pc = projectMap.get(v.id) || { count: 0, activeCount: 0 };
+    const tc = taskMap.get(v.id) || { total: 0, done: 0, inProgress: 0 };
+    return `### ${v.name} (${v.status})
+- Domain: ${v.domain} | Last updated: ${v.updatedAt || "never"}
+- ${v.oneLiner || "No description"}
+- Projects: ${pc.count} total, ${pc.activeCount} active
+- Tasks: ${tc.total} total, ${tc.done} done, ${tc.inProgress} in progress`;
+  });
+
+  const prompt = `You are running your scheduled venture health review. Here is the current state of all ventures:
+
+## Ventures Overview (${allVentures.length} total)
+
+${ventureSummaries.join("\n\n")}
+
+---
+
+Review each venture and assess:
+1. **Status vs reality** — Is the status accurate? Should any be updated?
+2. **Missing structure** — Are there ventures without projects, phases, or tasks?
+3. **Stalled ventures** — Any venture with no recent activity that should be addressed?
+4. **Untracked work** — Based on your knowledge, are there ventures or projects that exist but aren't tracked here?
+
+Submit your findings as a structured report via \`submit_deliverable\`.`;
+
+  await executeAgentChat("venture-architect", prompt, "scheduler");
+
+  logger.info(
+    { ventureCount: allVentures.length },
+    "Venture health review completed"
+  );
+});
+
+// ============================================================================
+// AGENT PERFORMANCE — Agent Engineer analyzes system health
+// ============================================================================
+
+/**
+ * Agent Performance — Agent Engineer analyzes dead letters, failed jobs, conversation volume.
+ * Runs Fridays at 3pm Dubai. Queries operational metrics and feeds to Agent Engineer.
+ */
+registerJobHandler("agent_performance", async (_agentId: string, _agentSlug: string) => {
+  const database = await getDb();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+  // Dead letters in last 7 days
+  let deadLetters: any[] = [];
+  try {
+    deadLetters = await database
+      .select({
+        id: deadLetterJobs.id,
+        jobName: deadLetterJobs.jobName,
+        agentSlug: deadLetterJobs.agentSlug,
+        error: deadLetterJobs.error,
+        failedAt: deadLetterJobs.failedAt,
+      })
+      .from(deadLetterJobs)
+      .where(gte(deadLetterJobs.failedAt, sevenDaysAgo));
+  } catch {
+    // Table may not exist yet
+  }
+
+  // Conversation counts per agent (last 7 days)
+  const convoCounts = await database
+    .select({
+      agentId: agentConversations.agentId,
+      messageCount: sql<number>`COUNT(*)::int`,
+    })
+    .from(agentConversations)
+    .where(gte(agentConversations.createdAt, sevenDaysAgo))
+    .groupBy(agentConversations.agentId);
+
+  // Look up agent names
+  const allAgents = await database
+    .select({ id: agents.id, name: agents.name, slug: agents.slug })
+    .from(agents)
+    .where(eq(agents.isActive, true));
+  const agentMap = new Map<string, any>(allAgents.map((a: any) => [a.id, a]));
+
+  const convoSummary = convoCounts
+    .map((c: any) => {
+      const agent = agentMap.get(c.agentId);
+      return `- ${agent?.name || c.agentId}: ${c.messageCount} messages`;
+    })
+    .join("\n");
+
+  // Compaction events (last 7 days)
+  let compactionStats = "";
+  try {
+    const compactions = await database
+      .select({
+        agentId: agentCompactionEvents.agentId,
+        count: sql<number>`COUNT(*)::int`,
+        totalSaved: sql<number>`SUM(${agentCompactionEvents.tokensSaved})::int`,
+      })
+      .from(agentCompactionEvents)
+      .where(gte(agentCompactionEvents.createdAt, sevenDaysAgo))
+      .groupBy(agentCompactionEvents.agentId);
+
+    if (compactions.length > 0) {
+      compactionStats = compactions
+        .map((c: any) => {
+          const agent = agentMap.get(c.agentId);
+          return `- ${agent?.name || c.agentId}: ${c.count} compactions, ${c.totalSaved} tokens saved`;
+        })
+        .join("\n");
+    }
+  } catch {
+    compactionStats = "Compaction data unavailable";
+  }
+
+  const prompt = `You are running your weekly agent performance analysis. Here are the metrics for the last 7 days:
+
+## Dead Letter Jobs (failed jobs): ${deadLetters.length}
+${deadLetters.length > 0 ? deadLetters.map((d: any) => `- ${d.agentSlug}:${d.jobName} — ${(d.error || "unknown error").slice(0, 200)} (${d.failedAt})`).join("\n") : "No failures — all jobs executed successfully."}
+
+## Agent Conversation Volume
+${convoSummary || "No agent conversations in the last 7 days."}
+
+## Context Compaction Events
+${compactionStats || "No compaction events recorded."}
+
+## Active Agents: ${allAgents.length}
+${allAgents.map((a: any) => `- ${a.name} (${a.slug})`).join("\n")}
+
+---
+
+Analyze these metrics and provide:
+1. **Health assessment** — Are agents working as expected? Any silent failures?
+2. **Optimization opportunities** — Are any agents over/under-utilized?
+3. **Dead letter analysis** — Root cause patterns in failures
+4. **Recommendations** — Specific improvements to agent configs, schedules, or tooling
+
+Submit your analysis via \`submit_deliverable\`.`;
+
+  await executeAgentChat("agent-engineer", prompt, "scheduler");
+
+  logger.info(
+    { deadLetters: deadLetters.length, activeAgents: allAgents.length },
+    "Agent performance analysis completed"
+  );
+});
+
+// ============================================================================
+// MODEL COST REVIEW — Agent Engineer evaluates model pricing
+// ============================================================================
+
+/**
+ * Model Cost Review — Agent Engineer checks OpenRouter for cheaper/better models.
+ * Runs Mondays at 12pm Dubai. Fetches model list and compares to current usage.
+ */
+registerJobHandler("model_cost_review", async (_agentId: string, _agentSlug: string) => {
+  const database = await getDb();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+  // Count conversations per agent (proxy for token usage)
+  const agentUsage = await database
+    .select({
+      agentId: agentConversations.agentId,
+      messageCount: sql<number>`COUNT(*)::int`,
+    })
+    .from(agentConversations)
+    .where(gte(agentConversations.createdAt, sevenDaysAgo))
+    .groupBy(agentConversations.agentId);
+
+  // Look up agent details
+  const allAgents = await database
+    .select({ id: agents.id, name: agents.name, slug: agents.slug, modelTier: agents.modelTier })
+    .from(agents)
+    .where(eq(agents.isActive, true));
+  const agentMap = new Map<string, any>(allAgents.map((a: any) => [a.id, a]));
+
+  const usageSummary = agentUsage
+    .map((u: any) => {
+      const agent = agentMap.get(u.agentId);
+      return `- ${agent?.name || u.agentId} (${agent?.modelTier || "unknown"} tier): ${u.messageCount} messages/week`;
+    })
+    .join("\n");
+
+  // Fetch OpenRouter model list
+  let modelListSummary = "Could not fetch model list — check OpenRouter API key.";
+  try {
+    const resp = await fetch("https://openrouter.ai/api/v1/models");
+    if (resp.ok) {
+      const data = await resp.json();
+      // Filter for fast/cheap models comparable to Haiku
+      const relevantModels = (data.data || [])
+        .filter((m: any) => {
+          const pricing = m.pricing;
+          if (!pricing) return false;
+          const promptPrice = parseFloat(pricing.prompt || "999");
+          // Under $1/M tokens (cheap tier)
+          return promptPrice < 0.000001;
+        })
+        .slice(0, 20)
+        .map((m: any) => `- ${m.id}: $${(parseFloat(m.pricing.prompt) * 1_000_000).toFixed(4)}/M prompt, $${(parseFloat(m.pricing.completion) * 1_000_000).toFixed(4)}/M completion, context: ${m.context_length || "?"}`);
+
+      if (relevantModels.length > 0) {
+        modelListSummary = relevantModels.join("\n");
+      } else {
+        modelListSummary = "No models found under $1/M tokens threshold.";
+      }
+    }
+  } catch (err: any) {
+    modelListSummary = `Fetch failed: ${err.message}`;
+  }
+
+  const prompt = `You are running your weekly model cost review. Here is the current state:
+
+## Current Agent Usage (last 7 days)
+${usageSummary || "No agent activity recorded."}
+
+## Current Model Tiers
+- **fast** (Haiku): Used by specialists — lowest cost, good for routine tasks
+- **mid** (Sonnet): Used by executives — balanced cost/capability
+- **top** (Opus): Used by CoS only — highest capability
+
+## Available Cheap Models on OpenRouter (under $1/M tokens)
+${modelListSummary}
+
+---
+
+Analyze and recommend:
+1. **Cost comparison** — Estimate weekly spend based on message counts and model pricing
+2. **Model alternatives** — Are there models that offer better price/performance for our use case?
+3. **Tier optimization** — Should any agents move to a different tier based on their actual task complexity?
+4. **Savings estimate** — What could we save monthly by switching?
+
+Submit your analysis via \`submit_deliverable\`.`;
+
+  await executeAgentChat("agent-engineer", prompt, "scheduler");
+
+  logger.info("Model cost review completed");
 });
 
 // ============================================================================

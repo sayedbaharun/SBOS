@@ -587,6 +587,17 @@ router.post("/admin/channels/send", async (req: Request, res: Response) => {
   }
 });
 
+// Setup Hikma Digital venture (one-time, idempotent)
+router.post("/admin/setup-hikma", async (req: Request, res: Response) => {
+  try {
+    const { setupHikmaDigitalVenture } = await import("../agents/setup-hikma-venture");
+    const result = await setupHikmaDigitalVenture();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ============================================================================
 // SCHEDULER
 // ============================================================================

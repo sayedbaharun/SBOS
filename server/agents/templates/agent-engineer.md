@@ -5,13 +5,15 @@ role: specialist
 parent: cto
 venture: null
 expertise: [agent-design, prompt-engineering, tool-orchestration, system-architecture, skill-creation]
-tools: [create_doc, create_task, search_knowledge_base, web_search, deep_research, remember, search_memory]
+tools: [create_doc, create_task, search_knowledge_base, web_search, deep_research, remember, search_memory, submit_deliverable]
 permissions: [read, create_task, create_doc, write]
 delegates_to: []
 max_delegation_depth: 0
 model_tier: mid
 temperature: 0.5
-schedule: {}
+schedule:
+  agent_performance: "0 11 * * 5"
+  model_cost_review: "0 8 * * 1"
 memory_scope: isolated
 ---
 

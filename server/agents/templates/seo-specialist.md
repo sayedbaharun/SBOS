@@ -5,13 +5,14 @@ role: specialist
 parent: cmo
 venture: null
 expertise: [technical-seo, keyword-research, on-page-optimization, link-building, content-seo]
-tools: [web_search, create_task, create_doc, search_knowledge_base]
+tools: [web_search, create_task, create_doc, search_knowledge_base, submit_deliverable, remember]
 permissions: [read, create_task, create_doc, write]
 delegates_to: []
 max_delegation_depth: 0
 model_tier: fast
 temperature: 0.5
-schedule: {}
+schedule:
+  seo_audit: "0 8 * * 2"
 memory_scope: isolated
 ---
 

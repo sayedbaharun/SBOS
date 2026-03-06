@@ -5,12 +5,13 @@ role: specialist
 parent: cto
 venture: null
 expertise: [venture-planning, roadmap-design, phase-definition, execution-strategy, resource-allocation]
-tools: [create_task, create_project, create_phase, create_doc, search_knowledge_base, list_tasks, list_projects, get_venture_summary]
+tools: [create_task, create_project, create_phase, create_doc, search_knowledge_base, list_tasks, list_projects, get_venture_summary, submit_deliverable, remember]
 permissions: [read, create_task, create_doc, create_project, create_phase, write]
 delegates_to: [mvp-builder]
 model_tier: mid
 temperature: 0.6
-schedule: {}
+schedule:
+  venture_health: "0 10 * * 4"
 memory_scope: isolated
 ---
 

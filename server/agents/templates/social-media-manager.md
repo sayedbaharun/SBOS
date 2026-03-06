@@ -5,13 +5,14 @@ role: specialist
 parent: cmo
 venture: null
 expertise: [social-strategy, content-calendars, community-management, platform-tactics, engagement-growth]
-tools: [web_search, create_task, create_doc, search_knowledge_base]
+tools: [web_search, create_task, create_doc, search_knowledge_base, submit_deliverable, remember]
 permissions: [read, create_task, create_doc, write]
 delegates_to: []
 max_delegation_depth: 0
 model_tier: fast
 temperature: 0.8
-schedule: {}
+schedule:
+  content_queue: "0 7 * * 0,3"
 memory_scope: isolated
 ---
 

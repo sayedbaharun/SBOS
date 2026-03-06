@@ -14,6 +14,7 @@ temperature: 0.7
 schedule:
   weekly_report: "0 17 * * 5"
   campaign_review: "0 9 * * 1"
+  distribution_check: "0 8 * * 1,3,5"
 memory_scope: isolated
 ---
 
