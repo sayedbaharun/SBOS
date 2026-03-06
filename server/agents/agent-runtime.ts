@@ -596,6 +596,95 @@ function buildCoreTools(agent: Agent, permissions: string[]): OpenAI.Chat.ChatCo
     });
   }
 
+  // Calendar read — list events, check availability, find free slots, search
+  if (availableTools.includes("calendar_read")) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "calendar_read",
+        description: "Read from Google Calendar: list events for a date range, check availability, find free slots, or search events by keyword.",
+        parameters: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              enum: ["list_events", "check_availability", "find_free_slots", "search_events"],
+              description: "What to do with the calendar",
+            },
+            start_date: {
+              type: "string",
+              description: "Start date/time in ISO format or YYYY-MM-DD (defaults to today)",
+            },
+            end_date: {
+              type: "string",
+              description: "End date/time in ISO format or YYYY-MM-DD (defaults to end of start_date)",
+            },
+            query: {
+              type: "string",
+              description: "Search query (for search_events action)",
+            },
+            duration_minutes: {
+              type: "number",
+              description: "Slot duration in minutes (for find_free_slots, default: 60)",
+            },
+            max_results: {
+              type: "number",
+              description: "Maximum events to return (for list_events, default: 10)",
+            },
+          },
+          required: ["action"],
+        },
+      },
+    });
+  }
+
+  // Calendar write — create events, update events, delete events, create focus blocks
+  if (availableTools.includes("calendar_write")) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "calendar_write",
+        description: "Write to Google Calendar: create events (with Google Meet), update existing events, delete events, or create focus time blocks with auto-decline.",
+        parameters: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              enum: ["create_event", "update_event", "delete_event", "create_focus_block"],
+              description: "Calendar write action",
+            },
+            event_id: {
+              type: "string",
+              description: "Event ID (for update_event and delete_event)",
+            },
+            summary: {
+              type: "string",
+              description: "Event title/summary",
+            },
+            start_time: {
+              type: "string",
+              description: "Start time in ISO format (e.g., 2026-03-06T09:00:00)",
+            },
+            end_time: {
+              type: "string",
+              description: "End time in ISO format (e.g., 2026-03-06T10:00:00)",
+            },
+            description: {
+              type: "string",
+              description: "Event description/notes",
+            },
+            attendee_emails: {
+              type: "array",
+              items: { type: "string" },
+              description: "Email addresses of attendees to invite",
+            },
+          },
+          required: ["action"],
+        },
+      },
+    });
+  }
+
   return tools;
 }
 
@@ -1065,6 +1154,103 @@ async function executeTool(
             return getDeploymentStatus();
           default:
             return { result: `Unknown deploy action: ${args.action}` };
+        }
+      }
+
+      case "calendar_read": {
+        const { listEvents, checkAvailability, findFreeSlots, searchEvents } = await import("../google-calendar");
+        const now = new Date();
+        const startDate = args.start_date ? new Date(args.start_date) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const endDate = args.end_date ? new Date(args.end_date) : new Date(startDate.getTime() + 24 * 60 * 60 * 1000);
+
+        switch (args.action) {
+          case "list_events": {
+            const events = await listEvents(startDate, endDate, args.max_results || 10);
+            const formatted = events.map((e: any) => ({
+              id: e.id,
+              summary: e.summary,
+              start: e.start?.dateTime || e.start?.date,
+              end: e.end?.dateTime || e.end?.date,
+              location: e.location,
+              attendees: e.attendees?.map((a: any) => a.email),
+              meetLink: e.hangoutLink,
+            }));
+            return { result: JSON.stringify({ action: "list_events", events: formatted, count: formatted.length }, null, 2) };
+          }
+          case "check_availability": {
+            const available = await checkAvailability(startDate, endDate);
+            return { result: JSON.stringify({ action: "check_availability", start: startDate.toISOString(), end: endDate.toISOString(), available }) };
+          }
+          case "find_free_slots": {
+            const slots = await findFreeSlots(startDate, endDate, args.duration_minutes || 60);
+            return { result: JSON.stringify({ action: "find_free_slots", slots: slots.slice(0, 10), count: slots.length }, null, 2) };
+          }
+          case "search_events": {
+            const results = await searchEvents(args.query || "", startDate, endDate);
+            const formatted = results.map((e: any) => ({
+              id: e.id,
+              summary: e.summary,
+              start: e.start?.dateTime || e.start?.date,
+              end: e.end?.dateTime || e.end?.date,
+            }));
+            return { result: JSON.stringify({ action: "search_events", query: args.query, events: formatted }, null, 2) };
+          }
+          default:
+            return { result: `Unknown calendar_read action: ${args.action}. Use list_events, check_availability, find_free_slots, or search_events.` };
+        }
+      }
+
+      case "calendar_write": {
+        const gcal = await import("../google-calendar");
+
+        switch (args.action) {
+          case "create_event": {
+            const event = await gcal.createEvent(
+              args.summary || "Untitled Event",
+              new Date(args.start_time),
+              new Date(args.end_time),
+              args.description,
+              args.attendee_emails,
+            );
+            return {
+              result: JSON.stringify({ action: "create_event", eventId: event.id, summary: event.summary, meetLink: event.hangoutLink, htmlLink: event.htmlLink }),
+              action: { actionType: "create_event", entityType: "calendar_event", entityId: event.id || "", status: "success" },
+            };
+          }
+          case "update_event": {
+            const updated = await gcal.updateEvent(args.event_id, {
+              summary: args.summary,
+              startTime: args.start_time ? new Date(args.start_time) : undefined,
+              endTime: args.end_time ? new Date(args.end_time) : undefined,
+              description: args.description,
+              attendeeEmails: args.attendee_emails,
+            });
+            return {
+              result: JSON.stringify({ action: "update_event", eventId: updated.id, summary: updated.summary }),
+              action: { actionType: "update_event", entityType: "calendar_event", entityId: args.event_id, status: "success" },
+            };
+          }
+          case "delete_event": {
+            await gcal.deleteEvent(args.event_id);
+            return {
+              result: JSON.stringify({ action: "delete_event", eventId: args.event_id, deleted: true }),
+              action: { actionType: "delete_event", entityType: "calendar_event", entityId: args.event_id, status: "success" },
+            };
+          }
+          case "create_focus_block": {
+            const block = await gcal.createFocusTimeBlock(
+              args.summary || "Focus Time",
+              new Date(args.start_time),
+              new Date(args.end_time),
+              args.description,
+            );
+            return {
+              result: JSON.stringify({ action: "create_focus_block", eventId: block.id, summary: block.summary, autoDecline: true }),
+              action: { actionType: "create_focus_block", entityType: "calendar_event", entityId: block.id || "", status: "success" },
+            };
+          }
+          default:
+            return { result: `Unknown calendar_write action: ${args.action}. Use create_event, update_event, delete_event, or create_focus_block.` };
         }
       }
 
