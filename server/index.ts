@@ -434,39 +434,39 @@ app.use((req, res, next) => {
       const { initializeScheduler } = await import('./agents/agent-scheduler');
       await initializeScheduler();
 
-      // Initialize channel adapters (Telegram, etc.)
-      try {
-        const { registerAdapter, startAllAdapters } = await import('./channels/channel-manager');
-        const { telegramAdapter } = await import('./channels/adapters/telegram-adapter');
-        registerAdapter(telegramAdapter);
-        await startAllAdapters();
-
-        log('✓ Channel adapters initialized');
-      } catch (channelError) {
-        log('Channel adapters setup skipped:', String(channelError));
-      }
-
-      // Start outbound message queue processor (Project Ironclad)
-      try {
-        const { startMessageQueueProcessor } = await import('./infra/message-queue');
-        startMessageQueueProcessor();
-        log('✓ Outbound message queue processor started');
-      } catch (mqError) {
-        log('Message queue processor setup skipped:', String(mqError));
-      }
-
-      // Initialize nudge engine (event-driven proactive notifications)
-      try {
-        const { scheduleNudgeEngine } = await import('./automations/nudge-engine');
-        scheduleNudgeEngine();
-        log('✓ Nudge engine initialized');
-      } catch (nudgeError) {
-        log('Nudge engine setup skipped:', String(nudgeError));
-      }
-
-      log('✓ SB-OS automations initialized (day creation, reminders, RAG embeddings, agent scheduler, nudges)');
+      log('✓ SB-OS automations initialized (day creation, reminders, RAG embeddings, agent scheduler)');
     } catch (error) {
       log('SB-OS automations setup skipped:', String(error));
+    }
+
+    // Initialize channel adapters (Telegram, etc.) — runs independently of DISABLE_CRONS
+    try {
+      const { registerAdapter, startAllAdapters } = await import('./channels/channel-manager');
+      const { telegramAdapter } = await import('./channels/adapters/telegram-adapter');
+      registerAdapter(telegramAdapter);
+      await startAllAdapters();
+
+      log('✓ Channel adapters initialized');
+    } catch (channelError) {
+      log('Channel adapters setup skipped:', String(channelError));
+    }
+
+    // Start outbound message queue processor (Project Ironclad) — runs independently of DISABLE_CRONS
+    try {
+      const { startMessageQueueProcessor } = await import('./infra/message-queue');
+      startMessageQueueProcessor();
+      log('✓ Outbound message queue processor started');
+    } catch (mqError) {
+      log('Message queue processor setup skipped:', String(mqError));
+    }
+
+    // Initialize nudge engine — runs independently of DISABLE_CRONS
+    try {
+      const { scheduleNudgeEngine } = await import('./automations/nudge-engine');
+      scheduleNudgeEngine();
+      log('✓ Nudge engine initialized');
+    } catch (nudgeError) {
+      log('Nudge engine setup skipped:', String(nudgeError));
     }
 
     // Initialize memory systems (non-blocking)
