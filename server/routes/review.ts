@@ -191,7 +191,8 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
             priority: details.priority || "P2",
             status: "todo",
             ventureId: details.ventureId,
-          });
+            createdByAgentId: task.agentId || undefined,
+          } as any);
           promotedTo.push({ type: "task", id: String(newTask.id) });
         } else if (result.suggestedAction === "create_doc") {
           const { doc } = await storage.createDocIfNotExists({
@@ -217,7 +218,8 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
             ventureId: item.ventureId || undefined,
             projectId: item.projectId || undefined,
             dueDate: item.dueDate,
-          });
+            createdByAgentId: task.agentId || undefined,
+          } as any);
           promotedTo.push({ type: "task", id: String(newTask.id) });
         }
         break;

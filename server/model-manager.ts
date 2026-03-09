@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { logger } from "./logger";
+import type { InsertTokenUsageLog } from "@shared/schema";
 
 // Initialize OpenRouter with OpenAI-compatible API (lazy initialization)
 let openai: OpenAI | null = null;
@@ -127,6 +128,66 @@ async function localChatCompletion(
 
   // Fallback to cloud fast tier
   return chatCompletion(params, "simple", LOCAL_FALLBACK_MODEL);
+}
+
+// ============================================================================
+// TOKEN USAGE LOGGING
+// ============================================================================
+
+// Approximate cost per 1M tokens (in cents) for common models
+const MODEL_COST_PER_MILLION: Record<string, { input: number; output: number }> = {
+  "anthropic/claude-opus-4": { input: 1500, output: 7500 },
+  "anthropic/claude-sonnet-4": { input: 300, output: 1500 },
+  "anthropic/claude-3.5-sonnet": { input: 300, output: 1500 },
+  "anthropic/claude-3.5-haiku": { input: 80, output: 400 },
+  "openai/gpt-4o": { input: 250, output: 1000 },
+  "openai/gpt-4o-mini": { input: 15, output: 60 },
+  "google/gemini-2.5-pro-preview-06-05": { input: 125, output: 1000 },
+  "google/gemini-2.5-flash-preview-05-20": { input: 15, output: 60 },
+  "deepseek/deepseek-chat": { input: 14, output: 28 },
+  "meta-llama/llama-3.3-70b-instruct": { input: 12, output: 30 },
+};
+
+function estimateCostCents(model: string, promptTokens: number, completionTokens: number): number {
+  const pricing = MODEL_COST_PER_MILLION[model];
+  if (!pricing) return 0; // Unknown model — cost unknown
+  return (promptTokens * pricing.input + completionTokens * pricing.output) / 1_000_000;
+}
+
+/**
+ * Log token usage to the database (fire-and-forget).
+ */
+export function logTokenUsage(
+  model: string,
+  usage: OpenAI.CompletionUsage | undefined,
+  source: InsertTokenUsageLog["source"],
+  agentId?: string | null,
+): void {
+  if (!usage) return;
+  const promptTokens = usage.prompt_tokens || 0;
+  const completionTokens = usage.completion_tokens || 0;
+  const totalTokens = usage.total_tokens || 0;
+  const estimatedCostCents = estimateCostCents(model, promptTokens, completionTokens);
+
+  // Fire-and-forget — don't block the caller
+  (async () => {
+    try {
+      const { storage } = await import("./storage");
+      await (storage as any).db.insert(
+        (await import("@shared/schema")).tokenUsageLog
+      ).values({
+        agentId: agentId || null,
+        model,
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        estimatedCostCents,
+        source: source || "web_chat",
+      });
+    } catch (err: any) {
+      logger.warn({ error: err.message }, "Failed to log token usage");
+    }
+  })();
 }
 
 // Model configuration with fallback cascade (OpenRouter model names)
@@ -284,6 +345,9 @@ export async function chatCompletion(
           latencyMs,
           finishReason: response.choices[0]?.finish_reason,
         }, `✅ Chat completion successful with ${model}`);
+
+        // Log token usage (fire-and-forget)
+        logTokenUsage(model, response.usage, "web_chat");
 
         return {
           response,

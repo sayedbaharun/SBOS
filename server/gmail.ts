@@ -170,13 +170,18 @@ export async function sendEmail(options: {
 
     const encodedMessage = Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-    const response = await gmail.users.messages.send({
+    // Save as draft instead of sending directly — Sayed reviews before sending
+    const response = await gmail.users.drafts.create({
       userId: 'me',
       requestBody: {
-        raw: encodedMessage,
-        threadId: options.threadId || undefined,
+        message: {
+          raw: encodedMessage,
+          threadId: options.threadId || undefined,
+        },
       },
     });
+
+    logger.info({ draftId: response.data.id, to: options.to, subject: options.subject }, 'Email saved as draft');
 
     return {
       success: true,
@@ -185,7 +190,7 @@ export async function sendEmail(options: {
   } catch (error: any) {
     return {
       success: false,
-      error: error.message || 'Failed to send email',
+      error: error.message || 'Failed to create draft',
     };
   }
 }

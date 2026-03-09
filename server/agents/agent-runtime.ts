@@ -919,7 +919,8 @@ async function executeTool(
           ventureId: args.ventureId || agent.ventureId,
           projectId: args.projectId,
           dueDate: args.dueDate,
-        });
+          createdByAgentId: agent.id,
+        } as any);
 
         return {
           result: `Created task: "${task.title}" (ID: ${task.id})`,

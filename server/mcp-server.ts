@@ -360,7 +360,7 @@ server.registerTool(
       status: (status as any) ?? 'next',
       priority: (priority as any) ?? 'P2',
       type: (type as any) ?? 'business',
-      ventureId: ventureId ?? null,
+      ventureId: ventureId || undefined,
       projectId: projectId ?? null,
       dueDate: dueDate ?? null,
       focusDate: focusDate ?? null,

@@ -5,7 +5,7 @@
  * Handles agent CRUD, chat, delegation, and status.
  */
 import { Router, Request, Response } from "express";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import { logger } from "../logger";
 import {
   agents,
@@ -144,6 +144,61 @@ router.get("/", async (req: Request, res: Response) => {
   } catch (error) {
     logger.error({ error }, "Error listing agents");
     res.status(500).json({ error: "Failed to list agents" });
+  }
+});
+
+// Token usage stats (MUST be before /:slug routes)
+router.get("/token-usage", async (req: Request, res: Response) => {
+  try {
+    const database = await getDb();
+    const { tokenUsageLog } = await import("@shared/schema");
+
+    const days = parseInt(String(req.query.days) || "7", 10);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // Daily breakdown by model
+    const dailyByModel = await database
+      .select({
+        date: sql<string>`DATE(${tokenUsageLog.createdAt})`.as("date"),
+        model: tokenUsageLog.model,
+        totalTokens: sql<number>`SUM(${tokenUsageLog.totalTokens})`.as("total_tokens"),
+        totalCostCents: sql<number>`SUM(${tokenUsageLog.estimatedCostCents})`.as("total_cost_cents"),
+        callCount: sql<number>`COUNT(*)`.as("call_count"),
+      })
+      .from(tokenUsageLog)
+      .where(gte(tokenUsageLog.createdAt, since))
+      .groupBy(sql`DATE(${tokenUsageLog.createdAt})`, tokenUsageLog.model)
+      .orderBy(sql`DATE(${tokenUsageLog.createdAt})`);
+
+    // By agent
+    const byAgent = await database
+      .select({
+        agentId: tokenUsageLog.agentId,
+        agentName: agents.name,
+        totalTokens: sql<number>`SUM(${tokenUsageLog.totalTokens})`.as("total_tokens"),
+        totalCostCents: sql<number>`SUM(${tokenUsageLog.estimatedCostCents})`.as("total_cost_cents"),
+        callCount: sql<number>`COUNT(*)`.as("call_count"),
+      })
+      .from(tokenUsageLog)
+      .leftJoin(agents, eq(tokenUsageLog.agentId, agents.id))
+      .where(gte(tokenUsageLog.createdAt, since))
+      .groupBy(tokenUsageLog.agentId, agents.name)
+      .orderBy(sql`SUM(${tokenUsageLog.estimatedCostCents}) DESC`);
+
+    // Totals
+    const [totals] = await database
+      .select({
+        totalTokens: sql<number>`COALESCE(SUM(${tokenUsageLog.totalTokens}), 0)`.as("total_tokens"),
+        totalCostCents: sql<number>`COALESCE(SUM(${tokenUsageLog.estimatedCostCents}), 0)`.as("total_cost_cents"),
+        callCount: sql<number>`COUNT(*)`.as("call_count"),
+      })
+      .from(tokenUsageLog)
+      .where(gte(tokenUsageLog.createdAt, since));
+
+    res.json({ days, since: since.toISOString(), totals, dailyByModel, byAgent });
+  } catch (error) {
+    logger.error({ error }, "Error fetching token usage");
+    res.status(500).json({ error: "Failed to fetch token usage" });
   }
 });
 

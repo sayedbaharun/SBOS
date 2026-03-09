@@ -320,8 +320,28 @@ app.use((req, res, next) => {
         }
 
         log(`Telegram webhook: update_id=${updateId}, has_message=${!!update.message}, text="${update.message?.text || 'N/A'}", chat_id=${update.message?.chat?.id || 'N/A'}`);
-        await bot.handleUpdate(update);
+
+        // Respond immediately — don't let agent processing block the webhook
         res.status(200).json({ ok: true });
+
+        // Process asynchronously with timeout
+        const WEBHOOK_TIMEOUT_MS = 120_000; // 2 minutes
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Webhook processing timed out after 120s")), WEBHOOK_TIMEOUT_MS)
+        );
+
+        Promise.race([
+          bot.handleUpdate(update),
+          timeoutPromise,
+        ]).catch((err) => {
+          log('Telegram webhook async processing error:', String(err));
+          // Try to notify the user if possible
+          const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
+          if (chatId) {
+            bot.telegram.sendMessage(chatId, "Sorry, that took too long to process. Please try again.")
+              .catch(() => {}); // Best effort
+          }
+        });
       } catch (err) {
         log('Telegram webhook handleUpdate error:', String(err));
         res.status(200).json({ ok: true }); // Always 200 to Telegram

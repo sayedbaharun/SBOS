@@ -557,6 +557,7 @@ export const tasks = pgTable(
     tags: jsonb("tags").$type<string[]>().default([]),
     externalId: text("external_id"),
     calendarEventId: text("calendar_event_id"), // Google Calendar event ID for two-way sync
+    createdByAgentId: uuid("created_by_agent_id").references(() => agents.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),
@@ -3930,3 +3931,42 @@ export const insertSubAgentRunSchema = createInsertSchema(subAgentRuns).omit({
 
 export type SubAgentRun = typeof subAgentRuns.$inferSelect;
 export type InsertSubAgentRun = z.infer<typeof insertSubAgentRunSchema>;
+
+// ----------------------------------------------------------------------------
+// TOKEN USAGE LOG — Track LLM spend per call
+// ----------------------------------------------------------------------------
+
+export const tokenUsageSourceEnum = pgEnum('token_usage_source', [
+  'agent_chat',
+  'agent_task',
+  'scheduled_job',
+  'web_chat',
+]);
+
+export const tokenUsageLog = pgTable(
+  "token_usage_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id").references(() => agents.id, { onDelete: "set null" }),
+    model: text("model").notNull(),
+    promptTokens: integer("prompt_tokens").default(0),
+    completionTokens: integer("completion_tokens").default(0),
+    totalTokens: integer("total_tokens").default(0),
+    estimatedCostCents: real("estimated_cost_cents").default(0),
+    source: tokenUsageSourceEnum("source").default("web_chat"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_token_usage_agent_id").on(table.agentId),
+    index("idx_token_usage_model").on(table.model),
+    index("idx_token_usage_created_at").on(table.createdAt),
+  ]
+);
+
+export const insertTokenUsageLogSchema = createInsertSchema(tokenUsageLog).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type TokenUsageLog = typeof tokenUsageLog.$inferSelect;
+export type InsertTokenUsageLog = z.infer<typeof insertTokenUsageLogSchema>;

@@ -1389,3 +1389,72 @@ Include recommendations for each stale doc (archive, update, or keep), suggested
     "Knowledge audit completed"
   );
 });
+
+// ============================================================================
+// CREDIT BALANCE MONITOR
+// ============================================================================
+
+/**
+ * Check OpenRouter credit balance every 6 hours.
+ * Sends Telegram alert if balance is low ($2) or critical ($0.50).
+ */
+registerJobHandler("check_credit_balance", async (_agentId: string, _agentSlug: string) => {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    logger.warn("check_credit_balance: OPENROUTER_API_KEY not set, skipping");
+    return;
+  }
+
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/auth/key", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
+    if (!res.ok) {
+      logger.error({ status: res.status }, "check_credit_balance: Failed to fetch credit info");
+      return;
+    }
+
+    const data = await res.json() as { data: { limit: number; usage: number; limit_remaining: number } };
+    const remaining = data.data.limit_remaining;
+    const limit = data.data.limit;
+    const usage = data.data.usage;
+
+    logger.info(
+      { remaining, limit, usage },
+      `OpenRouter credit check: $${(remaining / 100).toFixed(2)} remaining`
+    );
+
+    // Convert from credits (cents?) to dollars — OpenRouter returns dollars
+    const remainingDollars = remaining;
+
+    let alertLevel: "critical" | "warning" | null = null;
+    if (remainingDollars < 0.50) {
+      alertLevel = "critical";
+    } else if (remainingDollars < 2) {
+      alertLevel = "warning";
+    }
+
+    if (alertLevel) {
+      const emoji = alertLevel === "critical" ? "🚨" : "⚠️";
+      const urgency = alertLevel === "critical" ? "CRITICAL" : "LOW";
+      const message = formatMessage({
+        header: msgHeader(emoji, `${urgency}: OpenRouter Credits`),
+        body: `<b>Remaining:</b> $${remainingDollars.toFixed(2)}\n<b>Used:</b> $${usage.toFixed(2)} of $${limit.toFixed(2)} limit\n\nTop up: https://openrouter.ai/settings/credits`,
+      });
+
+      try {
+        const { sendProactiveMessage } = await import("../channels/channel-manager");
+        const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+        for (const chatId of getAuthorizedChatIds()) {
+          await sendProactiveMessage("telegram", chatId, message);
+        }
+      } catch {
+        // Telegram not configured — log only
+        logger.warn({ remainingDollars, alertLevel }, "OpenRouter credits low but Telegram not configured");
+      }
+    }
+  } catch (err: any) {
+    logger.error({ error: err.message }, "check_credit_balance: unexpected error");
+  }
+});

@@ -19,6 +19,7 @@ schedule:
   weekly_report_cos: "0 16 * * 5"
   session_log_extraction: "0 22 * * *"
   pipeline_health_check: "0 */6 * * *"
+  check_credit_balance: "30 */6 * * *"
   memory_consolidation: "0 23 * * *"
 memory_scope: isolated
 ---
