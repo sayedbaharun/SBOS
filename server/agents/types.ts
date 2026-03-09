@@ -173,7 +173,7 @@ export interface AgentChatResult {
 export const MODEL_TIER_DEFAULTS: Record<string, string> = {
   top: "anthropic/claude-opus-4",
   mid: "anthropic/claude-sonnet-4",
-  fast: "anthropic/claude-3.5-haiku",
+  fast: "google/gemini-2.5-flash-lite",
   local: "local/auto",
 };
 

@@ -23,6 +23,36 @@ function getOpenAIClient(): OpenAI {
 }
 
 // ============================================================================
+// KILO CODE FALLBACK (when OpenRouter credits are exhausted)
+// ============================================================================
+
+let kiloClient: OpenAI | null = null;
+
+function getKiloClient(): OpenAI | null {
+  if (!process.env.KILOCODE_API_KEY) return null;
+  if (!kiloClient) {
+    kiloClient = new OpenAI({
+      apiKey: process.env.KILOCODE_API_KEY,
+      baseURL: "https://api.kilo.ai/api/gateway",
+      defaultHeaders: {
+        "HTTP-Referer": process.env.SITE_URL || "http://localhost:5000",
+        "X-Title": "SB-OS",
+      },
+    });
+  }
+  return kiloClient;
+}
+
+/** Returns true for errors that indicate OpenRouter credits are exhausted */
+function isCreditsExhausted(error: any): boolean {
+  return (
+    error.status === 402 || // Payment required
+    (error.status === 400 && /insufficient.*credit/i.test(error.message || "")) ||
+    (error.status === 429 && /limit|quota|credit/i.test(error.message || ""))
+  );
+}
+
+// ============================================================================
 // LOCAL MODEL (LM Studio / Qwen 3.5)
 // ============================================================================
 
@@ -144,6 +174,7 @@ const MODEL_COST_PER_MILLION: Record<string, { input: number; output: number }> 
   "openai/gpt-4o-mini": { input: 15, output: 60 },
   "google/gemini-2.5-pro-preview-06-05": { input: 125, output: 1000 },
   "google/gemini-2.5-flash-preview-05-20": { input: 15, output: 60 },
+  "google/gemini-2.5-flash-lite": { input: 10, output: 40 },
   "deepseek/deepseek-chat": { input: 14, output: 28 },
   "meta-llama/llama-3.3-70b-instruct": { input: 12, output: 30 },
 };
@@ -214,6 +245,7 @@ export const AVAILABLE_MODELS = [
   // Google models
   { id: "google/gemini-2.5-pro-preview-06-05", name: "Gemini 2.5 Pro", provider: "Google", description: "Latest Gemini, most capable" },
   { id: "google/gemini-2.5-flash-preview-05-20", name: "Gemini 2.5 Flash", provider: "Google", description: "Fast latest-gen Gemini" },
+  { id: "google/gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", provider: "Google", description: "Ultra-fast agentic Gemini" },
   { id: "google/gemini-2.0-flash-001", name: "Gemini 2.0 Flash", provider: "Google", description: "Fast and capable" },
   { id: "google/gemini-2.0-flash-thinking-exp", name: "Gemini 2.0 Flash Thinking", provider: "Google", description: "Reasoning-enhanced Gemini" },
   // DeepSeek models
@@ -394,15 +426,51 @@ export async function chatCompletion(
     }
   }
 
-  // All models failed
+  // ── Kilo Code fallback: retry the selected model via Kilo gateway ──
+  const kilo = getKiloClient();
+  if (kilo && lastError && isCreditsExhausted(lastError)) {
+    const kiloModel = selectedModel;
+    const startTime = Date.now();
+    try {
+      logger.info({ model: kiloModel }, `OpenRouter credits exhausted — falling back to Kilo gateway`);
+      const response = await kilo.chat.completions.create({
+        model: kiloModel,
+        messages: params.messages,
+        tools: params.tools,
+        tool_choice: params.tool_choice,
+        temperature: params.temperature ?? 0.7,
+        max_tokens: params.max_tokens,
+        response_format: params.response_format,
+      });
+
+      const latencyMs = Date.now() - startTime;
+      logger.info({ model: kiloModel, latencyMs, provider: "kilo" }, `✅ Kilo fallback successful`);
+      logTokenUsage(`kilo/${kiloModel}`, response.usage, "web_chat");
+
+      return {
+        response,
+        metrics: {
+          modelUsed: `kilo/${kiloModel}`,
+          attemptNumber: totalAttempts + 1,
+          totalAttempts: totalAttempts + 1,
+          success: true,
+          tokensUsed: response.usage?.total_tokens,
+          latencyMs,
+        },
+      };
+    } catch (kiloError: any) {
+      logger.error({ error: kiloError.message, model: kiloModel }, `❌ Kilo fallback also failed`);
+    }
+  }
+
+  // All providers failed
   const errorMessage = lastError?.message || "All models failed";
   logger.error({
     totalAttempts,
     modelsAttempted: orderedCascade.map(m => m.name),
     lastError: errorMessage,
-  }, `🚨 All model fallbacks exhausted`);
+  }, `🚨 All model fallbacks exhausted (including Kilo)`);
 
-  // Return error metrics
   throw new Error(`All AI models failed after ${totalAttempts} attempts: ${errorMessage}`);
 }
 
@@ -487,11 +555,42 @@ export async function chatCompletionStream(
     }
   }
 
+  // ── Kilo Code fallback for streaming ──
+  const kilo = getKiloClient();
+  if (kilo && lastError && isCreditsExhausted(lastError)) {
+    const kiloModel = preferredModel;
+    try {
+      logger.info({ model: kiloModel }, `OpenRouter credits exhausted — streaming fallback to Kilo gateway`);
+      const stream = await kilo.chat.completions.create({
+        model: kiloModel,
+        messages: params.messages,
+        tools: params.tools,
+        tool_choice: params.tool_choice,
+        temperature: params.temperature ?? 0.7,
+        max_tokens: params.max_tokens,
+        stream: true,
+      });
+
+      logger.info({ model: kiloModel, provider: "kilo" }, `✅ Kilo streaming started`);
+      return {
+        stream,
+        metrics: {
+          modelUsed: `kilo/${kiloModel}`,
+          attemptNumber: totalAttempts + 1,
+          totalAttempts: totalAttempts + 1,
+          success: true,
+        },
+      };
+    } catch (kiloError: any) {
+      logger.error({ error: kiloError.message, model: kiloModel }, `❌ Kilo streaming fallback also failed`);
+    }
+  }
+
   const errorMessage = lastError?.message || "All models failed";
   logger.error({
     totalAttempts,
     lastError: errorMessage,
-  }, `🚨 All streaming model fallbacks exhausted`);
+  }, `🚨 All streaming model fallbacks exhausted (including Kilo)`);
 
   throw new Error(`All AI models failed for streaming after ${totalAttempts} attempts: ${errorMessage}`);
 }

@@ -24,6 +24,7 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   "anthropic/claude-opus-4": 200_000,
   "anthropic/claude-sonnet-4": 200_000,
   "anthropic/claude-3.5-haiku": 200_000,
+  "google/gemini-2.5-flash-lite": 1_000_000,
   // Legacy IDs (still valid on OpenRouter)
   "anthropic/claude-3-opus": 200_000,
   "anthropic/claude-3.5-sonnet": 200_000,
