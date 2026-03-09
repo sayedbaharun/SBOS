@@ -47,7 +47,7 @@ function checkRateLimit(chatId: string, maxRequests = 10, windowMs = 60000): boo
   return true;
 }
 
-export const bot = BOT_TOKEN ? new Telegraf(BOT_TOKEN) : null;
+export const bot = BOT_TOKEN ? new Telegraf(BOT_TOKEN, { handlerTimeout: 300_000 }) : null;
 
 // Initialize bot if token exists
 if (bot) {

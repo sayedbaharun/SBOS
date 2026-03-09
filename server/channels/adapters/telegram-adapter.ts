@@ -135,7 +135,7 @@ class TelegramAdapter implements ChannelAdapter {
       return;
     }
 
-    this.bot = new Telegraf(BOT_TOKEN);
+    this.bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 300_000 }); // 5 min — agent tool loops can be slow via Kilo fallback
 
     // ---- Access Control Middleware ----
     this.bot.use((ctx, next) => {
