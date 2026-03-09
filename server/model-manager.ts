@@ -52,6 +52,25 @@ function isCreditsExhausted(error: any): boolean {
   );
 }
 
+// Short-lived cache: once we know OpenRouter is out of credits, skip it entirely
+// for OPENROUTER_COOLDOWN_MS to avoid wasting ~3s per call cycling dead models
+const OPENROUTER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+let openRouterExhaustedAt: number | null = null;
+
+function markOpenRouterExhausted(): void {
+  openRouterExhaustedAt = Date.now();
+  logger.info(`OpenRouter marked as credit-exhausted for ${OPENROUTER_COOLDOWN_MS / 1000}s`);
+}
+
+function isOpenRouterCoolingDown(): boolean {
+  if (!openRouterExhaustedAt) return false;
+  if (Date.now() - openRouterExhaustedAt > OPENROUTER_COOLDOWN_MS) {
+    openRouterExhaustedAt = null; // Reset — try OpenRouter again
+    return false;
+  }
+  return true;
+}
+
 // ============================================================================
 // LOCAL MODEL (LM Studio / Qwen 3.5)
 // ============================================================================
@@ -318,6 +337,44 @@ export async function chatCompletion(
 
   // Use preferred model if specified, otherwise select based on complexity
   const selectedModel = preferredModel || selectModelForTask(complexity);
+
+  // ── Fast path: if OpenRouter is known-exhausted, go straight to Kilo ──
+  const kilo = getKiloClient();
+  if (kilo && isOpenRouterCoolingDown()) {
+    const startTime = Date.now();
+    try {
+      logger.info({ model: selectedModel, provider: "kilo" }, `OpenRouter cooling down — using Kilo directly`);
+      const response = await kilo.chat.completions.create({
+        model: selectedModel,
+        messages: params.messages,
+        tools: params.tools,
+        tool_choice: params.tool_choice,
+        temperature: params.temperature ?? 0.7,
+        max_tokens: params.max_tokens,
+        response_format: params.response_format,
+      });
+
+      const latencyMs = Date.now() - startTime;
+      logger.info({ model: selectedModel, latencyMs, provider: "kilo" }, `✅ Kilo direct call successful`);
+      logTokenUsage(`kilo/${selectedModel}`, response.usage, "web_chat");
+
+      return {
+        response,
+        metrics: {
+          modelUsed: `kilo/${selectedModel}`,
+          attemptNumber: 1,
+          totalAttempts: 1,
+          success: true,
+          tokensUsed: response.usage?.total_tokens,
+          latencyMs,
+        },
+      };
+    } catch (kiloError: any) {
+      logger.warn({ error: kiloError.message }, `Kilo direct call failed — trying OpenRouter cascade`);
+      // Clear cooldown so we fall through to normal cascade
+      openRouterExhaustedAt = null;
+    }
+  }
   const startIndex = MODEL_CASCADE.findIndex((m) => m.name === selectedModel);
 
   // Build cascade: if preferred model is in cascade, reorder to start with it
@@ -427,13 +484,14 @@ export async function chatCompletion(
   }
 
   // ── Kilo Code fallback: retry the selected model via Kilo gateway ──
-  const kilo = getKiloClient();
-  if (kilo && lastError && isCreditsExhausted(lastError)) {
+  const kiloFallback = getKiloClient();
+  if (kiloFallback && lastError && isCreditsExhausted(lastError)) {
+    markOpenRouterExhausted(); // Skip OpenRouter for next 5 min
     const kiloModel = selectedModel;
     const startTime = Date.now();
     try {
       logger.info({ model: kiloModel }, `OpenRouter credits exhausted — falling back to Kilo gateway`);
-      const response = await kilo.chat.completions.create({
+      const response = await kiloFallback.chat.completions.create({
         model: kiloModel,
         messages: params.messages,
         tools: params.tools,
@@ -486,8 +544,33 @@ export async function chatCompletionStream(
   metrics: Omit<ModelMetrics, "latencyMs" | "tokensUsed">;
 }> {
   const preferredModel = selectModelForTask(complexity);
+
+  // ── Fast path: if OpenRouter is known-exhausted, stream from Kilo directly ──
+  const kiloStream = getKiloClient();
+  if (kiloStream && isOpenRouterCoolingDown()) {
+    try {
+      logger.info({ model: preferredModel, provider: "kilo" }, `OpenRouter cooling down — streaming from Kilo directly`);
+      const stream = await kiloStream.chat.completions.create({
+        model: preferredModel,
+        messages: params.messages,
+        tools: params.tools,
+        tool_choice: params.tool_choice,
+        temperature: params.temperature ?? 0.7,
+        max_tokens: params.max_tokens,
+        stream: true,
+      });
+      return {
+        stream,
+        metrics: { modelUsed: `kilo/${preferredModel}`, attemptNumber: 1, totalAttempts: 1, success: true },
+      };
+    } catch (kiloError: any) {
+      logger.warn({ error: kiloError.message }, `Kilo streaming direct failed — trying OpenRouter cascade`);
+      openRouterExhaustedAt = null;
+    }
+  }
+
   const startIndex = MODEL_CASCADE.findIndex((m) => m.name === preferredModel);
-  
+
   const orderedCascade = [
     ...MODEL_CASCADE.slice(startIndex),
     ...MODEL_CASCADE.slice(0, startIndex),
@@ -556,12 +639,13 @@ export async function chatCompletionStream(
   }
 
   // ── Kilo Code fallback for streaming ──
-  const kilo = getKiloClient();
-  if (kilo && lastError && isCreditsExhausted(lastError)) {
+  const kiloFb = getKiloClient();
+  if (kiloFb && lastError && isCreditsExhausted(lastError)) {
+    markOpenRouterExhausted();
     const kiloModel = preferredModel;
     try {
       logger.info({ model: kiloModel }, `OpenRouter credits exhausted — streaming fallback to Kilo gateway`);
-      const stream = await kilo.chat.completions.create({
+      const stream = await kiloFb.chat.completions.create({
         model: kiloModel,
         messages: params.messages,
         tools: params.tools,
