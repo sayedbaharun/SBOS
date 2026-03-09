@@ -5,7 +5,7 @@ role: specialist
 parent: chief-of-staff
 venture: null
 expertise: [calendar-management, time-optimization, scheduling, energy-awareness, venture-balancing]
-tools: [calendar_read, calendar_write, search_knowledge_base, send_notification, get_user_context, remember, search_memory]
+tools: [calendar_read, calendar_write, search_knowledge_base, send_notification, get_user_context, remember, search_memory, update_day]
 permissions: [read, write_calendar, send_notifications]
 delegates_to: []
 max_delegation_depth: 0

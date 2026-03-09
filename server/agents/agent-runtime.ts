@@ -202,6 +202,81 @@ function buildCoreTools(agent: Agent, permissions: string[]): OpenAI.Chat.ChatCo
     });
   }
 
+  // Get day record
+  if (availableTools.includes("update_day")) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "get_day",
+        description: "Get a day record to see current outcomes, reflections, rituals, and mood. Returns the full day object.",
+        parameters: {
+          type: "object",
+          properties: {
+            date: { type: "string", description: "Date in YYYY-MM-DD format. Defaults to today." },
+          },
+        },
+      },
+    });
+  }
+
+  // Update day record
+  if (availableTools.includes("update_day")) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "update_day",
+        description: "Update today's day record with outcomes, reflections, mood, one thing to ship, or ritual tracking. Only pass the fields you want to update.",
+        parameters: {
+          type: "object",
+          properties: {
+            date: { type: "string", description: "Date in YYYY-MM-DD format. Defaults to today." },
+            title: { type: "string", description: "Day theme or title" },
+            mood: { type: "string", enum: ["low", "medium", "high", "peak"], description: "Overall mood" },
+            top3Outcomes: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  text: { type: "string", description: "Outcome description" },
+                  completed: { type: "boolean", description: "Whether completed" },
+                },
+                required: ["text"],
+              },
+              description: "Top 3 priority outcomes for the day",
+            },
+            oneThingToShip: { type: "string", description: "Single most leveraged deliverable" },
+            reflectionAm: { type: "string", description: "Morning intention or reflection" },
+            reflectionPm: { type: "string", description: "Evening review or reflection" },
+            morningRituals: {
+              type: "object",
+              properties: {
+                pressUps: { type: "object", properties: { done: { type: "boolean" }, reps: { type: "number" } } },
+                squats: { type: "object", properties: { done: { type: "boolean" }, reps: { type: "number" } } },
+                supplements: { type: "object", properties: { done: { type: "boolean" } } },
+                water: { type: "object", properties: { done: { type: "boolean" } } },
+                completedAt: { type: "string", description: "ISO timestamp when completed" },
+              },
+              description: "Morning ritual tracking",
+            },
+            eveningRituals: {
+              type: "object",
+              properties: {
+                reviewCompleted: { type: "boolean" },
+                journalEntry: { type: "string" },
+                gratitude: { type: "array", items: { type: "string" } },
+                tomorrowPriorities: { type: "array", items: { type: "string" } },
+                fastingHours: { type: "number" },
+                deepWorkHours: { type: "number" },
+                completedAt: { type: "string", description: "ISO timestamp when completed" },
+              },
+              description: "Evening ritual and reflection tracking",
+            },
+          },
+        },
+      },
+    });
+  }
+
   // Create document
   if (availableTools.includes("create_doc") && (permissions.includes("create_doc") || permissions.includes("write"))) {
     tools.push({
@@ -853,6 +928,59 @@ async function executeTool(
             entityType: "task",
             entityId: task.id,
             parameters: args,
+            status: "success",
+          },
+        };
+      }
+
+      case "get_day": {
+        const date = args.date || new Date().toISOString().split("T")[0];
+        const day = await storage.getDayOrCreate(date);
+        return {
+          result: JSON.stringify({
+            date: day.date,
+            title: day.title,
+            mood: day.mood,
+            top3Outcomes: day.top3Outcomes,
+            oneThingToShip: day.oneThingToShip,
+            reflectionAm: day.reflectionAm,
+            reflectionPm: day.reflectionPm,
+            morningRituals: day.morningRituals,
+            eveningRituals: day.eveningRituals,
+          }, null, 2),
+        };
+      }
+
+      case "update_day": {
+        const date = args.date || new Date().toISOString().split("T")[0];
+
+        // Ensure day exists first
+        await storage.getDayOrCreate(date);
+
+        // Build partial update — only include fields that were passed
+        const updates: Record<string, unknown> = {};
+        if (args.title !== undefined) updates.title = args.title;
+        if (args.mood !== undefined) updates.mood = args.mood;
+        if (args.top3Outcomes !== undefined) updates.top3Outcomes = args.top3Outcomes;
+        if (args.oneThingToShip !== undefined) updates.oneThingToShip = args.oneThingToShip;
+        if (args.reflectionAm !== undefined) updates.reflectionAm = args.reflectionAm;
+        if (args.reflectionPm !== undefined) updates.reflectionPm = args.reflectionPm;
+        if (args.morningRituals !== undefined) updates.morningRituals = args.morningRituals;
+        if (args.eveningRituals !== undefined) updates.eveningRituals = args.eveningRituals;
+
+        if (Object.keys(updates).length === 0) {
+          return { result: "No fields provided to update." };
+        }
+
+        const day = await storage.updateDay(date, updates);
+
+        return {
+          result: `Updated day ${date}: ${Object.keys(updates).join(", ")}`,
+          action: {
+            actionType: "update_day",
+            entityType: "day",
+            entityId: day?.id || `day_${date}`,
+            parameters: { date, ...updates },
             status: "success",
           },
         };
