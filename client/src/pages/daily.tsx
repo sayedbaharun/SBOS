@@ -994,128 +994,6 @@ export default function DailyPage() {
             </CardContent>
           </Card>
 
-          {/* ---- EVENING REVIEW ---- */}
-          <Card className="border-indigo-500/20">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <Moon className="h-4 w-4 text-indigo-500" />
-                  Evening Review
-                </CardTitle>
-                {eveningComplete && (
-                  <Badge variant="outline" className="bg-green-500/10 text-green-400 border-green-500/20 text-[10px]">
-                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                    Done
-                  </Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Fasting + Deep Work */}
-              <div className="grid grid-cols-2 gap-4">
-                {/* Fasting Hours */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Utensils className="h-3.5 w-3.5 text-orange-500" />
-                      <Label className="text-xs font-semibold">Fasting</Label>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground">16h goal</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={24}
-                      step={0.5}
-                      placeholder="0"
-                      value={evening.fastingHours}
-                      onChange={(e) => setEvening({ ...evening, fastingHours: e.target.value })}
-                      className="w-16 h-8 text-center text-sm"
-                    />
-                    <span className="text-xs text-muted-foreground">hrs</span>
-                    {fastingH >= 16 && (
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    )}
-                  </div>
-                  <Progress
-                    value={Math.min((fastingH / 16) * 100, 100)}
-                    className={`h-1 ${fastingH >= 16 ? "[&>div]:bg-green-500" : "[&>div]:bg-orange-500"}`}
-                  />
-                </div>
-
-                {/* Deep Work Hours */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Timer className="h-3.5 w-3.5 text-purple-500" />
-                      <Label className="text-xs font-semibold">Deep Work</Label>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground">5h goal</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={12}
-                      step={0.5}
-                      placeholder="0"
-                      value={evening.deepWorkHours}
-                      onChange={(e) => setEvening({ ...evening, deepWorkHours: e.target.value })}
-                      className="w-16 h-8 text-center text-sm"
-                    />
-                    <span className="text-xs text-muted-foreground">hrs</span>
-                    {deepWorkH >= 5 && (
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    )}
-                  </div>
-                  <Progress
-                    value={Math.min((deepWorkH / 5) * 100, 100)}
-                    className={`h-1 ${deepWorkH >= 5 ? "[&>div]:bg-green-500" : "[&>div]:bg-purple-500"}`}
-                  />
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Journal & Reflection */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Journal & Reflection</Label>
-                <Textarea
-                  placeholder="What went well? What could improve? Lessons learned, gratitude, free-form thoughts..."
-                  value={evening.reflectionPm}
-                  onChange={(e) => setEvening({ ...evening, reflectionPm: e.target.value })}
-                  rows={4}
-                  className="text-sm resize-none"
-                />
-              </div>
-
-              {/* Day Summary */}
-              {totalTasks > 0 && (
-                <>
-                  <Separator />
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="text-center p-2.5 bg-muted/50 rounded-lg">
-                      <div className="text-xl font-bold text-blue-400">{completedTasks}/{totalTasks}</div>
-                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Tasks Done</div>
-                      <Progress value={taskCompletionRate} className="h-1 mt-1.5" />
-                    </div>
-                    <div className="text-center p-2.5 bg-muted/50 rounded-lg">
-                      <div className="text-xl font-bold text-purple-400">{completedOutcomes}/{totalOutcomes || 3}</div>
-                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Outcomes Hit</div>
-                      <Progress value={totalOutcomes > 0 ? (completedOutcomes / totalOutcomes) * 100 : 0} className="h-1 mt-1.5" />
-                    </div>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* ============================================================ */}
-        {/* RIGHT COLUMN: MIND & EXECUTION                                */}
-        {/* ============================================================ */}
-        <div className="space-y-5">
           {/* ---- DAY PLAN ---- */}
           <Card className="border-blue-500/20">
             <CardHeader className="pb-3">
@@ -1299,6 +1177,128 @@ export default function DailyPage() {
             </CardContent>
           </Card>
 
+          {/* ---- EVENING REVIEW ---- */}
+          <Card className="border-indigo-500/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base font-bold">
+                  <Moon className="h-4 w-4 text-indigo-500" />
+                  Evening Review
+                </CardTitle>
+                {eveningComplete && (
+                  <Badge variant="outline" className="bg-green-500/10 text-green-400 border-green-500/20 text-[10px]">
+                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                    Done
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Fasting + Deep Work */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Fasting Hours */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Utensils className="h-3.5 w-3.5 text-orange-500" />
+                      <Label className="text-xs font-semibold">Fasting</Label>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">16h goal</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={24}
+                      step={0.5}
+                      placeholder="0"
+                      value={evening.fastingHours}
+                      onChange={(e) => setEvening({ ...evening, fastingHours: e.target.value })}
+                      className="w-16 h-8 text-center text-sm"
+                    />
+                    <span className="text-xs text-muted-foreground">hrs</span>
+                    {fastingH >= 16 && (
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    )}
+                  </div>
+                  <Progress
+                    value={Math.min((fastingH / 16) * 100, 100)}
+                    className={`h-1 ${fastingH >= 16 ? "[&>div]:bg-green-500" : "[&>div]:bg-orange-500"}`}
+                  />
+                </div>
+
+                {/* Deep Work Hours */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Timer className="h-3.5 w-3.5 text-purple-500" />
+                      <Label className="text-xs font-semibold">Deep Work</Label>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">5h goal</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={12}
+                      step={0.5}
+                      placeholder="0"
+                      value={evening.deepWorkHours}
+                      onChange={(e) => setEvening({ ...evening, deepWorkHours: e.target.value })}
+                      className="w-16 h-8 text-center text-sm"
+                    />
+                    <span className="text-xs text-muted-foreground">hrs</span>
+                    {deepWorkH >= 5 && (
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    )}
+                  </div>
+                  <Progress
+                    value={Math.min((deepWorkH / 5) * 100, 100)}
+                    className={`h-1 ${deepWorkH >= 5 ? "[&>div]:bg-green-500" : "[&>div]:bg-purple-500"}`}
+                  />
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Journal & Reflection */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Journal & Reflection</Label>
+                <Textarea
+                  placeholder="What went well? What could improve? Lessons learned, gratitude, free-form thoughts..."
+                  value={evening.reflectionPm}
+                  onChange={(e) => setEvening({ ...evening, reflectionPm: e.target.value })}
+                  rows={4}
+                  className="text-sm resize-none"
+                />
+              </div>
+
+              {/* Day Summary */}
+              {totalTasks > 0 && (
+                <>
+                  <Separator />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="text-center p-2.5 bg-muted/50 rounded-lg">
+                      <div className="text-xl font-bold text-blue-400">{completedTasks}/{totalTasks}</div>
+                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Tasks Done</div>
+                      <Progress value={taskCompletionRate} className="h-1 mt-1.5" />
+                    </div>
+                    <div className="text-center p-2.5 bg-muted/50 rounded-lg">
+                      <div className="text-xl font-bold text-purple-400">{completedOutcomes}/{totalOutcomes || 3}</div>
+                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Outcomes Hit</div>
+                      <Progress value={totalOutcomes > 0 ? (completedOutcomes / totalOutcomes) * 100 : 0} className="h-1 mt-1.5" />
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* ============================================================ */}
+        {/* RIGHT COLUMN: MEALS & HEALTH                                    */}
+        {/* ============================================================ */}
+        <div className="space-y-5">
           {/* ---- MEALS ---- */}
           <Card className="border-green-500/20">
             <CardHeader className="pb-3">
