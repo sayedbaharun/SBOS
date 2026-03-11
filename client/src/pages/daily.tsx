@@ -62,9 +62,10 @@ interface Day {
   reflectionPm: string | null;
   mood: string | null;
   primaryVentureFocus: string | null;
+  proteinMet: boolean | null;
+  caloriesOver2100: boolean | null;
   eveningRituals: {
     reviewCompleted?: boolean;
-    journalEntry?: string;
     fastingHours?: number;
     fastingCompleted?: boolean;
     deepWorkHours?: number;
@@ -75,6 +76,7 @@ interface Day {
 interface Top3Outcome {
   text: string;
   completed: boolean;
+  taskId?: string;
 }
 
 interface HealthEntry {
@@ -202,7 +204,6 @@ export default function DailyPage() {
   ]);
   const [planning, setPlanning] = useState({
     oneThingToShip: "",
-    reflectionAm: "",
     primaryVentureFocus: "",
   });
 
@@ -224,12 +225,15 @@ export default function DailyPage() {
   // Evening
   const [evening, setEvening] = useState({
     reflectionPm: "",
-    journalEntry: "",
     fastingHours: "" as string | number,
     deepWorkHours: "" as string | number,
   });
 
   const [healthEntryId, setHealthEntryId] = useState<number | null>(null);
+
+  // Nutrition toggles
+  const [proteinMet, setProteinMet] = useState(false);
+  const [caloriesOver2100, setCaloriesOver2100] = useState(false);
 
   // Nutrition
   const [newMeal, setNewMeal] = useState({
@@ -330,9 +334,11 @@ export default function DailyPage() {
       { text: "", completed: false },
       { text: "", completed: false },
     ]);
-    setPlanning({ oneThingToShip: "", reflectionAm: "", primaryVentureFocus: "" });
+    setPlanning({ oneThingToShip: "", primaryVentureFocus: "" });
     setHealth({ sleepHours: "", sleepQuality: "", energyLevel: "", mood: "", weightKg: "", bodyFatPercent: "", stressLevel: "", steps: "", workoutDone: false, workoutType: "", workoutDurationMin: "" });
-    setEvening({ reflectionPm: "", journalEntry: "", fastingHours: "", deepWorkHours: "" });
+    setEvening({ reflectionPm: "", fastingHours: "", deepWorkHours: "" });
+    setProteinMet(false);
+    setCaloriesOver2100(false);
     setHealthEntryId(null);
     setNewMeal({ mealType: "", description: "", calories: "", proteinG: "" });
   }, [selectedDate]);
@@ -381,15 +387,16 @@ export default function DailyPage() {
 
       setPlanning({
         oneThingToShip: dayData.oneThingToShip || "",
-        reflectionAm: dayData.reflectionAm || "",
         primaryVentureFocus: dayData.primaryVentureFocus || "",
       });
+
+      setProteinMet(dayData.proteinMet || false);
+      setCaloriesOver2100(dayData.caloriesOver2100 || false);
 
       // Evening data
       setEvening((prev) => ({
         ...prev,
         reflectionPm: dayData.reflectionPm || "",
-        journalEntry: dayData.eveningRituals?.journalEntry || "",
         fastingHours: dayData.eveningRituals?.fastingHours || "",
         deepWorkHours: dayData.eveningRituals?.deepWorkHours || "",
       }));
@@ -493,12 +500,7 @@ export default function DailyPage() {
       for (const habit of enabledHabits) {
         const ritual = rituals[habit.key];
         if (ritual) {
-          morningRituals[habit.key] = {
-            done: ritual.done,
-            ...(habit.hasCount && habit.countLabel === "reps" && { reps: ritual.count }),
-            ...(habit.hasCount && habit.countLabel === "pages" && { pages: ritual.count }),
-            ...(habit.hasCount && !["reps", "pages"].includes(habit.countLabel || "") && { count: ritual.count }),
-          };
+          morningRituals[habit.key] = { done: ritual.done };
         }
       }
       morningRituals.completedAt = isAllRitualsComplete() ? new Date().toISOString() : undefined;
@@ -507,8 +509,7 @@ export default function DailyPage() {
       const fastingH = typeof evening.fastingHours === "string" ? parseFloat(evening.fastingHours) || 0 : evening.fastingHours;
       const deepWorkH = typeof evening.deepWorkHours === "string" ? parseFloat(evening.deepWorkHours) || 0 : evening.deepWorkHours;
       const eveningRituals = {
-        reviewCompleted: !!evening.reflectionPm || !!evening.journalEntry || fastingH > 0 || deepWorkH > 0,
-        journalEntry: evening.journalEntry || undefined,
+        reviewCompleted: !!evening.reflectionPm || fastingH > 0 || deepWorkH > 0,
         fastingHours: fastingH || undefined,
         fastingCompleted: fastingH >= 16,
         deepWorkHours: deepWorkH || undefined,
@@ -523,9 +524,10 @@ export default function DailyPage() {
         morningRituals,
         top3Outcomes: filteredOutcomes.length > 0 ? top3Outcomes : null,
         oneThingToShip: planning.oneThingToShip || null,
-        reflectionAm: planning.reflectionAm || null,
         reflectionPm: evening.reflectionPm || null,
         primaryVentureFocus: planning.primaryVentureFocus || null,
+        proteinMet,
+        caloriesOver2100,
         eveningRituals,
       };
 
@@ -597,7 +599,7 @@ export default function DailyPage() {
   const healthComplete = !!(health.sleepHours && health.sleepQuality && health.energyLevel);
   const planComplete = !!(top3Outcomes.some((o) => o.text.trim()) && planning.oneThingToShip);
   const mealsLogged = mealCount > 0;
-  const eveningComplete = !!(evening.reflectionPm || evening.journalEntry);
+  const eveningComplete = !!evening.reflectionPm;
 
   const sectionsCompleted = [habitsComplete, healthComplete, planComplete, mealsLogged, eveningComplete].filter(Boolean).length;
 
@@ -723,6 +725,25 @@ export default function DailyPage() {
                 </div>
                 <Progress value={progressPercent} className="h-1.5 mt-2" />
               </CardHeader>
+              {!isAllRitualsComplete() && (
+                <div className="px-6 pb-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full h-7 text-xs"
+                    onClick={() => {
+                      const allDone: Record<string, { done: boolean }> = {};
+                      for (const habit of enabledHabits) {
+                        allDone[habit.key] = { done: true };
+                      }
+                      setRituals(allDone);
+                    }}
+                  >
+                    <CheckCircle2 className="h-3 w-3 mr-1.5" />
+                    Mark All Done
+                  </Button>
+                </div>
+              )}
               <CardContent className="space-y-2">
                 {enabledHabits.map((habit) => {
                   const Icon = getIconComponent(habit.icon);
@@ -752,18 +773,6 @@ export default function DailyPage() {
                           {habit.label}
                         </Label>
                       </div>
-                      {habit.hasCount && (
-                        <div className="flex items-center gap-1.5">
-                          <Input
-                            type="number"
-                            value={rituals[habit.key]?.count || ""}
-                            onChange={(e) => updateCount(habit.key, parseInt(e.target.value) || 0)}
-                            className="w-16 h-7 text-center text-xs"
-                            min={0}
-                          />
-                          <span className="text-[10px] text-muted-foreground w-8">{habit.countLabel}</span>
-                        </div>
-                      )}
                     </div>
                   );
                 })}
@@ -1025,26 +1034,14 @@ export default function DailyPage() {
 
               <Separator />
 
-              {/* Reflection */}
+              {/* Journal & Reflection */}
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Reflection</Label>
+                <Label className="text-xs font-semibold">Journal & Reflection</Label>
                 <Textarea
-                  placeholder="What went well? What could improve? What are you grateful for?"
+                  placeholder="What went well? What could improve? Lessons learned, gratitude, free-form thoughts..."
                   value={evening.reflectionPm}
                   onChange={(e) => setEvening({ ...evening, reflectionPm: e.target.value })}
-                  rows={3}
-                  className="text-sm resize-none"
-                />
-              </div>
-
-              {/* Journal */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Journal</Label>
-                <Textarea
-                  placeholder="Free-form thoughts, lessons learned, ideas..."
-                  value={evening.journalEntry}
-                  onChange={(e) => setEvening({ ...evening, journalEntry: e.target.value })}
-                  rows={3}
+                  rows={4}
                   className="text-sm resize-none"
                 />
               </div>
@@ -1092,6 +1089,30 @@ export default function DailyPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Venture Focus */}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                  <Label className="text-xs font-semibold">Venture Focus</Label>
+                </div>
+                <Select
+                  value={planning.primaryVentureFocus}
+                  onValueChange={(value) => setPlanning({ ...planning, primaryVentureFocus: value })}
+                >
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select venture..." /></SelectTrigger>
+                  <SelectContent>
+                    {activeVentures.map((venture) => (
+                      <SelectItem key={venture.id} value={venture.id}>
+                        <span className="flex items-center gap-2">
+                          {venture.icon && <span>{venture.icon}</span>}
+                          {venture.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
               {/* One Thing to Ship */}
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1.5">
@@ -1181,45 +1202,6 @@ export default function DailyPage() {
                   </div>
                 ))}
               </div>
-
-              {/* Primary Venture Focus */}
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-1.5">
-                  <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-                  <Label className="text-xs font-semibold">Venture Focus</Label>
-                </div>
-                <Select
-                  value={planning.primaryVentureFocus}
-                  onValueChange={(value) => setPlanning({ ...planning, primaryVentureFocus: value })}
-                >
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Select venture..." /></SelectTrigger>
-                  <SelectContent>
-                    {activeVentures.map((venture) => (
-                      <SelectItem key={venture.id} value={venture.id}>
-                        <span className="flex items-center gap-2">
-                          {venture.icon && <span>{venture.icon}</span>}
-                          {venture.name}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Morning Intention */}
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-1.5">
-                  <Sun className="h-3.5 w-3.5 text-amber-500" />
-                  <Label className="text-xs font-semibold">Morning Intention</Label>
-                </div>
-                <Textarea
-                  placeholder="Today I'm focused on..."
-                  value={planning.reflectionAm}
-                  onChange={(e) => setPlanning({ ...planning, reflectionAm: e.target.value })}
-                  rows={2}
-                  className="text-sm resize-none"
-                />
-              </div>
             </CardContent>
           </Card>
 
@@ -1251,6 +1233,32 @@ export default function DailyPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
+              {/* Daily Nutrition Checkboxes */}
+              <div className="flex items-center gap-6 p-2.5 rounded-lg bg-muted/30 border border-border/50">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="protein-met"
+                    checked={proteinMet}
+                    onCheckedChange={(checked) => setProteinMet(!!checked)}
+                  />
+                  <Label htmlFor="protein-met" className="text-xs cursor-pointer flex items-center gap-1.5">
+                    <Beef className="h-3.5 w-3.5 text-blue-400" />
+                    Protein Hit
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="calories-over"
+                    checked={caloriesOver2100}
+                    onCheckedChange={(checked) => setCaloriesOver2100(!!checked)}
+                  />
+                  <Label htmlFor="calories-over" className="text-xs cursor-pointer flex items-center gap-1.5">
+                    <Flame className="h-3.5 w-3.5 text-orange-400" />
+                    2100+ Cal
+                  </Label>
+                </div>
+              </div>
+
               {/* Add Meal Form */}
               <div className="space-y-2 p-3 rounded-lg bg-muted/30 border border-border/50">
                 <div className="grid grid-cols-2 gap-2">
