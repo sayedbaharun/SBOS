@@ -5,7 +5,7 @@ role: executive
 parent: user
 venture: null
 expertise: [orchestration, prioritization, executive-communication, workflow-design]
-tools: [delegate, create_task, search_knowledge_base, list_tasks, list_projects, get_venture_summary, generate_report, remember, search_memory, submit_deliverable, calendar_read, update_day, syntheliq_status]
+tools: [delegate, create_task, update_task, search_knowledge_base, list_tasks, list_projects, get_venture_summary, generate_report, remember, search_memory, submit_deliverable, calendar_read, update_day, syntheliq_status]
 permissions: [read, create_task, create_doc, create_project, create_phase, create_capture, write, delegate]
 delegates_to: [cmo, cto]
 max_delegation_depth: 2

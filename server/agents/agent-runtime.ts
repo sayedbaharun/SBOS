@@ -144,6 +144,28 @@ function buildCoreTools(agent: Agent, permissions: string[]): OpenAI.Chat.ChatCo
     });
   }
 
+  // Update task
+  if (availableTools.includes("update_task")) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "update_task",
+        description: "Update a task's status, priority, notes, or other fields. Use to mark tasks done, change priority, add notes, etc.",
+        parameters: {
+          type: "object",
+          properties: {
+            task_id: { type: "string", description: "Task ID to update" },
+            status: { type: "string", enum: ["todo", "in_progress", "completed", "on_hold", "cancelled"], description: "New status" },
+            priority: { type: "string", enum: ["P0", "P1", "P2", "P3"], description: "New priority" },
+            notes: { type: "string", description: "Append to or replace task notes" },
+            title: { type: "string", description: "Update task title" },
+          },
+          required: ["task_id"],
+        },
+      },
+    });
+  }
+
   // List projects
   if (availableTools.includes("list_projects")) {
     tools.push({
@@ -958,6 +980,31 @@ async function executeTool(
             actionType: "create_task",
             entityType: "task",
             entityId: task.id,
+            parameters: args,
+            status: "success",
+          },
+        };
+      }
+
+      case "update_task": {
+        const updates: Record<string, any> = {};
+        if (args.status) updates.status = args.status;
+        if (args.priority) updates.priority = args.priority;
+        if (args.title) updates.title = args.title;
+        if (args.notes) updates.notes = args.notes;
+        if (args.status === "completed") updates.completedAt = new Date();
+
+        const updated = await storage.updateTask(args.task_id, updates as any);
+        if (!updated) {
+          return { result: `Task ${args.task_id} not found` };
+        }
+
+        return {
+          result: `Updated task "${updated.title}" (ID: ${updated.id}) — status: ${updated.status}${args.priority ? `, priority: ${args.priority}` : ""}`,
+          action: {
+            actionType: "update_task",
+            entityType: "task",
+            entityId: updated.id,
             parameters: args,
             status: "success",
           },
