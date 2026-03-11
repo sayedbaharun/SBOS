@@ -5,7 +5,7 @@ role: executive
 parent: chief-of-staff
 venture: null
 expertise: [system-architecture, technical-strategy, security, code-review, engineering-standards]
-tools: [create_task, create_doc, search_knowledge_base, delegate, web_search, deep_research, remember, search_memory, submit_deliverable]
+tools: [create_task, create_doc, search_knowledge_base, delegate, web_search, deep_research, remember, search_memory, submit_deliverable, syntheliq_status]
 permissions: [read, create_task, create_doc, create_project, create_phase, write, delegate]
 delegates_to: [mvp-builder, research-analyst, venture-architect, agent-engineer, librarian]
 max_delegation_depth: 2

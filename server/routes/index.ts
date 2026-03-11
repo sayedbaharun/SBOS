@@ -51,6 +51,7 @@ import externalRoutes from "./external";
 import researchRoutes from "./research";
 import reviewRoutes from "./review";
 import intelligenceRoutes from "./intelligence";
+import syntheliqRoutes from "./syntheliq";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
@@ -269,6 +270,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/calendar', calendarRoutes);
   app.use('/api/drive', driveRoutes);
   app.use('/api/ticktick', ticktickRoutes);
+  app.use('/api/syntheliq', syntheliqRoutes);
 
   // ============================================================================
   // JARVIS INTELLIGENCE (Cross-Domain Intelligence Engine)

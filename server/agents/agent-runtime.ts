@@ -760,6 +760,36 @@ function buildCoreTools(agent: Agent, permissions: string[]): OpenAI.Chat.ChatCo
     });
   }
 
+  // Syntheliq status — cross-system bridge
+  if (availableTools.includes("syntheliq_status")) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "syntheliq_status",
+        description: "Query Syntheliq (Hikma Digital's AI agency orchestrator) for agent runs, leads, proposals, clients, and escalations",
+        parameters: {
+          type: "object",
+          properties: {
+            query_type: {
+              type: "string",
+              enum: ["status", "runs", "leads", "pipeline", "proposals", "clients", "escalations"],
+              description: "What to query from Syntheliq",
+            },
+            status_filter: {
+              type: "string",
+              description: "Optional status filter for leads, proposals, or clients",
+            },
+            hours: {
+              type: "number",
+              description: "Hours lookback for runs and events (default 24)",
+            },
+          },
+          required: ["query_type"],
+        },
+      },
+    });
+  }
+
   return tools;
 }
 
@@ -1380,6 +1410,38 @@ async function executeTool(
           }
           default:
             return { result: `Unknown calendar_write action: ${args.action}. Use create_event, update_event, delete_event, or create_focus_block.` };
+        }
+      }
+
+      case "syntheliq_status": {
+        const {
+          getSyntheliqDashboard,
+          getSyntheliqRuns,
+          getSyntheliqLeads,
+          getSyntheliqPipeline,
+          getSyntheliqProposals,
+          getSyntheliqClients,
+          getSyntheliqEscalations,
+        } = await import("../integrations/syntheliq-client.js");
+
+        const queryType = args.query_type || "status";
+        switch (queryType) {
+          case "status":
+            return { result: JSON.stringify(await getSyntheliqDashboard(), null, 2) };
+          case "runs":
+            return { result: JSON.stringify(await getSyntheliqRuns(args.hours || 24), null, 2) };
+          case "leads":
+            return { result: JSON.stringify(await getSyntheliqLeads(args.status_filter), null, 2) };
+          case "pipeline":
+            return { result: JSON.stringify(await getSyntheliqPipeline(), null, 2) };
+          case "proposals":
+            return { result: JSON.stringify(await getSyntheliqProposals(args.status_filter), null, 2) };
+          case "clients":
+            return { result: JSON.stringify(await getSyntheliqClients(args.status_filter), null, 2) };
+          case "escalations":
+            return { result: JSON.stringify(await getSyntheliqEscalations(), null, 2) };
+          default:
+            return { result: `Unknown syntheliq query type: ${queryType}` };
         }
       }
 

@@ -641,6 +641,134 @@ class TelegramAdapter implements ChannelAdapter {
       }
     });
 
+    // ---- Syntheliq Bridge ----
+    this.bot.command("syntheliq", async (ctx) => {
+      try {
+        const subcommand = ctx.message.text.replace(/^\/syntheliq\s*/, "").trim().toLowerCase();
+        const timeAgo = (d: Date) => {
+          const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+          if (mins < 60) return `${mins}m ago`;
+          const hrs = Math.floor(mins / 60);
+          if (hrs < 24) return `${hrs}h ago`;
+          return `${Math.floor(hrs / 24)}d ago`;
+        };
+        const {
+          getSyntheliqDashboard,
+          getSyntheliqRuns,
+          getSyntheliqLeads,
+          getSyntheliqPipeline,
+          getSyntheliqProposals,
+          getSyntheliqEscalations,
+        } = await import("../../integrations/syntheliq-client.js");
+
+        if (subcommand === "leads") {
+          const pipeline = await getSyntheliqPipeline().catch(() => null);
+          const leads = await getSyntheliqLeads().catch(() => []);
+          let text = "<b>SYNTHELIQ LEADS</b>\n\n";
+          if (pipeline && typeof pipeline === "object") {
+            const stages = Object.entries(pipeline as Record<string, number>);
+            if (stages.length > 0) {
+              text += "<b>Pipeline:</b> " + stages.map(([k, v]) => `${v} ${k}`).join(" → ") + "\n\n";
+            }
+          }
+          if (Array.isArray(leads) && leads.length > 0) {
+            text += "<b>Recent:</b>\n";
+            leads.slice(0, 10).forEach((l: any) => {
+              text += `• ${l.company || l.name || "Unknown"} — ${l.status || "new"}${l.score ? ` (${l.score})` : ""}\n`;
+            });
+          } else {
+            text += "No leads found.";
+          }
+          await this.sendLongMessage(ctx.chat.id.toString(), text, "html");
+        } else if (subcommand === "runs") {
+          const runs = await getSyntheliqRuns(24).catch(() => []);
+          let text = "<b>SYNTHELIQ RUNS</b> (24h)\n\n";
+          if (Array.isArray(runs) && runs.length > 0) {
+            runs.slice(0, 10).forEach((r: any) => {
+              const icon = r.status === "completed" ? "✓" : r.status === "failed" ? "✗" : "⏳";
+              const ago = r.startedAt ? timeAgo(new Date(r.startedAt)) : "";
+              text += `• ${r.agentName || r.agent || "Agent"} (${ago}) ${icon} ${r.summary || r.result?.slice(0, 60) || ""}\n`;
+            });
+          } else {
+            text += "No runs in the last 24h.";
+          }
+          await this.sendLongMessage(ctx.chat.id.toString(), text, "html");
+        } else if (subcommand === "proposals") {
+          const proposals = await getSyntheliqProposals().catch(() => []);
+          let text = "<b>SYNTHELIQ PROPOSALS</b>\n\n";
+          if (Array.isArray(proposals) && proposals.length > 0) {
+            proposals.slice(0, 10).forEach((p: any) => {
+              text += `• ${p.company || p.leadName || "Unknown"} — ${p.status || "draft"}${p.value ? ` ($${p.value})` : ""}\n`;
+            });
+          } else {
+            text += "No active proposals.";
+          }
+          await this.sendLongMessage(ctx.chat.id.toString(), text, "html");
+        } else if (subcommand === "escalations") {
+          const escalations = await getSyntheliqEscalations().catch(() => []);
+          let text = "<b>SYNTHELIQ ESCALATIONS</b>\n\n";
+          if (Array.isArray(escalations) && escalations.length > 0) {
+            escalations.forEach((e: any) => {
+              text += `• ${e.type || "Issue"}: ${e.message || e.description || "No details"}\n`;
+            });
+          } else {
+            text += "No open escalations.";
+          }
+          await this.sendLongMessage(ctx.chat.id.toString(), text, "html");
+        } else {
+          // Default: overview
+          const [dashboard, runs, escalations] = await Promise.all([
+            getSyntheliqDashboard().catch(() => null),
+            getSyntheliqRuns(24).catch(() => []),
+            getSyntheliqEscalations().catch(() => []),
+          ]);
+
+          let text = "<b>SYNTHELIQ STATUS</b>";
+
+          if (dashboard) {
+            text += " ✓\n\n";
+            if (dashboard.pipeline && typeof dashboard.pipeline === "object") {
+              const stages = Object.entries(dashboard.pipeline as Record<string, number>);
+              if (stages.length > 0) {
+                text += "<b>Pipeline:</b> " + stages.map(([k, v]) => `${v} ${k}`).join(" → ") + "\n\n";
+              }
+            }
+          } else {
+            text += " (unreachable)\n\n";
+          }
+
+          text += "<b>Recent Runs:</b>\n";
+          if (Array.isArray(runs) && runs.length > 0) {
+            runs.slice(0, 3).forEach((r: any) => {
+              const icon = r.status === "completed" ? "✓" : r.status === "failed" ? "✗" : "⏳";
+              const ago = r.startedAt ? timeAgo(new Date(r.startedAt)) : "";
+              text += `• ${r.agentName || r.agent || "Agent"} (${ago}) ${icon} ${r.summary || r.result?.slice(0, 50) || ""}\n`;
+            });
+          } else {
+            text += "None in 24h\n";
+          }
+
+          text += "\n<b>Escalations:</b> ";
+          if (Array.isArray(escalations) && escalations.length > 0) {
+            text += `${escalations.length} open\n`;
+            escalations.slice(0, 3).forEach((e: any) => {
+              text += `• ${e.type || "Issue"}: ${e.message || e.description || "No details"}\n`;
+            });
+          } else {
+            text += "None";
+          }
+
+          await this.sendLongMessage(ctx.chat.id.toString(), text, "html");
+        }
+      } catch (error: any) {
+        const msg = error.message?.includes("not configured")
+          ? "Syntheliq bridge not configured. Set SYNTHELIQ_URL env var."
+          : `Syntheliq error: ${error.message}`;
+        await ctx.reply(msg);
+        this.recordError(error.message);
+      }
+    });
+
     // ---- Text Messages ----
     this.bot.on("text", async (ctx) => {
       try {
