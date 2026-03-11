@@ -124,6 +124,7 @@ interface Task {
   title: string;
   status: string;
   priority: "P0" | "P1" | "P2" | "P3" | null;
+  ventureId: string | null;
   dueDate: string | null;
   focusDate: string | null;
   completedAt: string | null;
@@ -291,6 +292,18 @@ export default function DailyPage() {
     },
   });
 
+  // Active tasks for Top 3 picker — filtered by selected venture
+  const { data: activeTasks = [] } = useQuery<Task[]>({
+    queryKey: ["/api/tasks", { status: "todo,in_progress,next", ventureId: planning.primaryVentureFocus }],
+    queryFn: async () => {
+      const params = new URLSearchParams({ status: "todo,in_progress,next" });
+      if (planning.primaryVentureFocus) params.set("venture_id", planning.primaryVentureFocus);
+      const res = await fetch(`/api/tasks?${params}`, { credentials: "include" });
+      if (!res.ok) return [];
+      return await res.json();
+    },
+  });
+
   const { data: nutritionEntries = [], isLoading: isNutritionLoading } = useQuery<NutritionEntry[]>({
     queryKey: ["/api/nutrition", { date: selectedDate }],
     queryFn: async () => {
@@ -447,7 +460,38 @@ export default function DailyPage() {
   const toggleOutcomeCompleted = (index: number) => {
     setTop3Outcomes((prev) => {
       const updated = [...prev];
-      updated[index] = { ...updated[index], completed: !updated[index].completed };
+      const wasCompleted = updated[index].completed;
+      updated[index] = { ...updated[index], completed: !wasCompleted };
+
+      // If completing and has linked task, mark task as done
+      if (!wasCompleted && updated[index].taskId) {
+        apiRequest("PATCH", `/api/tasks/${updated[index].taskId}`, {
+          status: "done",
+          completedAt: new Date().toISOString(),
+        }).then(() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+        }).catch(() => {});
+      }
+
+      return updated;
+    });
+  };
+
+  const selectTaskForOutcome = (index: number, taskId: string) => {
+    const task = activeTasks.find((t) => t.id === taskId);
+    if (task) {
+      setTop3Outcomes((prev) => {
+        const updated = [...prev];
+        updated[index] = { ...updated[index], text: task.title, taskId: task.id };
+        return updated;
+      });
+    }
+  };
+
+  const clearOutcomeTask = (index: number) => {
+    setTop3Outcomes((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], text: "", taskId: undefined };
       return updated;
     });
   };
@@ -1191,14 +1235,64 @@ export default function DailyPage() {
                     >
                       {index + 1}
                     </div>
-                    <Input
-                      placeholder={index === 0 ? "Most important outcome..." : `Outcome ${index + 1}...`}
-                      value={outcome.text}
-                      onChange={(e) => updateOutcomeText(index, e.target.value)}
-                      className={`flex-1 h-8 text-sm border-0 bg-transparent shadow-none focus-visible:ring-0 px-0 ${
-                        outcome.completed ? "line-through text-muted-foreground" : ""
-                      }`}
-                    />
+                    {outcome.taskId ? (
+                      <div className="flex-1 flex items-center gap-1.5">
+                        <span className={`text-sm flex-1 ${outcome.completed ? "line-through text-muted-foreground" : ""}`}>
+                          {outcome.text}
+                        </span>
+                        <Badge variant="outline" className="text-[9px] px-1 py-0 text-muted-foreground">task</Badge>
+                        {!outcome.completed && (
+                          <button
+                            type="button"
+                            onClick={() => clearOutcomeTask(index)}
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    ) : !outcome.text.trim() && activeTasks.length > 0 ? (
+                      <Select onValueChange={(taskId) => selectTaskForOutcome(index, taskId)}>
+                        <SelectTrigger className="flex-1 h-8 text-sm border-0 bg-transparent shadow-none">
+                          <SelectValue placeholder={index === 0 ? "Pick a task or type below..." : `Outcome ${index + 1}...`} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {activeTasks
+                            .sort((a, b) => {
+                              const pOrder = { P0: 0, P1: 1, P2: 2, P3: 3 };
+                              return (pOrder[a.priority || "P3"] || 3) - (pOrder[b.priority || "P3"] || 3);
+                            })
+                            .map((task) => (
+                              <SelectItem key={task.id} value={task.id}>
+                                <span className="flex items-center gap-2">
+                                  {task.priority && (
+                                    <Badge
+                                      variant="outline"
+                                      className={`text-[9px] px-1 py-0 ${
+                                        task.priority === "P0" ? "text-red-400 border-red-500/20" :
+                                        task.priority === "P1" ? "text-orange-400 border-orange-500/20" :
+                                        "text-muted-foreground"
+                                      }`}
+                                    >
+                                      {task.priority}
+                                    </Badge>
+                                  )}
+                                  {task.title}
+                                </span>
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        placeholder={index === 0 ? "Most important outcome..." : `Outcome ${index + 1}...`}
+                        value={outcome.text}
+                        onChange={(e) => updateOutcomeText(index, e.target.value)}
+                        className={`flex-1 h-8 text-sm border-0 bg-transparent shadow-none focus-visible:ring-0 px-0 ${
+                          outcome.completed ? "line-through text-muted-foreground" : ""
+                        }`}
+                      />
+                    )}
                   </div>
                 ))}
               </div>
