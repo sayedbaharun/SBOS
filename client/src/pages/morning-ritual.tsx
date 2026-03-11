@@ -4,7 +4,6 @@ import { format, subDays, addDays, parseISO } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +48,7 @@ interface Day {
 interface Top3Outcome {
   text: string;
   completed: boolean;
+  taskId?: string;
 }
 
 interface Task {
@@ -138,7 +138,6 @@ export default function MorningRitual() {
 
   const [planning, setPlanning] = useState({
     oneThingToShip: "",
-    reflectionAm: "",
     primaryVentureFocus: "",
   });
 
@@ -175,6 +174,21 @@ export default function MorningRitual() {
       task.status !== "on_hold"
   );
 
+  // Fetch active tasks for the Top 3 task picker
+  const { data: activeTasks = [] } = useQuery<Task[]>({
+    queryKey: ["/api/tasks", { forPicker: true, ventureId: planning.primaryVentureFocus }],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (planning.primaryVentureFocus) params.set("ventureId", planning.primaryVentureFocus);
+      const res = await fetch(`/api/tasks?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch tasks");
+      return await res.json();
+    },
+  });
+  const pickerTasks = activeTasks.filter(
+    (t) => t.status !== "completed" && t.status !== "on_hold"
+  );
+
   // Reset rituals when navigating to a different date
   useEffect(() => {
     if (enabledHabits.length > 0) {
@@ -193,7 +207,7 @@ export default function MorningRitual() {
       { text: "", completed: false },
       { text: "", completed: false },
     ]);
-    setPlanning({ oneThingToShip: "", reflectionAm: "", primaryVentureFocus: "" });
+    setPlanning({ oneThingToShip: "", primaryVentureFocus: "" });
   }, [selectedDate]);
 
   // Initialize rituals from habit config
@@ -251,7 +265,6 @@ export default function MorningRitual() {
 
       setPlanning({
         oneThingToShip: dayData.oneThingToShip || "",
-        reflectionAm: dayData.reflectionAm || "",
         primaryVentureFocus: dayData.primaryVentureFocus || "",
       });
     }
@@ -264,12 +277,7 @@ export default function MorningRitual() {
       for (const habit of enabledHabits) {
         const ritual = rituals[habit.key];
         if (ritual) {
-          morningRituals[habit.key] = {
-            done: ritual.done,
-            ...(habit.hasCount && habit.countLabel === "reps" && { reps: ritual.count }),
-            ...(habit.hasCount && habit.countLabel === "pages" && { pages: ritual.count }),
-            ...(habit.hasCount && !["reps", "pages"].includes(habit.countLabel || "") && { count: ritual.count }),
-          };
+          morningRituals[habit.key] = { done: ritual.done };
         }
       }
       morningRituals.completedAt = isAllRitualsComplete() ? new Date().toISOString() : undefined;
@@ -282,7 +290,6 @@ export default function MorningRitual() {
         morningRituals,
         top3Outcomes: filteredOutcomes.length > 0 ? top3Outcomes : null,
         oneThingToShip: planning.oneThingToShip || null,
-        reflectionAm: planning.reflectionAm || null,
         primaryVentureFocus: planning.primaryVentureFocus || null,
       };
 
@@ -310,13 +317,6 @@ export default function MorningRitual() {
     }));
   };
 
-  const updateCount = (key: string, count: number) => {
-    setRituals(prev => ({
-      ...prev,
-      [key]: { ...prev[key], count },
-    }));
-  };
-
   const isAllRitualsComplete = () => {
     return enabledHabits.every(h => rituals[h.key]?.done);
   };
@@ -332,7 +332,19 @@ export default function MorningRitual() {
   const toggleOutcomeCompleted = (index: number) => {
     setTop3Outcomes(prev => {
       const updated = [...prev];
-      updated[index] = { ...updated[index], completed: !updated[index].completed };
+      const newCompleted = !updated[index].completed;
+      updated[index] = { ...updated[index], completed: newCompleted };
+
+      // If completing and has a linked task, mark it completed too
+      if (newCompleted && updated[index].taskId) {
+        apiRequest("PATCH", `/api/tasks/${updated[index].taskId}`, {
+          status: "completed",
+          completedAt: new Date().toISOString(),
+        }).then(() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+        }).catch(() => {});
+      }
+
       return updated;
     });
   };
@@ -431,6 +443,25 @@ export default function MorningRitual() {
             Start your day with these essential habits
           </CardDescription>
         </CardHeader>
+        {enabledHabits.length > 0 && !isAllRitualsComplete() && (
+          <div className="px-6 pb-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() => {
+                const allDone: Record<string, { done: boolean }> = {};
+                for (const habit of enabledHabits) {
+                  allDone[habit.key] = { done: true };
+                }
+                setRituals(allDone);
+              }}
+            >
+              <CheckCircle2 className="h-4 w-4 mr-2" />
+              Mark All Done
+            </Button>
+          </div>
+        )}
         <CardContent className="space-y-4">
           {enabledHabits.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
@@ -468,19 +499,6 @@ export default function MorningRitual() {
                       {habit.label}
                     </Label>
                   </div>
-
-                  {habit.hasCount && (
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        value={rituals[habit.key]?.count || ""}
-                        onChange={(e) => updateCount(habit.key, parseInt(e.target.value) || 0)}
-                        className="w-20 h-8 text-center"
-                        min={0}
-                      />
-                      <span className="text-sm text-muted-foreground">{habit.countLabel}</span>
-                    </div>
-                  )}
                 </div>
               );
             })
@@ -502,7 +520,33 @@ export default function MorningRitual() {
           </CollapsibleTrigger>
           <CollapsibleContent>
             <CardContent className="space-y-6 pt-0">
-              {/* One Thing to Ship */}
+              {/* 1. Primary Venture Focus */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-amber-500" />
+                  <Label className="font-medium">Venture Focus</Label>
+                </div>
+                <Select
+                  value={planning.primaryVentureFocus}
+                  onValueChange={(value) => setPlanning({ ...planning, primaryVentureFocus: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a venture..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeVentures.map((venture) => (
+                      <SelectItem key={venture.id} value={venture.id}>
+                        <span className="flex items-center gap-2">
+                          {venture.icon && <span>{venture.icon}</span>}
+                          {venture.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* 2. One Thing to Ship */}
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Rocket className="h-4 w-4 text-purple-500" />
@@ -545,7 +589,7 @@ export default function MorningRitual() {
                 )}
               </div>
 
-              {/* Top 3 Outcomes */}
+              {/* 3. Top 3 Outcomes — Task Picker */}
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Target className="h-4 w-4 text-blue-500" />
@@ -574,12 +618,53 @@ export default function MorningRitual() {
                     }`}>
                       {index + 1}
                     </div>
-                    <Input
-                      placeholder={index === 0 ? "Most important outcome..." : `Outcome ${index + 1}...`}
-                      value={outcome.text}
-                      onChange={(e) => updateOutcomeText(index, e.target.value)}
-                      className={`flex-1 ${outcome.completed ? "line-through text-muted-foreground" : ""}`}
-                    />
+                    <div className="flex-1 flex gap-2">
+                      {pickerTasks.length > 0 && !outcome.text.trim() ? (
+                        <Select
+                          value={outcome.taskId || ""}
+                          onValueChange={(taskId) => {
+                            const task = pickerTasks.find(t => t.id === taskId);
+                            if (task) {
+                              setTop3Outcomes(prev => {
+                                const updated = [...prev];
+                                updated[index] = { text: task.title, completed: false, taskId: task.id };
+                                return updated;
+                              });
+                            }
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder={index === 0 ? "Pick most important task..." : `Pick outcome ${index + 1}...`} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {pickerTasks.map((task) => (
+                              <SelectItem key={task.id} value={task.id}>
+                                <span className="flex items-center gap-2">
+                                  {task.priority && (
+                                    <Badge variant="outline" className="text-xs">
+                                      {task.priority}
+                                    </Badge>
+                                  )}
+                                  {task.title}
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Input
+                          placeholder={index === 0 ? "Most important outcome..." : `Outcome ${index + 1}...`}
+                          value={outcome.text}
+                          onChange={(e) => updateOutcomeText(index, e.target.value)}
+                          className={`flex-1 ${outcome.completed ? "line-through text-muted-foreground" : ""}`}
+                        />
+                      )}
+                      {outcome.text.trim() && outcome.taskId && (
+                        <Badge variant="secondary" className="text-xs whitespace-nowrap self-center">
+                          Linked
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 ))}
                 {totalOutcomes > 0 && (
@@ -593,45 +678,6 @@ export default function MorningRitual() {
                 )}
               </div>
 
-              {/* Primary Venture Focus */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-amber-500" />
-                  <Label className="font-medium">Primary Venture Focus</Label>
-                </div>
-                <Select
-                  value={planning.primaryVentureFocus}
-                  onValueChange={(value) => setPlanning({ ...planning, primaryVentureFocus: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a venture..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeVentures.map((venture) => (
-                      <SelectItem key={venture.id} value={venture.id}>
-                        <span className="flex items-center gap-2">
-                          {venture.icon && <span>{venture.icon}</span>}
-                          {venture.name}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Morning Intention */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Sun className="h-4 w-4 text-amber-500" />
-                  <Label className="font-medium">Morning Intention</Label>
-                </div>
-                <Textarea
-                  placeholder="Today I'm grateful for... I'm focused on... I will approach challenges with..."
-                  value={planning.reflectionAm}
-                  onChange={(e) => setPlanning({ ...planning, reflectionAm: e.target.value })}
-                  rows={3}
-                />
-              </div>
             </CardContent>
           </CollapsibleContent>
         </Card>

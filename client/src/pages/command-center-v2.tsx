@@ -7,10 +7,77 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Circle, Clock, Inbox, ChevronRight, Flame, AlertTriangle, CheckCircle2, Target, Calendar, CalendarDays, Video, MapPin, Moon, Sun } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { Circle, Clock, Inbox, ChevronRight, Flame, AlertTriangle, CheckCircle2, Target, Calendar, CalendarDays, Video, MapPin, Moon, Sun, Utensils } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import QuickLogModal from "@/components/health-hub/quick-log-modal";
 import { useWebSocket } from "@/hooks/use-websocket";
+
+function NutritionToggleCard() {
+    const today = new Date().toISOString().split('T')[0];
+    const { data: dayData } = useQuery({
+        queryKey: ["dashboard-day"],
+    });
+
+    const nutritionMutation = useMutation({
+        mutationFn: async (updates: { proteinMet?: boolean; caloriesOver2100?: boolean }) => {
+            try {
+                const res = await apiRequest("PATCH", `/api/days/${today}`, {
+                    id: `day_${today}`,
+                    date: today,
+                    ...updates,
+                });
+                return await res.json();
+            } catch {
+                const res = await apiRequest("POST", "/api/days", {
+                    id: `day_${today}`,
+                    date: today,
+                    ...updates,
+                });
+                return await res.json();
+            }
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["dashboard-day"] });
+            queryClient.invalidateQueries({ queryKey: ["dashboard-scorecard"] });
+        },
+    });
+
+    return (
+        <Card>
+            <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                    <Utensils className="h-4 w-4" />
+                    Daily Nutrition
+                </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+                <div className="flex items-center gap-3">
+                    <Checkbox
+                        id="protein-met"
+                        checked={!!(dayData as any)?.proteinMet}
+                        onCheckedChange={(checked) => nutritionMutation.mutate({ proteinMet: !!checked })}
+                    />
+                    <Label htmlFor="protein-met" className="text-sm cursor-pointer">
+                        Protein target met (200g+)
+                    </Label>
+                </div>
+                <div className="flex items-center gap-3">
+                    <Checkbox
+                        id="calories-over-2100"
+                        checked={!!(dayData as any)?.caloriesOver2100}
+                        onCheckedChange={(checked) => nutritionMutation.mutate({ caloriesOver2100: !!checked })}
+                    />
+                    <Label htmlFor="calories-over-2100" className="text-sm cursor-pointer">
+                        Calories over 2100
+                    </Label>
+                </div>
+            </CardContent>
+        </Card>
+    );
+}
 
 export default function CommandCenterV2() {
     const [, navigate] = useLocation();
@@ -510,6 +577,9 @@ export default function CommandCenterV2() {
                             eveningComplete={scorecardData.eveningComplete}
                         />
                     )}
+
+                    {/* Daily Nutrition Quick Toggle */}
+                    <NutritionToggleCard />
                 </div>
 
                 {/* CENTER: ACTIVE CONTEXT */}

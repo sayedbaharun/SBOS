@@ -195,7 +195,6 @@ export default function EveningReview() {
     mutationFn: async () => {
       const eveningRituals = {
         reviewCompleted: true,
-        journalEntry: review.reflectionPm,
         fastingHours: review.fastingHours || undefined,
         fastingCompleted: review.fastingHours >= 16,
         deepWorkHours: review.deepWorkHours || undefined,
@@ -519,15 +518,15 @@ export default function EveningReview() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5 text-blue-500" />
-            Evening Reflection
+            Journal & Reflection
           </CardTitle>
           <CardDescription>
-            What went well? What could be improved? What are you grateful for?
+            What happened today? What went well? What could be improved? What are you grateful for?
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Textarea
-            placeholder="Today I accomplished... I learned... I'm grateful for... Tomorrow I will..."
+            placeholder="What happened today? What did I accomplish? What did I learn? What am I grateful for? What will I do differently tomorrow?"
             value={review.reflectionPm}
             onChange={(e) => setReview({ ...review, reflectionPm: e.target.value })}
             rows={6}

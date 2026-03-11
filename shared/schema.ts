@@ -646,6 +646,8 @@ export const days = pgTable(
     reflectionAm: text("reflection_am"),
     reflectionPm: text("reflection_pm"),
     mood: moodEnum("mood"),
+    proteinMet: boolean("protein_met").default(false),
+    caloriesOver2100: boolean("calories_over_2100").default(false),
     primaryVentureFocus: uuid("primary_venture_focus").references(() => ventures.id, {
       onDelete: "set null"
     }),

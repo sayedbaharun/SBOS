@@ -297,7 +297,7 @@ function mapPriorityToType(priority: number): 'task' | 'idea' {
 /**
  * Extract tags from TickTick task title (format: #tag)
  */
-function extractTagsFromTitle(title: string): { cleanTitle: string; tags: string[] } {
+export function extractTagsFromTitle(title: string): { cleanTitle: string; tags: string[] } {
   const tagRegex = /#(\w+)/g;
   const tags: string[] = [];
   let match;

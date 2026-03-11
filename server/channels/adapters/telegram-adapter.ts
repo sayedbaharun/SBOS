@@ -185,6 +185,7 @@ class TelegramAdapter implements ChannelAdapter {
         `• /today — today's summary\n` +
         `• /tasks — list active tasks\n` +
         `• /done <number> — mark task done\n` +
+        `• /morning — mark all morning habits done\n` +
         `• /shop <item> [#category] — add to shopping list\n` +
         `• /clip <url> — clip article to Knowledge Hub\n\n` +
         `Tip: Send a bare URL to get a "Clip it?" prompt.`
@@ -436,6 +437,35 @@ class TelegramAdapter implements ChannelAdapter {
         this.saveMessageHistory(ctx.chat.id.toString(), `/done ${numStr}`, reply, "command").catch(() => {});
       } catch (error: any) {
         await ctx.reply("Failed to mark task as done.");
+        this.recordError(error.message);
+      }
+    });
+
+    // ---- /morning Command (One-Tap Done) ----
+    this.bot.command("morning", async (ctx) => {
+      try {
+        const today = getUserDate();
+        const day = await storage.getDayOrCreate(today);
+
+        // Fetch habit config
+        const prefs = await storage.getUserPreferences("00000000-0000-0000-0000-000000000001");
+        const habitConfig = (prefs as any)?.morningRitualConfig?.habits || [];
+        const enabledHabits = habitConfig.filter((h: any) => h.enabled);
+
+        // Build morningRituals with all enabled habits set to done
+        const morningRituals: Record<string, any> = {};
+        for (const habit of enabledHabits) {
+          morningRituals[habit.key] = { done: true };
+        }
+        morningRituals.completedAt = new Date().toISOString();
+
+        await storage.updateDay(today, { morningRituals } as any);
+
+        const reply = `Morning routine complete. ${enabledHabits.length} habits marked done.`;
+        await ctx.reply(reply);
+        this.saveMessageHistory(ctx.chat.id.toString(), "/morning", reply, "command").catch(() => {});
+      } catch (error: any) {
+        await ctx.reply("Failed to complete morning routine.");
         this.recordError(error.message);
       }
     });

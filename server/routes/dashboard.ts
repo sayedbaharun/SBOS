@@ -426,18 +426,20 @@ router.get("/scorecard", async (req: Request, res: Response) => {
       {
         label: "Protein",
         target: "200g+",
-        actual: totalProtein > 0 ? `${Math.round(totalProtein)}g` : null,
-        status: totalProtein === 0 ? 'pending' :
+        actual: day?.proteinMet ? "Yes" : (totalProtein > 0 ? `${Math.round(totalProtein)}g` : null),
+        status: day?.proteinMet ? 'success' :
+                totalProtein === 0 ? 'pending' :
                 totalProtein >= 200 ? 'success' :
                 totalProtein >= 150 ? 'warning' : 'danger'
       },
       {
         label: "Calories",
-        target: "<2000",
-        actual: totalCalories > 0 ? `${Math.round(totalCalories)}` : null,
-        status: totalCalories === 0 ? 'pending' :
-                totalCalories <= 2000 ? 'success' :
-                totalCalories <= 2200 ? 'warning' : 'danger'
+        target: ">2100",
+        actual: day?.caloriesOver2100 ? "Yes" : (totalCalories > 0 ? `${Math.round(totalCalories)}` : null),
+        status: day?.caloriesOver2100 ? 'success' :
+                totalCalories === 0 ? 'pending' :
+                totalCalories >= 2100 ? 'success' :
+                totalCalories >= 1800 ? 'warning' : 'danger'
       },
       {
         label: "Deep Work",

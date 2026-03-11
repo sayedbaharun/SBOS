@@ -9,6 +9,16 @@ import * as ticktick from "../ticktick";
 
 const router = Router();
 
+// Guard middleware: return 503 if TickTick token not configured
+function requireTickTickToken(req: Request, res: Response, next: Function) {
+  if (!process.env.TICKTICK_ACCESS_TOKEN) {
+    return res.status(503).json({ error: "TickTick not configured", connected: false });
+  }
+  next();
+}
+
+router.use(requireTickTickToken);
+
 // Get TickTick connection status
 router.get("/status", async (req: Request, res: Response) => {
   try {
@@ -58,7 +68,58 @@ router.post("/inbox/setup", async (req: Request, res: Response) => {
   }
 });
 
-// Sync tasks from TickTick inbox to SB-OS capture items
+// Helper: Get or create "Personal" venture
+async function getOrCreatePersonalVenture(): Promise<string> {
+  const ventures = await storage.getVentures();
+  const personal = ventures.find(v => (v as any).domain === "personal" && v.status !== "archived");
+  if (personal) return personal.id;
+
+  const created = await storage.createVenture({
+    name: "Personal",
+    domain: "personal" as any,
+    status: "ongoing",
+    oneLiner: "Personal tasks and TickTick imports",
+  } as any);
+  return created.id;
+}
+
+// Helper: Get or create "TickTick Inbox" project under Personal venture
+async function getOrCreateTickTickProject(ventureId: string): Promise<string> {
+  const projects = await storage.getProjects({ ventureId });
+  const existing = projects.find(p => p.name === "TickTick Inbox");
+  if (existing) return existing.id;
+
+  const created = await storage.createProject({
+    name: "TickTick Inbox",
+    ventureId,
+    status: "in_progress",
+    category: "admin_general" as any,
+  } as any);
+  return created.id;
+}
+
+// Helper: Get or create weekly phase (Week commencing Monday)
+async function getOrCreateWeekPhase(projectId: string): Promise<string> {
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+  const weekLabel = `Week commencing ${monday.toISOString().split('T')[0]}`;
+
+  const phases = await storage.getPhases({ projectId });
+  const existing = phases.find(p => p.name === weekLabel);
+  if (existing) return existing.id;
+
+  const created = await storage.createPhase({
+    name: weekLabel,
+    projectId,
+    status: "in_progress" as any,
+    order: phases.length + 1,
+  } as any);
+  return created.id;
+}
+
+// Sync tasks from TickTick inbox to SB-OS tasks (under Personal venture)
 router.post("/sync", async (req: Request, res: Response) => {
   try {
     // Get the inbox project ID
@@ -71,6 +132,11 @@ router.post("/sync", async (req: Request, res: Response) => {
       });
     }
 
+    // Set up Personal venture → TickTick Inbox project → weekly phase
+    const personalVentureId = await getOrCreatePersonalVenture();
+    const ticktickProjectId = await getOrCreateTickTickProject(personalVentureId);
+    const weekPhaseId = await getOrCreateWeekPhase(ticktickProjectId);
+
     // Fetch tasks from TickTick
     const ticktickTasks = await ticktick.getProjectTasks(inboxProjectId);
 
@@ -79,19 +145,19 @@ router.post("/sync", async (req: Request, res: Response) => {
       t => t.status === ticktick.TICKTICK_STATUS.NORMAL
     );
 
-    const result: ticktick.TickTickSyncResult = {
+    const result = {
       synced: 0,
       skipped: 0,
-      errors: [],
-      items: [],
+      errors: [] as string[],
+      items: [] as Array<{ tickTickId: string; title: string; taskId?: string }>,
     };
 
-    // Get existing capture items with TickTick external IDs to avoid duplicates
-    const existingCaptures = await storage.getCaptures({ clarified: false });
+    // Get existing tasks with TickTick external IDs to avoid duplicates
+    const existingTasks = await storage.getTasks({ ventureId: personalVentureId });
     const existingExternalIds = new Set(
-      existingCaptures
-        .filter(c => c.externalId?.startsWith('ticktick:'))
-        .map(c => c.externalId)
+      existingTasks
+        .filter(t => t.externalId?.startsWith('ticktick:'))
+        .map(t => t.externalId)
     );
 
     // Process each TickTick task
@@ -109,31 +175,32 @@ router.post("/sync", async (req: Request, res: Response) => {
       }
 
       try {
-        // Convert TickTick task to capture item format
-        const captureData = ticktick.tickTickTaskToCaptureItem(task);
+        const { cleanTitle } = ticktick.extractTagsFromTitle(task.title);
 
-        // Create capture item in SB-OS
-        const capture = await storage.createCapture({
-          title: captureData.title,
-          type: captureData.type,
-          source: captureData.source,
-          notes: captureData.notes,
-          externalId: captureData.externalId,
-          clarified: false,
-        });
+        // Create task in SB-OS
+        const newTask = await storage.createTask({
+          title: cleanTitle || task.title,
+          notes: task.content || task.desc || null,
+          ventureId: personalVentureId,
+          projectId: ticktickProjectId,
+          phaseId: weekPhaseId,
+          status: "todo",
+          type: "personal" as any,
+          externalId,
+        } as any);
 
         result.synced++;
         result.items.push({
           tickTickId: task.id,
           title: task.title,
-          captureId: capture.id,
+          taskId: newTask.id,
         });
 
         logger.info({
           tickTickId: task.id,
-          captureId: capture.id,
+          taskId: newTask.id,
           title: task.title,
-        }, "Synced TickTick task to capture item");
+        }, "Synced TickTick task to SB-OS task");
 
       } catch (error: any) {
         result.errors.push(`Failed to sync task "${task.title}": ${error.message}`);
@@ -147,7 +214,7 @@ router.post("/sync", async (req: Request, res: Response) => {
     // Clear inbox by deleting synced tasks from TickTick
     if (req.body.clearInboxAfterSync) {
       for (const item of result.items) {
-        if (item.captureId) {
+        if (item.taskId) {
           try {
             await ticktick.deleteTask(inboxProjectId, item.tickTickId);
             cleared++;
@@ -161,7 +228,7 @@ router.post("/sync", async (req: Request, res: Response) => {
     // Legacy: complete tasks instead of deleting (keeps them in TickTick completed section)
     else if (req.body.completeAfterSync) {
       for (const item of result.items) {
-        if (item.captureId) {
+        if (item.taskId) {
           try {
             await ticktick.completeTask(inboxProjectId, item.tickTickId);
           } catch (error) {
@@ -175,7 +242,10 @@ router.post("/sync", async (req: Request, res: Response) => {
       success: true,
       ...result,
       cleared,
-      message: `Synced ${result.synced} new items, skipped ${result.skipped} existing items${cleared > 0 ? `, cleared ${cleared} from TickTick inbox` : ''}`,
+      personalVentureId,
+      ticktickProjectId,
+      weekPhaseId,
+      message: `Synced ${result.synced} new tasks to Personal venture, skipped ${result.skipped} existing${cleared > 0 ? `, cleared ${cleared} from TickTick inbox` : ''}`,
     });
 
   } catch (error) {
