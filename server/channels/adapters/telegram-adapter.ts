@@ -108,6 +108,9 @@ function getContextPrefix(chatId: string): string {
   return `[Recent conversation context]\n${lines.join("\n")}\n[End context]\n\n`;
 }
 
+// Pending amend feedback: maps chatId → taskId awaiting feedback text
+const pendingAmendFeedback = new Map<string, string>();
+
 class TelegramAdapter implements ChannelAdapter {
   platform = "telegram" as const;
   capabilities = {
@@ -187,7 +190,9 @@ class TelegramAdapter implements ChannelAdapter {
         `• /done <number> — mark task done\n` +
         `• /morning — mark all morning habits done\n` +
         `• /shop <item> [#category] — add to shopping list\n` +
-        `• /clip <url> — clip article to Knowledge Hub\n\n` +
+        `• /clip <url> — clip article to Knowledge Hub\n` +
+        `• /review — review pending deliverables\n` +
+        `• /delegate @<slug> <task> — delegate to agent\n\n` +
         `Tip: Send a bare URL to get a "Clip it?" prompt.`
       );
     });
@@ -769,19 +774,143 @@ class TelegramAdapter implements ChannelAdapter {
       }
     });
 
+    // ---- /review Command ----
+    this.bot.command("review", async (ctx) => {
+      try {
+        const { escapeHtml } = await import("../../infra/telegram-format.js");
+        const database = (storage as any).db;
+        const { agentTasks, agents: agentsTable } = await import("@shared/schema");
+        const { eq, and, desc, sql } = await import("drizzle-orm");
+
+        const rows = await database
+          .select({
+            task: agentTasks,
+            agentName: agentsTable.name,
+          })
+          .from(agentTasks)
+          .leftJoin(agentsTable, eq(agentTasks.assignedTo, agentsTable.id))
+          .where(
+            and(
+              sql`${agentTasks.deliverableType} IS NOT NULL`,
+              eq(agentTasks.status, "needs_review")
+            )
+          )
+          .orderBy(desc(agentTasks.createdAt))
+          .limit(5);
+
+        if (rows.length === 0) {
+          await ctx.reply("No pending deliverables. All clear!");
+          return;
+        }
+
+        const typeIcons: Record<string, string> = {
+          document: "\u{1F4C4}",
+          recommendation: "\u{1F4A1}",
+          action_items: "\u{1F4CB}",
+          code: "\u{1F4BB}",
+        };
+
+        for (const row of rows) {
+          const t = row.task;
+          const agent = row.agentName || "Unknown";
+          const icon = typeIcons[t.deliverableType] || "\u{1F4CB}";
+          const mins = Math.floor((Date.now() - new Date(t.createdAt).getTime()) / 60000);
+          const ago = mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.floor(mins / 60)}h` : `${Math.floor(mins / 1440)}d`;
+
+          await this.bot!.telegram.sendMessage(ctx.chat.id.toString(),
+            `${icon} <b>${escapeHtml(t.deliverableType)}</b> from ${escapeHtml(agent)}\n` +
+            `"${escapeHtml((t.title || "").slice(0, 200))}" — ${ago} ago`,
+            {
+              parse_mode: "HTML",
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: "\u2705 Approve", callback_data: `review:approve:${t.id}` },
+                  { text: "\u270F\uFE0F Amend", callback_data: `review:amend:${t.id}` },
+                  { text: "\u274C Reject", callback_data: `review:reject:${t.id}` },
+                ]],
+              },
+            }
+          );
+        }
+      } catch (error: any) {
+        await ctx.reply("Error fetching review queue: " + error.message);
+        this.recordError(error.message);
+      }
+    });
+
+    // ---- /delegate Command ----
+    this.bot.command("delegate", async (ctx) => {
+      try {
+        const args = ctx.message.text.replace(/^\/delegate\s*/, "").trim();
+
+        if (!args) {
+          const { loadAllAgents } = await import("../../agents/agent-registry");
+          const allAgents = await loadAllAgents();
+          const active = allAgents
+            .filter((a: any) => a.status === "active" && !a.slug.startsWith("_"))
+            .map((a: any) => `  @${a.slug}`)
+            .join("\n");
+          await ctx.reply(
+            `Usage: /delegate @<agent-slug> <task description>\n\nAvailable agents:\n${active}`
+          );
+          return;
+        }
+
+        const match = args.match(/^@?([\w-]+)\s+([\s\S]+)$/);
+        if (!match) {
+          await ctx.reply("Usage: /delegate @<agent-slug> <task description>");
+          return;
+        }
+
+        const [, slug, taskText] = match;
+        const { delegateFromUser } = await import("../../agents/delegation-engine");
+        const result = await delegateFromUser(slug, taskText, taskText);
+
+        if (result.error) {
+          await ctx.reply(`Failed: ${result.error}`);
+          return;
+        }
+
+        await ctx.reply(`Task delegated to @${slug}\nID: ${result.taskId}`);
+      } catch (error: any) {
+        await ctx.reply("Error delegating: " + error.message);
+        this.recordError(error.message);
+      }
+    });
+
     // ---- Text Messages ----
     this.bot.on("text", async (ctx) => {
       try {
         this.stats.messagesReceived++;
         this.stats.lastActivity = new Date();
 
+        // Pending amend feedback: if user is replying with amendment text
+        const chatId = ctx.chat.id.toString();
+        const pendingTaskId = pendingAmendFeedback.get(chatId);
+        if (pendingTaskId) {
+          pendingAmendFeedback.delete(chatId);
+          try {
+            const { requestChanges } = await import("../../routes/review-actions");
+            const result = await requestChanges(pendingTaskId, ctx.message.text);
+            if (result.success) {
+              await ctx.reply("Amendments sent. The agent will revise and resubmit.");
+            } else {
+              await ctx.reply(`Failed: ${result.error}`);
+            }
+          } catch (err: any) {
+            await ctx.reply("Error sending amendments: " + err.message);
+          }
+          this.stats.messagesSent++;
+          return;
+        }
+
         // NLP intercept: handle natural language logging (rituals, workouts, nutrition)
         const { detectAndHandleLog } = await import("../telegram-nlp-handler.js");
         const nlpResult = await detectAndHandleLog(ctx.message.text);
         if (nlpResult.handled) {
           // Save raw NLP messages to telegram_messages table
-          await this.saveMessageHistory(ctx.chat.id.toString(), ctx.message.text, nlpResult.response!, "nlp");
-          await this.sendLongMessage(ctx.chat.id.toString(), nlpResult.response!);
+          await this.saveMessageHistory(chatId, ctx.message.text, nlpResult.response!, "nlp");
+          await this.sendLongMessage(chatId, nlpResult.response!);
           this.stats.messagesSent++;
           return;
         }
@@ -802,8 +931,6 @@ class TelegramAdapter implements ChannelAdapter {
           this.stats.messagesSent++;
           return;
         }
-
-        const chatId = ctx.chat.id.toString();
 
         // Add user message to conversation context
         addToContext(chatId, "user", ctx.message.text);
@@ -1028,6 +1155,59 @@ class TelegramAdapter implements ChannelAdapter {
         if (data === "clip:dismiss") {
           await ctx.answerCbQuery("Dismissed");
           await ctx.editMessageReplyMarkup(undefined);
+          return;
+        }
+
+        // Review actions: approve/amend/reject deliverables
+        if (data.startsWith("review:")) {
+          const parts = data.split(":");
+          const action = parts[1];
+          const taskId = parts[2];
+
+          if (!taskId) {
+            await ctx.answerCbQuery("Invalid action");
+            return;
+          }
+
+          const {
+            approveDeliverable: approveDel,
+            rejectDeliverable: rejectDel,
+            requestChanges: reqChanges,
+          } = await import("../../routes/review-actions");
+
+          const originalText = (ctx.callbackQuery as any).message?.text || "";
+
+          if (action === "approve") {
+            const result = await approveDel(taskId);
+            if (result.success) {
+              const created = result.promotedTo.map(p => `${p.type} #${p.id}`).join(", ");
+              await ctx.answerCbQuery("Approved");
+              await ctx.editMessageText(
+                originalText + `\n\n\u2705 <b>Approved</b>${created ? ` \u2014 Created: ${created}` : ""}`,
+                { parse_mode: "HTML" }
+              );
+            } else {
+              await ctx.answerCbQuery(result.error || "Failed");
+            }
+          } else if (action === "reject") {
+            const result = await rejectDel(taskId, "Rejected via Telegram");
+            if (result.success) {
+              await ctx.answerCbQuery("Rejected");
+              await ctx.editMessageText(
+                originalText + "\n\n\u274C <b>Rejected</b>",
+                { parse_mode: "HTML" }
+              );
+            } else {
+              await ctx.answerCbQuery(result.error || "Failed");
+            }
+          } else if (action === "amend") {
+            const chatIdStr = String(ctx.chat?.id);
+            pendingAmendFeedback.set(chatIdStr, taskId);
+            await ctx.answerCbQuery("Reply with your feedback");
+            await ctx.reply("Reply with your amendment feedback:", {
+              reply_parameters: { message_id: (ctx.callbackQuery as any).message?.message_id },
+            } as any);
+          }
           return;
         }
 
@@ -1419,4 +1599,50 @@ export const telegramAdapter = new TelegramAdapter();
  */
 export function getAuthorizedChatIds(): string[] {
   return [...AUTHORIZED_CHAT_IDS];
+}
+
+/**
+ * Send a Telegram notification when a deliverable is submitted for review.
+ * Includes inline keyboard for approve/amend/reject actions.
+ */
+export async function notifyDeliverableSubmitted(
+  taskId: string,
+  title: string,
+  type: string,
+  agentName: string
+): Promise<void> {
+  const bot = telegramAdapter.bot;
+  if (!bot) return;
+
+  const { escapeHtml } = await import("../../infra/telegram-format.js");
+
+  const typeIcons: Record<string, string> = {
+    document: "\u{1F4C4}",
+    recommendation: "\u{1F4A1}",
+    action_items: "\u{1F4CB}",
+    code: "\u{1F4BB}",
+  };
+  const icon = typeIcons[type] || "\u{1F4CB}";
+
+  for (const chatId of getAuthorizedChatIds()) {
+    try {
+      await bot.telegram.sendMessage(chatId,
+        `\u{1F4CB} <b>New Deliverable</b>\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n` +
+        `${icon} <b>${escapeHtml(type)}</b> from ${escapeHtml(agentName)}\n\n` +
+        `"${escapeHtml(title.slice(0, 200))}"`,
+        {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "\u2705 Approve", callback_data: `review:approve:${taskId}` },
+              { text: "\u270F\uFE0F Amend", callback_data: `review:amend:${taskId}` },
+              { text: "\u274C Reject", callback_data: `review:reject:${taskId}` },
+            ]],
+          },
+        }
+      );
+    } catch (err) {
+      logger.error({ err, chatId }, "Failed to send deliverable notification");
+    }
+  }
 }

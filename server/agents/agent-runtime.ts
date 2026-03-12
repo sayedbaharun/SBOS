@@ -1133,6 +1133,12 @@ async function executeTool(
           })
           .returning();
 
+        // Fire-and-forget Telegram notification
+        try {
+          const { notifyDeliverableSubmitted } = await import("../channels/adapters/telegram-adapter");
+          notifyDeliverableSubmitted(deliverableTask.id, args.title, args.type, agent.name).catch(() => {});
+        } catch { /* non-critical */ }
+
         return {
           result: `Deliverable submitted for review: "${args.title}" (ID: ${deliverableTask.id}). Sayed will review it in the Review Queue.`,
           action: {

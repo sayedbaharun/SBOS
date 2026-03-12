@@ -36,6 +36,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
 interface Deliverable {
@@ -194,6 +195,9 @@ function DeliverableCard({
   onAmend,
   onReject,
   approving,
+  isMobile,
+  onInlineFeedback,
+  inlineFeedbackPending,
 }: {
   d: Deliverable;
   isExpanded: boolean;
@@ -203,8 +207,13 @@ function DeliverableCard({
   onAmend?: (id: string) => void;
   onReject?: (id: string) => void;
   approving?: boolean;
+  isMobile?: boolean;
+  onInlineFeedback?: (id: string, action: "amend" | "reject", feedback: string) => void;
+  inlineFeedbackPending?: boolean;
 }) {
   const TypeIcon = typeIcons[d.deliverableType] || FileText;
+  const [inlineAction, setInlineAction] = useState<"amend" | "reject" | null>(null);
+  const [inlineText, setInlineText] = useState("");
 
   return (
     <Card className="overflow-hidden">
@@ -272,46 +281,100 @@ function DeliverableCard({
 
             {/* Action buttons — only for pending review items */}
             {showActions && (
-              <div className="flex gap-2 mt-4 pt-3 border-t">
-                <Button
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onApprove?.(d.id);
-                  }}
-                  disabled={approving}
-                  className="bg-green-600 hover:bg-green-700 text-white"
-                >
-                  {approving ? (
-                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                  ) : (
-                    <Check className="h-3 w-3 mr-1" />
-                  )}
-                  Approve
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAmend?.(d.id);
-                  }}
-                >
-                  <Pencil className="h-3 w-3 mr-1" />
-                  Amend
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onReject?.(d.id);
-                  }}
-                >
-                  <X className="h-3 w-3 mr-1" />
-                  Reject
-                </Button>
+              <div className="mt-4 pt-3 border-t">
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onApprove?.(d.id);
+                    }}
+                    disabled={approving}
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    {approving ? (
+                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                    ) : (
+                      <Check className="h-3 w-3 mr-1" />
+                    )}
+                    Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isMobile) {
+                        setInlineAction(inlineAction === "amend" ? null : "amend");
+                        setInlineText("");
+                      } else {
+                        onAmend?.(d.id);
+                      }
+                    }}
+                  >
+                    <Pencil className="h-3 w-3 mr-1" />
+                    Amend
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isMobile) {
+                        setInlineAction(inlineAction === "reject" ? null : "reject");
+                        setInlineText("");
+                      } else {
+                        onReject?.(d.id);
+                      }
+                    }}
+                  >
+                    <X className="h-3 w-3 mr-1" />
+                    Reject
+                  </Button>
+                </div>
+
+                {/* Inline feedback on mobile */}
+                {isMobile && inlineAction && (
+                  <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                    <Textarea
+                      value={inlineText}
+                      onChange={(e) => setInlineText(e.target.value)}
+                      placeholder={
+                        inlineAction === "reject"
+                          ? "Reason for rejection..."
+                          : "What needs to change?"
+                      }
+                      rows={3}
+                      autoFocus
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant={inlineAction === "reject" ? "destructive" : "default"}
+                        disabled={!inlineText.trim() || inlineFeedbackPending}
+                        onClick={() => {
+                          onInlineFeedback?.(d.id, inlineAction, inlineText);
+                          setInlineAction(null);
+                          setInlineText("");
+                        }}
+                      >
+                        {inlineFeedbackPending && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                        {inlineAction === "reject" ? "Reject" : "Send Amendments"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setInlineAction(null);
+                          setInlineText("");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -321,8 +384,17 @@ function DeliverableCard({
   );
 }
 
+const typeFilterOptions = [
+  { value: "all", label: "All Types" },
+  { value: "document", label: "Document" },
+  { value: "recommendation", label: "Recommendation" },
+  { value: "action_items", label: "Action Items" },
+  { value: "code", label: "Code" },
+];
+
 export default function ReviewQueue() {
   const { toast } = useToast();
+  const isMobile = useIsMobile();
   const [activeTab, setActiveTab] = useState("needs_review");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -432,6 +504,14 @@ export default function ReviewQueue() {
     }
   };
 
+  const handleInlineFeedback = (id: string, action: "amend" | "reject", feedback: string) => {
+    if (action === "reject") {
+      rejectMutation.mutate({ id, feedback });
+    } else {
+      amendMutation.mutate({ id, feedback });
+    }
+  };
+
   const pendingCount = stats?.pending || 0;
 
   const emptyMessages: Record<string, string> = {
@@ -486,18 +566,34 @@ export default function ReviewQueue() {
             </TabsTrigger>
           </TabsList>
 
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="document">Document</SelectItem>
-              <SelectItem value="recommendation">Recommendation</SelectItem>
-              <SelectItem value="action_items">Action Items</SelectItem>
-              <SelectItem value="code">Code</SelectItem>
-            </SelectContent>
-          </Select>
+          {isMobile ? (
+            <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+              {typeFilterOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setTypeFilter(opt.value)}
+                  className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    typeFilter === opt.value
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Type" />
+              </SelectTrigger>
+              <SelectContent>
+                {typeFilterOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         {["needs_review", "completed", "failed"].map((tab) => (
@@ -533,6 +629,9 @@ export default function ReviewQueue() {
                   onAmend={(id) => setFeedbackDialog({ id, action: "amend" })}
                   onReject={(id) => setFeedbackDialog({ id, action: "reject" })}
                   approving={approveMutation.isPending}
+                  isMobile={isMobile}
+                  onInlineFeedback={handleInlineFeedback}
+                  inlineFeedbackPending={rejectMutation.isPending || amendMutation.isPending}
                 />
               ))}
             </div>

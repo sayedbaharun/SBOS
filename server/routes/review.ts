@@ -10,6 +10,11 @@ import { z } from "zod";
 import { agentTasks, agents, deliverableResultSchema } from "@shared/schema";
 import { storage } from "../storage";
 import { logger } from "../logger";
+import {
+  approveDeliverable,
+  rejectDeliverable,
+  requestChanges,
+} from "./review-actions";
 
 const router = Router();
 
@@ -140,122 +145,15 @@ router.get("/:id", async (req: Request, res: Response) => {
 // POST /api/review/:id/approve — Approve → create doc/tasks based on type
 router.post("/:id/approve", async (req: Request, res: Response) => {
   try {
-    const database = await getDb();
     const id = String(req.params.id);
+    const result = await approveDeliverable(id, req.body?.feedback);
 
-    const [task] = await database
-      .select()
-      .from(agentTasks)
-      .where(eq(agentTasks.id, id));
-
-    if (!task) {
-      return res.status(404).json({ error: "Deliverable not found" });
+    if (!result.success) {
+      const status = result.error?.includes("not found") ? 404 : 400;
+      return res.status(status).json({ error: result.error });
     }
 
-    if (task.status !== "needs_review") {
-      return res.status(400).json({ error: `Cannot approve task with status: ${task.status}` });
-    }
-
-    const result = task.result as Record<string, any>;
-    if (!result || !result.type) {
-      return res.status(400).json({ error: "Deliverable has no structured result" });
-    }
-
-    const promotedTo: Array<{ type: string; id: string }> = [];
-
-    logger.info({ taskId: id, resultType: result.type, resultKeys: Object.keys(result) }, "Approving deliverable");
-
-    switch (result.type) {
-      case "document": {
-        if (!result.title) {
-          return res.status(400).json({ error: "Document deliverable missing title", result });
-        }
-        const { doc } = await storage.createDocIfNotExists({
-          title: result.title,
-          body: result.body || "",
-          type: result.docType || "page",
-          domain: result.domain,
-          ventureId: result.ventureId || undefined,
-          status: "active",
-        });
-        promotedTo.push({ type: "doc", id: String(doc.id) });
-        break;
-      }
-
-      case "recommendation": {
-        if (result.suggestedAction === "create_task") {
-          const details = result.actionDetails || {};
-          const newTask = await storage.createTask({
-            title: result.title,
-            notes: `${result.summary}\n\n**Rationale:** ${result.rationale}`,
-            priority: details.priority || "P2",
-            status: "todo",
-            ventureId: details.ventureId,
-            createdByAgentId: task.agentId || undefined,
-          } as any);
-          promotedTo.push({ type: "task", id: String(newTask.id) });
-        } else if (result.suggestedAction === "create_doc") {
-          const { doc } = await storage.createDocIfNotExists({
-            title: result.title,
-            body: `## Summary\n${result.summary}\n\n## Rationale\n${result.rationale}`,
-            type: "research",
-            status: "active",
-          });
-          promotedTo.push({ type: "doc", id: String(doc.id) });
-        }
-        // no_action — just mark approved, no entity created
-        break;
-      }
-
-      case "action_items": {
-        const items = result.items || [];
-        for (const item of items) {
-          const newTask = await storage.createTask({
-            title: item.title,
-            notes: item.notes,
-            priority: item.priority || "P2",
-            status: "todo",
-            ventureId: item.ventureId || undefined,
-            projectId: item.projectId || undefined,
-            dueDate: item.dueDate,
-            createdByAgentId: task.agentId || undefined,
-          } as any);
-          promotedTo.push({ type: "task", id: String(newTask.id) });
-        }
-        break;
-      }
-
-      case "code": {
-        const lang = result.language || "typescript";
-        const body = `${result.description ? `${result.description}\n\n` : ""}\`\`\`${lang}\n${result.code}\n\`\`\``;
-        const { doc } = await storage.createDocIfNotExists({
-          title: result.title,
-          body,
-          type: "tech_doc",
-          ventureId: result.ventureId || undefined,
-          status: "active",
-        });
-        promotedTo.push({ type: "doc", id: String(doc.id) });
-        break;
-      }
-
-      default:
-        return res.status(400).json({ error: `Unknown deliverable type: ${result.type}` });
-    }
-
-    // Update task status
-    await database
-      .update(agentTasks)
-      .set({
-        status: "completed",
-        promotedTo,
-        completedAt: new Date(),
-        reviewFeedback: req.body?.feedback || null,
-      })
-      .where(eq(agentTasks.id, id));
-
-    logger.info({ taskId: id, promotedTo }, "Deliverable approved");
-    res.json({ success: true, promotedTo });
+    res.json({ success: true, promotedTo: result.promotedTo });
   } catch (error: any) {
     logger.error({ err: error, message: error?.message, stack: error?.stack }, "Error approving deliverable");
     res.status(500).json({ error: "Failed to approve deliverable", detail: error?.message });
@@ -265,29 +163,13 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
 // POST /api/review/:id/reject — Reject with feedback
 router.post("/:id/reject", async (req: Request, res: Response) => {
   try {
-    const database = await getDb();
     const id = String(req.params.id);
-    const { feedback } = req.body;
+    const result = await rejectDeliverable(id, req.body?.feedback);
 
-    const [task] = await database
-      .select()
-      .from(agentTasks)
-      .where(eq(agentTasks.id, id));
-
-    if (!task) {
-      return res.status(404).json({ error: "Deliverable not found" });
+    if (!result.success) {
+      return res.status(404).json({ error: result.error });
     }
 
-    await database
-      .update(agentTasks)
-      .set({
-        status: "failed",
-        reviewFeedback: feedback || "Rejected",
-        completedAt: new Date(),
-      })
-      .where(eq(agentTasks.id, id));
-
-    logger.info({ taskId: id }, "Deliverable rejected");
     res.json({ success: true });
   } catch (error) {
     logger.error({ error }, "Error rejecting deliverable");
@@ -298,7 +180,6 @@ router.post("/:id/reject", async (req: Request, res: Response) => {
 // POST /api/review/:id/request-changes — Send back to agent with feedback
 router.post("/:id/request-changes", async (req: Request, res: Response) => {
   try {
-    const database = await getDb();
     const id = String(req.params.id);
     const { feedback } = req.body;
 
@@ -306,24 +187,12 @@ router.post("/:id/request-changes", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Feedback is required when requesting changes" });
     }
 
-    const [task] = await database
-      .select()
-      .from(agentTasks)
-      .where(eq(agentTasks.id, id));
+    const result = await requestChanges(id, feedback);
 
-    if (!task) {
-      return res.status(404).json({ error: "Deliverable not found" });
+    if (!result.success) {
+      return res.status(404).json({ error: result.error });
     }
 
-    await database
-      .update(agentTasks)
-      .set({
-        status: "pending",
-        reviewFeedback: feedback,
-      })
-      .where(eq(agentTasks.id, id));
-
-    logger.info({ taskId: id }, "Changes requested on deliverable");
     res.json({ success: true });
   } catch (error) {
     logger.error({ error }, "Error requesting changes");
