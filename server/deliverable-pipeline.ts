@@ -1,0 +1,396 @@
+/**
+ * Deliverable Output Pipeline
+ *
+ * Wires agent deliverables into Google Drive and Vercel so every agent output
+ * lands somewhere real (formatted Google Doc, deployed preview site).
+ *
+ * All Drive/Vercel operations are fire-and-forget with graceful degradation —
+ * if Drive isn't configured, everything still works via the existing review queue.
+ */
+
+import { eq } from "drizzle-orm";
+import { agentTasks } from "@shared/schema";
+import { logger } from "./logger";
+import { storage } from "./storage";
+import * as path from "path";
+import * as fs from "fs";
+import * as os from "os";
+
+let db: any = null;
+async function getDb() {
+  if (!db) {
+    db = (storage as any).db;
+  }
+  return db;
+}
+
+// Folder ID cache
+let toReviewFolderId: string | null = null;
+let approvedFolderId: string | null = null;
+
+function isDriveConfigured(): boolean {
+  const clientId = process.env.GOOGLE_DRIVE_CLIENT_ID || process.env.GOOGLE_CALENDAR_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_DRIVE_CLIENT_SECRET || process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN || process.env.GOOGLE_CALENDAR_REFRESH_TOKEN;
+  return !!(clientId && clientSecret && refreshToken);
+}
+
+async function getOrCreateFolder(name: string, parentId: string): Promise<string> {
+  const { getDriveClient } = await import("./google-drive");
+  const drive = await getDriveClient();
+
+  // Search for existing folder
+  const res = await drive.files.list({
+    q: `name='${name}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    fields: "files(id)",
+    spaces: "drive",
+  });
+
+  if (res.data.files && res.data.files.length > 0) {
+    return res.data.files[0].id!;
+  }
+
+  // Create it
+  const { createFolder } = await import("./google-drive");
+  const folder = await createFolder(name, parentId, `SB-OS ${name}`);
+  return folder.id!;
+}
+
+async function getToReviewFolderId(): Promise<string> {
+  if (toReviewFolderId) return toReviewFolderId;
+  const { getOrCreateSBOSFolder } = await import("./google-drive");
+  const rootId = await getOrCreateSBOSFolder();
+  toReviewFolderId = await getOrCreateFolder("To Review", rootId);
+  return toReviewFolderId;
+}
+
+async function getApprovedFolderId(): Promise<string> {
+  if (approvedFolderId) return approvedFolderId;
+  const { getOrCreateSBOSFolder } = await import("./google-drive");
+  const rootId = await getOrCreateSBOSFolder();
+  approvedFolderId = await getOrCreateFolder("Approved Deliverables", rootId);
+  return approvedFolderId;
+}
+
+/**
+ * Format any deliverable result into clean markdown for a Google Doc.
+ */
+function formatAsDoc(result: Record<string, any>): string {
+  switch (result.type) {
+    case "document":
+      return `# ${result.title}\n\n${result.summary ? `> ${result.summary}\n\n` : ""}${result.body || ""}`;
+
+    case "recommendation":
+      return [
+        `# ${result.title}`,
+        "",
+        "## Summary",
+        result.summary || "",
+        "",
+        "## Rationale",
+        result.rationale || "",
+        "",
+        "## Suggested Action",
+        result.suggestedAction === "create_task"
+          ? "Create task on approval"
+          : result.suggestedAction === "create_doc"
+            ? "Create knowledge base document on approval"
+            : "No action required — informational",
+      ].join("\n");
+
+    case "action_items": {
+      const items = (result.items || [])
+        .map((item: any, i: number) => {
+          const priority = item.priority ? ` [${item.priority}]` : "";
+          const due = item.dueDate ? ` — due ${item.dueDate}` : "";
+          const notes = item.notes ? `\n   ${item.notes}` : "";
+          return `${i + 1}. ${item.title}${priority}${due}${notes}`;
+        })
+        .join("\n");
+      return `# ${result.title}\n\n${result.summary ? `${result.summary}\n\n` : ""}${items}`;
+    }
+
+    case "code": {
+      const lang = result.language || "typescript";
+      return [
+        `# ${result.title}`,
+        "",
+        result.description || "",
+        "",
+        `\`\`\`${lang}`,
+        result.code || "",
+        "```",
+      ].join("\n");
+    }
+
+    default:
+      return `# ${result.title || "Deliverable"}\n\n${JSON.stringify(result, null, 2)}`;
+  }
+}
+
+/**
+ * Export a deliverable to Google Drive (and optionally Vercel for web pages).
+ * Called after the agentTask insert in submit_deliverable.
+ */
+export async function exportToReview(
+  taskId: string
+): Promise<{ driveUrl?: string; vercelUrl?: string }> {
+  if (!isDriveConfigured()) {
+    return {};
+  }
+
+  const database = await getDb();
+  const [task] = await database
+    .select()
+    .from(agentTasks)
+    .where(eq(agentTasks.id, taskId));
+
+  if (!task || !task.result) return {};
+
+  const result = task.result as Record<string, any>;
+  const folderId = await getToReviewFolderId();
+
+  let driveUrl: string | undefined;
+  let vercelUrl: string | undefined;
+  let driveFileId: string | undefined;
+  let vercelDeploymentId: string | undefined;
+
+  // Handle code with isWebPage — deploy to Vercel first
+  if (result.type === "code" && result.isWebPage) {
+    try {
+      const tmpDir = path.join(os.tmpdir(), "sbos-generated-projects", taskId);
+      fs.mkdirSync(tmpDir, { recursive: true });
+
+      // Write the code to an index.html (or appropriate file)
+      const ext = result.language === "html" ? "html" : result.language === "css" ? "css" : "html";
+      fs.writeFileSync(path.join(tmpDir, `index.${ext}`), result.code || "");
+
+      const { deploy } = await import("./agents/tools/deployer");
+      const deployResult = await deploy({
+        projectDir: tmpDir,
+        projectName: `sbos-${taskId.slice(0, 8)}`,
+        platform: "vercel",
+        environment: "preview",
+      });
+
+      const parsed = JSON.parse(deployResult.result);
+      if (parsed.status === "success" || parsed.url) {
+        vercelUrl = parsed.url;
+        vercelDeploymentId = parsed.deploymentId;
+      }
+    } catch (err) {
+      logger.warn({ err, taskId }, "Vercel preview deploy failed");
+    }
+  }
+
+  // Create Google Doc in To Review
+  try {
+    const { createDoc } = await import("./google-drive");
+    let content = formatAsDoc(result);
+
+    // Append preview URL if we have one
+    if (vercelUrl) {
+      content += `\n\n---\n\n**Preview:** ${vercelUrl}`;
+    }
+
+    const doc = await createDoc(
+      `[${result.type}] ${result.title}`,
+      content,
+      folderId,
+      `Agent deliverable — ${task.deliverableType}`
+    );
+
+    driveFileId = doc.id!;
+    driveUrl = doc.webViewLink || undefined;
+  } catch (err) {
+    logger.warn({ err, taskId }, "Drive doc creation failed");
+  }
+
+  // Update agentTask with Drive/Vercel metadata
+  if (driveFileId || vercelDeploymentId) {
+    const updates: Record<string, any> = {};
+    if (driveFileId) {
+      updates.driveFileId = driveFileId;
+      updates.driveWebViewLink = driveUrl;
+    }
+    if (vercelDeploymentId) {
+      updates.vercelDeploymentId = vercelDeploymentId;
+      updates.vercelPreviewUrl = vercelUrl;
+    }
+
+    await database
+      .update(agentTasks)
+      .set(updates)
+      .where(eq(agentTasks.id, taskId));
+  }
+
+  return { driveUrl, vercelUrl };
+}
+
+/**
+ * Promote a deliverable on approval — move Drive file to destination folder,
+ * promote Vercel preview to production.
+ */
+export async function promoteDeliverable(taskId: string): Promise<void> {
+  const database = await getDb();
+  const [task] = await database
+    .select()
+    .from(agentTasks)
+    .where(eq(agentTasks.id, taskId));
+
+  if (!task) return;
+
+  const result = task.result as Record<string, any>;
+
+  // Move Drive file to appropriate destination
+  if (task.driveFileId) {
+    try {
+      const { moveFile } = await import("./google-drive");
+
+      if (result.type === "action_items") {
+        // Action items go to Approved Deliverables
+        const destFolderId = await getApprovedFolderId();
+        await moveFile(task.driveFileId, destFolderId);
+      } else {
+        // Documents, recommendations, code go to Knowledge Base (venture subfolder if available)
+        const ventureId = result.ventureId;
+        let destFolderId: string;
+
+        if (ventureId) {
+          // Try to get venture name for subfolder
+          try {
+            const venture = await storage.getVenture(String(ventureId));
+            if (venture) {
+              const { createVentureFolder } = await import("./google-drive");
+              destFolderId = await createVentureFolder(venture.name);
+            } else {
+              const { getOrCreateKnowledgeBaseFolder } = await import("./google-drive");
+              destFolderId = await getOrCreateKnowledgeBaseFolder();
+            }
+          } catch {
+            const { getOrCreateKnowledgeBaseFolder } = await import("./google-drive");
+            destFolderId = await getOrCreateKnowledgeBaseFolder();
+          }
+        } else {
+          const { getOrCreateKnowledgeBaseFolder } = await import("./google-drive");
+          destFolderId = await getOrCreateKnowledgeBaseFolder();
+        }
+
+        await moveFile(task.driveFileId, destFolderId);
+      }
+    } catch (err) {
+      logger.warn({ err, taskId }, "Drive file move on approve failed");
+    }
+  }
+
+  // Promote Vercel preview to production
+  if (task.vercelPreviewUrl && result.type === "code" && result.isWebPage) {
+    try {
+      const tmpDir = path.join(os.tmpdir(), "sbos-generated-projects", taskId);
+      if (fs.existsSync(tmpDir)) {
+        const { deploy } = await import("./agents/tools/deployer");
+        const deployResult = await deploy({
+          projectDir: tmpDir,
+          projectName: `sbos-${taskId.slice(0, 8)}`,
+          platform: "vercel",
+          environment: "production",
+        });
+
+        const parsed = JSON.parse(deployResult.result);
+        if (parsed.url) {
+          await database
+            .update(agentTasks)
+            .set({ vercelPreviewUrl: parsed.url })
+            .where(eq(agentTasks.id, taskId));
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, taskId }, "Vercel production promote failed");
+    }
+  }
+}
+
+/**
+ * Clean up a rejected deliverable — trash the Drive file.
+ */
+export async function cleanupRejected(taskId: string): Promise<void> {
+  const database = await getDb();
+  const [task] = await database
+    .select()
+    .from(agentTasks)
+    .where(eq(agentTasks.id, taskId));
+
+  if (!task?.driveFileId) return;
+
+  try {
+    const { deleteFile } = await import("./google-drive");
+    await deleteFile(task.driveFileId);
+  } catch (err) {
+    logger.warn({ err, taskId }, "Drive file trash on reject failed");
+  }
+
+  // Tear down Vercel preview if exists
+  if (task.vercelPreviewUrl) {
+    try {
+      const tmpDir = path.join(os.tmpdir(), "sbos-generated-projects", taskId);
+      if (fs.existsSync(tmpDir)) {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    } catch (err) {
+      logger.warn({ err, taskId }, "Vercel preview cleanup failed");
+    }
+  }
+}
+
+/**
+ * Update an existing Drive doc's content (for amend → resubmit flow).
+ * Preserves the same URL and version history.
+ */
+export async function updateDeliverableContent(
+  taskId: string,
+  newResult: Record<string, any>
+): Promise<void> {
+  const database = await getDb();
+  const [task] = await database
+    .select()
+    .from(agentTasks)
+    .where(eq(agentTasks.id, taskId));
+
+  if (!task?.driveFileId) return;
+
+  try {
+    const { updateFileContent } = await import("./google-drive");
+    const content = formatAsDoc(newResult);
+    await updateFileContent(task.driveFileId, content, "text/plain");
+  } catch (err) {
+    logger.warn({ err, taskId }, "Drive file content update failed");
+  }
+
+  // Re-deploy Vercel preview if it's a web page
+  if (task.vercelPreviewUrl && newResult.type === "code" && newResult.isWebPage) {
+    try {
+      const tmpDir = path.join(os.tmpdir(), "sbos-generated-projects", taskId);
+      fs.mkdirSync(tmpDir, { recursive: true });
+      const ext = newResult.language === "html" ? "html" : "html";
+      fs.writeFileSync(path.join(tmpDir, `index.${ext}`), newResult.code || "");
+
+      const { deploy } = await import("./agents/tools/deployer");
+      const deployResult = await deploy({
+        projectDir: tmpDir,
+        projectName: `sbos-${taskId.slice(0, 8)}`,
+        platform: "vercel",
+        environment: "preview",
+      });
+
+      const parsed = JSON.parse(deployResult.result);
+      if (parsed.url) {
+        await database
+          .update(agentTasks)
+          .set({ vercelPreviewUrl: parsed.url, vercelDeploymentId: parsed.deploymentId })
+          .where(eq(agentTasks.id, taskId));
+      }
+    } catch (err) {
+      logger.warn({ err, taskId }, "Vercel preview redeploy on amend failed");
+    }
+  }
+}

@@ -3290,6 +3290,12 @@ export const agentTasks = pgTable(
     deliverableType: text("deliverable_type").$type<'document' | 'recommendation' | 'action_items' | 'code'>(),
     reviewFeedback: text("review_feedback"),
     promotedTo: jsonb("promoted_to").$type<Array<{ type: string; id: string }>>(),
+
+    // Drive / Vercel output pipeline
+    driveFileId: text("drive_file_id"),
+    driveWebViewLink: text("drive_web_view_link"),
+    vercelDeploymentId: text("vercel_deployment_id"),
+    vercelPreviewUrl: text("vercel_preview_url"),
   },
   (table) => [
     index("idx_agent_tasks_assigned_by").on(table.assignedBy),

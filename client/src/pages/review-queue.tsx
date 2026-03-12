@@ -14,6 +14,8 @@ import {
   Bot,
   ChevronDown,
   ChevronUp,
+  ExternalLink,
+  Globe,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -53,6 +55,8 @@ interface Deliverable {
   completedAt: string | null;
   agentName: string;
   agentSlug: string;
+  driveWebViewLink: string | null;
+  vercelPreviewUrl: string | null;
 }
 
 interface ReviewStats {
@@ -276,6 +280,31 @@ function DeliverableCard({
                     </Badge>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* View in Drive / Preview Site link */}
+            {(d.vercelPreviewUrl || d.driveWebViewLink) && (
+              <div className="mt-3 pt-3 border-t">
+                <a
+                  href={d.vercelPreviewUrl || d.driveWebViewLink || "#"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                >
+                  {d.vercelPreviewUrl ? (
+                    <>
+                      <Globe className="h-4 w-4" />
+                      Preview Site
+                    </>
+                  ) : (
+                    <>
+                      <ExternalLink className="h-4 w-4" />
+                      View in Drive
+                    </>
+                  )}
+                </a>
               </div>
             )}
 

@@ -377,6 +377,7 @@ function buildCoreTools(agent: Agent, permissions: string[]): OpenAI.Chat.ChatCo
             language: { type: "string", description: "Programming language (for type=code)" },
             code: { type: "string", description: "Code content (for type=code)" },
             description: { type: "string", description: "Description of what the code does (for type=code)" },
+            isWebPage: { type: "boolean", description: "Set true if this code is a complete deployable web page/site (for type=code)" },
           },
           required: ["type", "title"],
         },
@@ -1115,6 +1116,7 @@ async function executeTool(
             deliverableResult.code = args.code;
             deliverableResult.description = args.description;
             deliverableResult.ventureId = args.ventureId || agent.ventureId;
+            deliverableResult.isWebPage = args.isWebPage || false;
             break;
         }
 
@@ -1133,14 +1135,26 @@ async function executeTool(
           })
           .returning();
 
+        // Export to Google Drive / Vercel (fire-and-forget)
+        let driveUrl: string | undefined;
+        let vercelUrl: string | undefined;
+        try {
+          const { exportToReview } = await import("../deliverable-pipeline");
+          const exported = await exportToReview(deliverableTask.id);
+          driveUrl = exported.driveUrl;
+          vercelUrl = exported.vercelUrl;
+        } catch (err) {
+          logger.warn({ err, taskId: deliverableTask.id }, "Drive export failed");
+        }
+
         // Fire-and-forget Telegram notification
         try {
           const { notifyDeliverableSubmitted } = await import("../channels/adapters/telegram-adapter");
-          notifyDeliverableSubmitted(deliverableTask.id, args.title, args.type, agent.name).catch(() => {});
+          notifyDeliverableSubmitted(deliverableTask.id, args.title, args.type, agent.name, driveUrl, vercelUrl).catch(() => {});
         } catch { /* non-critical */ }
 
         return {
-          result: `Deliverable submitted for review: "${args.title}" (ID: ${deliverableTask.id}). Sayed will review it in the Review Queue.`,
+          result: `Deliverable submitted for review: "${args.title}" (ID: ${deliverableTask.id}).${driveUrl ? ` View in Drive: ${driveUrl}` : ""} Sayed will review it in the Review Queue.`,
           action: {
             actionType: "submit_deliverable",
             entityType: "agent_task",

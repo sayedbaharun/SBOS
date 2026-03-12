@@ -136,6 +136,14 @@ export async function approveDeliverable(
     })
     .where(eq(agentTasks.id, taskId));
 
+  // Promote Drive file / Vercel deployment (fire-and-forget)
+  try {
+    const { promoteDeliverable } = await import("../deliverable-pipeline");
+    await promoteDeliverable(taskId);
+  } catch (err) {
+    logger.warn({ err, taskId }, "Drive/Vercel promote on approve failed");
+  }
+
   logger.info({ taskId, promotedTo }, "Deliverable approved");
   return { success: true, promotedTo };
 }
@@ -163,6 +171,14 @@ export async function rejectDeliverable(
       completedAt: new Date(),
     })
     .where(eq(agentTasks.id, taskId));
+
+  // Cleanup Drive file / Vercel preview (fire-and-forget)
+  try {
+    const { cleanupRejected } = await import("../deliverable-pipeline");
+    await cleanupRejected(taskId);
+  } catch (err) {
+    logger.warn({ err, taskId }, "Drive/Vercel cleanup on reject failed");
+  }
 
   logger.info({ taskId }, "Deliverable rejected");
   return { success: true };

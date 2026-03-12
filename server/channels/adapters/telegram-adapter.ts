@@ -1609,7 +1609,9 @@ export async function notifyDeliverableSubmitted(
   taskId: string,
   title: string,
   type: string,
-  agentName: string
+  agentName: string,
+  driveUrl?: string,
+  vercelUrl?: string
 ): Promise<void> {
   const bot = telegramAdapter.bot;
   if (!bot) return;
@@ -1624,6 +1626,21 @@ export async function notifyDeliverableSubmitted(
   };
   const icon = typeIcons[type] || "\u{1F4CB}";
 
+  // Build inline keyboard rows
+  const viewUrl = vercelUrl || driveUrl;
+  const viewLabel = vercelUrl ? "\u{1F310} Preview Site" : "\u{1F4C2} View in Drive";
+  const inlineKeyboard: any[][] = [];
+
+  if (viewUrl) {
+    inlineKeyboard.push([{ text: viewLabel, url: viewUrl }]);
+  }
+
+  inlineKeyboard.push([
+    { text: "\u2705 Approve", callback_data: `review:approve:${taskId}` },
+    { text: "\u270F\uFE0F Amend", callback_data: `review:amend:${taskId}` },
+    { text: "\u274C Reject", callback_data: `review:reject:${taskId}` },
+  ]);
+
   for (const chatId of getAuthorizedChatIds()) {
     try {
       await bot.telegram.sendMessage(chatId,
@@ -1633,11 +1650,7 @@ export async function notifyDeliverableSubmitted(
         {
           parse_mode: "HTML",
           reply_markup: {
-            inline_keyboard: [[
-              { text: "\u2705 Approve", callback_data: `review:approve:${taskId}` },
-              { text: "\u270F\uFE0F Amend", callback_data: `review:amend:${taskId}` },
-              { text: "\u274C Reject", callback_data: `review:reject:${taskId}` },
-            ]],
+            inline_keyboard: inlineKeyboard,
           },
         }
       );
