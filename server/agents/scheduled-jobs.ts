@@ -131,10 +131,10 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
         parts.push("Failed runs: " + recentFailed.map((r: any) => `${r.agentName}: ${r.summary || "no details"}`).join("; "));
       }
     }
-    syntheliqSection = `\n\n## Syntheliq (Hikma Digital)\n${parts.join("\n")}`;
+    syntheliqSection = `\n\n## Syntheliq\n${parts.join("\n")}`;
     logger.info("Syntheliq data included in daily briefing");
   } catch (err: any) {
-    syntheliqSection = "\n\n## Syntheliq (Hikma Digital)\nUnavailable — " + (err.message || "unknown error");
+    syntheliqSection = "\n\n## Syntheliq\nUnavailable — " + (err.message || "unknown error");
   }
 
   // Step 2b: Gather briefing data
@@ -194,7 +194,7 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
   }
 
   // Step 3: Have the CoS agent synthesize everything into one briefing
-  const prompt = `Generate your daily briefing for the founder. Here is the data:\n\n${briefingData.report}${activitySummary}${blockerSection}${intelligenceSection}${syntheliqSection}\n\nPresent this as your daily briefing, with your personality and insights. Highlight what matters most today. Flag any blockers prominently. If Syntheliq data is available, cross-reference with Hikma Digital tasks and flag any potential matches.${outcomesPrompt}`;
+  const prompt = `Generate your daily briefing for the founder. Here is the data:\n\n${briefingData.report}${activitySummary}${blockerSection}${intelligenceSection}${syntheliqSection}\n\nPresent this as your daily briefing, with your personality and insights. Highlight what matters most today. Flag any blockers prominently. If Syntheliq data is available, cross-reference with Syntheliq-related tasks and flag any potential matches.${outcomesPrompt}`;
 
   const result = await executeAgentChat(agentSlug, prompt, "scheduler");
 
@@ -677,31 +677,30 @@ registerJobHandler("syntheliq_reconcile", async (agentId: string, agentSlug: str
     return;
   }
 
-  // Fetch Hikma Digital venture tasks
-  // Hikma Digital venture ID from memory: de2a8490
-  let hikmaVentureId: string | null = null;
+  // Fetch Syntheliq venture tasks
+  let syntheliqVentureId: string | null = null;
   try {
     const allVentures = await storage.getVentures();
-    const hikma = allVentures.find((v: any) =>
-      v.name?.toLowerCase().includes("hikma")
+    const syntheliqVenture = allVentures.find((v: any) =>
+      v.name?.toLowerCase().includes("syntheliq") || v.name?.toLowerCase().includes("hikma")
     );
-    if (hikma) hikmaVentureId = String(hikma.id);
+    if (syntheliqVenture) syntheliqVentureId = String(syntheliqVenture.id);
   } catch {
     // fallback
   }
 
-  if (!hikmaVentureId) {
-    logger.info("Syntheliq reconcile: Hikma Digital venture not found — skipping");
+  if (!syntheliqVentureId) {
+    logger.info("Syntheliq reconcile: Syntheliq venture not found — skipping");
     return;
   }
 
-  const allTasks = await storage.getTasks({ ventureId: hikmaVentureId });
+  const allTasks = await storage.getTasks({ ventureId: syntheliqVentureId });
   const openTasks = allTasks.filter((t: any) =>
     ["todo", "next", "in_progress", "idea"].includes(t.status)
   );
 
   if (openTasks.length === 0) {
-    logger.info("Syntheliq reconcile: no open Hikma Digital tasks");
+    logger.info("Syntheliq reconcile: no open Syntheliq tasks");
     return;
   }
 
