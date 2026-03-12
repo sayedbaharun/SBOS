@@ -20,6 +20,7 @@ schedule:
   session_log_extraction: "0 22 * * *"
   pipeline_health_check: "0 */6 * * *"
   check_credit_balance: "30 */6 * * *"
+  syntheliq_reconcile: "15 */6 * * *"
   memory_consolidation: "0 23 * * *"
 memory_scope: isolated
 ---
@@ -59,6 +60,15 @@ When Sayed tells you his top 3 outcomes, one thing to ship, morning reflection, 
 - Mood → `mood`
 - Morning rituals completed → `morningRituals`
 - Evening rituals completed → `eveningRituals`
+
+## Syntheliq Integration
+
+You have access to the Syntheliq orchestrator — Hikma Digital's AI agency platform. Use the `syntheliq_status` tool to:
+- Include Syntheliq pipeline status in daily briefings (leads, runs, escalations)
+- Cross-reference: when reviewing Hikma Digital tasks, check if Syntheliq has already completed related work (agent runs, lead progression, proposals sent)
+- When you find potential matches between Syntheliq runs and open SB-OS tasks, **flag them for Sayed's review** — do NOT auto-complete tasks. Present the match with evidence so he can confirm.
+- Report escalations (failed agent runs) as potential blockers
+- If Syntheliq is unavailable (circuit breaker open), note it briefly and move on — do not retry or block on it
 
 ## Communication Style
 

@@ -674,7 +674,7 @@ class TelegramAdapter implements ChannelAdapter {
           if (Array.isArray(leads) && leads.length > 0) {
             text += "<b>Recent:</b>\n";
             leads.slice(0, 10).forEach((l: any) => {
-              text += `• ${l.company || l.name || "Unknown"} — ${l.status || "new"}${l.score ? ` (${l.score})` : ""}\n`;
+              text += `• ${l.company || l.company_name || l.name || "Unknown"} — ${l.status || "new"}${(l.score ?? l.match_score) ? ` (${l.score ?? l.match_score})` : ""}\n`;
             });
           } else {
             text += "No leads found.";
@@ -686,8 +686,8 @@ class TelegramAdapter implements ChannelAdapter {
           if (Array.isArray(runs) && runs.length > 0) {
             runs.slice(0, 10).forEach((r: any) => {
               const icon = r.status === "completed" ? "✓" : r.status === "failed" ? "✗" : "⏳";
-              const ago = r.startedAt ? timeAgo(new Date(r.startedAt)) : "";
-              text += `• ${r.agentName || r.agent || "Agent"} (${ago}) ${icon} ${r.summary || r.result?.slice(0, 60) || ""}\n`;
+              const ago = (r.startedAt || r.started_at) ? timeAgo(new Date(r.startedAt || r.started_at)) : "";
+              text += `• ${r.agentName || r.agent_name || r.agent || "Agent"} (${ago}) ${icon} ${r.summary || r.output_data?.summary || r.result?.slice(0, 60) || ""}\n`;
             });
           } else {
             text += "No runs in the last 24h.";
@@ -698,7 +698,7 @@ class TelegramAdapter implements ChannelAdapter {
           let text = "<b>SYNTHELIQ PROPOSALS</b>\n\n";
           if (Array.isArray(proposals) && proposals.length > 0) {
             proposals.slice(0, 10).forEach((p: any) => {
-              text += `• ${p.company || p.leadName || "Unknown"} — ${p.status || "draft"}${p.value ? ` ($${p.value})` : ""}\n`;
+              text += `• ${p.company || p.company_name || p.contact_name || p.leadName || "Unknown"} — ${p.status || "draft"}${(p.value ?? p.monthly_rate) ? ` ($${p.value ?? p.monthly_rate})` : ""}\n`;
             });
           } else {
             text += "No active proposals.";
@@ -741,8 +741,8 @@ class TelegramAdapter implements ChannelAdapter {
           if (Array.isArray(runs) && runs.length > 0) {
             runs.slice(0, 3).forEach((r: any) => {
               const icon = r.status === "completed" ? "✓" : r.status === "failed" ? "✗" : "⏳";
-              const ago = r.startedAt ? timeAgo(new Date(r.startedAt)) : "";
-              text += `• ${r.agentName || r.agent || "Agent"} (${ago}) ${icon} ${r.summary || r.result?.slice(0, 50) || ""}\n`;
+              const ago = (r.startedAt || r.started_at) ? timeAgo(new Date(r.startedAt || r.started_at)) : "";
+              text += `• ${r.agentName || r.agent_name || r.agent || "Agent"} (${ago}) ${icon} ${r.summary || r.output_data?.summary || r.result?.slice(0, 50) || ""}\n`;
             });
           } else {
             text += "None in 24h\n";

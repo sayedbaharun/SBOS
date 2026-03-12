@@ -110,7 +110,34 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
     logger.warn({ error: err.message }, "Intelligence synthesis failed — proceeding without");
   }
 
-  // Step 2: Gather briefing data
+  // Step 2a: Syntheliq cross-system check
+  let syntheliqSection = "";
+  try {
+    const { getSyntheliqDashboard } = await import("../integrations/syntheliq-client.js");
+    const dashboard = await getSyntheliqDashboard();
+    const parts: string[] = [];
+    if (dashboard.health) parts.push("System: online");
+    else parts.push("System: unreachable");
+    if (dashboard.pipeline && typeof dashboard.pipeline === "object") {
+      const stages = Object.entries(dashboard.pipeline as Record<string, number>);
+      if (stages.length > 0) parts.push("Pipeline: " + stages.map(([k, v]) => `${v} ${k}`).join(" → "));
+    }
+    if (Array.isArray(dashboard.runs) && dashboard.runs.length > 0) {
+      const completed = dashboard.runs.filter((r: any) => r.status === "completed").length;
+      const failed = dashboard.runs.filter((r: any) => r.status === "failed").length;
+      parts.push(`Runs (24h): ${completed} completed, ${failed} failed, ${dashboard.runs.length} total`);
+      const recentFailed = dashboard.runs.filter((r: any) => r.status === "failed").slice(0, 3);
+      if (recentFailed.length > 0) {
+        parts.push("Failed runs: " + recentFailed.map((r: any) => `${r.agentName}: ${r.summary || "no details"}`).join("; "));
+      }
+    }
+    syntheliqSection = `\n\n## Syntheliq (Hikma Digital)\n${parts.join("\n")}`;
+    logger.info("Syntheliq data included in daily briefing");
+  } catch (err: any) {
+    syntheliqSection = "\n\n## Syntheliq (Hikma Digital)\nUnavailable — " + (err.message || "unknown error");
+  }
+
+  // Step 2b: Gather briefing data
   const briefingResult = await dailyBriefing();
   const briefingData = JSON.parse(briefingResult.result);
 
@@ -167,7 +194,7 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
   }
 
   // Step 3: Have the CoS agent synthesize everything into one briefing
-  const prompt = `Generate your daily briefing for the founder. Here is the data:\n\n${briefingData.report}${activitySummary}${blockerSection}${intelligenceSection}\n\nPresent this as your daily briefing, with your personality and insights. Highlight what matters most today. Flag any blockers prominently.${outcomesPrompt}`;
+  const prompt = `Generate your daily briefing for the founder. Here is the data:\n\n${briefingData.report}${activitySummary}${blockerSection}${intelligenceSection}${syntheliqSection}\n\nPresent this as your daily briefing, with your personality and insights. Highlight what matters most today. Flag any blockers prominently. If Syntheliq data is available, cross-reference with Hikma Digital tasks and flag any potential matches.${outcomesPrompt}`;
 
   const result = await executeAgentChat(agentSlug, prompt, "scheduler");
 
@@ -625,6 +652,109 @@ registerJobHandler("pipeline_health_check", async (_agentId: string, agentSlug: 
   logger.info(
     { agentSlug, pass: result.overall === "pass", alertCount: result.alerts.length },
     "Pipeline health check completed"
+  );
+});
+
+// ============================================================================
+// SYNTHELIQ RECONCILE — cross-reference Syntheliq runs with SB-OS tasks
+// ============================================================================
+
+registerJobHandler("syntheliq_reconcile", async (agentId: string, agentSlug: string) => {
+  const { storage } = await import("../storage");
+
+  let runs: any[] = [];
+  try {
+    const { getSyntheliqRuns } = await import("../integrations/syntheliq-client.js");
+    runs = await getSyntheliqRuns(6);
+  } catch (err: any) {
+    logger.info({ error: err.message }, "Syntheliq reconcile skipped — unavailable");
+    return;
+  }
+
+  const completedRuns = runs.filter((r: any) => r.status === "completed");
+  if (completedRuns.length === 0) {
+    logger.info("Syntheliq reconcile: no completed runs in last 6h");
+    return;
+  }
+
+  // Fetch Hikma Digital venture tasks
+  // Hikma Digital venture ID from memory: de2a8490
+  let hikmaVentureId: string | null = null;
+  try {
+    const allVentures = await storage.getVentures();
+    const hikma = allVentures.find((v: any) =>
+      v.name?.toLowerCase().includes("hikma")
+    );
+    if (hikma) hikmaVentureId = String(hikma.id);
+  } catch {
+    // fallback
+  }
+
+  if (!hikmaVentureId) {
+    logger.info("Syntheliq reconcile: Hikma Digital venture not found — skipping");
+    return;
+  }
+
+  const allTasks = await storage.getTasks({ ventureId: hikmaVentureId });
+  const openTasks = allTasks.filter((t: any) =>
+    ["todo", "next", "in_progress", "idea"].includes(t.status)
+  );
+
+  if (openTasks.length === 0) {
+    logger.info("Syntheliq reconcile: no open Hikma Digital tasks");
+    return;
+  }
+
+  // Fuzzy match: keyword overlap between run agent+summary and task titles
+  const matches: Array<{ task: any; run: any; overlap: number }> = [];
+
+  for (const run of completedRuns) {
+    const runWords = `${run.agentName || ""} ${run.summary || ""}`.toLowerCase().split(/\W+/).filter((w: string) => w.length > 3);
+    for (const task of openTasks) {
+      const taskWords = (task.title || "").toLowerCase().split(/\W+/).filter((w: string) => w.length > 3);
+      const overlap = runWords.filter((w: string) => taskWords.includes(w)).length;
+      if (overlap >= 2) {
+        matches.push({ task, run, overlap });
+      }
+    }
+  }
+
+  if (matches.length === 0) {
+    logger.info({ completedRuns: completedRuns.length, openTasks: openTasks.length }, "Syntheliq reconcile: no matches found");
+    return;
+  }
+
+  // Sort by overlap descending, take top 5
+  matches.sort((a, b) => b.overlap - a.overlap);
+  const topMatches = matches.slice(0, 5);
+
+  // Build a prompt for CoS to present matches
+  const matchLines = topMatches.map((m) =>
+    `- Task "${m.task.title}" (${m.task.status}) ↔ Syntheliq run "${m.run.agentName}" completed: "${m.run.summary}" (overlap: ${m.overlap} keywords)`
+  ).join("\n");
+
+  const prompt = `SYNTHELIQ RECONCILIATION: The following SB-OS tasks may have been completed by Syntheliq agent runs in the last 6 hours. Review each match and present them to Sayed for confirmation. Do NOT auto-complete any tasks.\n\n${matchLines}\n\nFor each match, explain why you think they might be related and ask Sayed to confirm.`;
+
+  const result = await executeAgentChat(agentSlug, prompt, "scheduler");
+
+  // Send to Telegram
+  try {
+    const { sendProactiveMessage } = await import("../channels/channel-manager");
+    const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+    for (const chatId of getAuthorizedChatIds()) {
+      await sendProactiveMessage("telegram", chatId, formatMessage({
+        header: msgHeader("🔄", "Syntheliq Reconciliation"),
+        body: msgTruncate(escapeHtml(result.response)),
+        cta: "/syntheliq runs for details",
+      }));
+    }
+  } catch {
+    // Telegram not configured
+  }
+
+  logger.info(
+    { matches: topMatches.length, agentSlug },
+    "Syntheliq reconciliation completed"
   );
 });
 
