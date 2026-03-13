@@ -27,6 +27,9 @@ async function getDb() {
 // Folder ID cache
 let toReviewFolderId: string | null = null;
 let approvedFolderId: string | null = null;
+let ideasFolderId: string | null = null;
+let ideasApprovedFolderId: string | null = null;
+let ideasRejectedFolderId: string | null = null;
 
 function isDriveConfigured(): boolean {
   const clientId = process.env.GOOGLE_DRIVE_CLIENT_ID || process.env.GOOGLE_CALENDAR_CLIENT_ID;
@@ -70,6 +73,28 @@ async function getApprovedFolderId(): Promise<string> {
   const rootId = await getOrCreateSBOSFolder();
   approvedFolderId = await getOrCreateFolder("Approved Deliverables", rootId);
   return approvedFolderId;
+}
+
+async function getIdeasFolderId(): Promise<string> {
+  if (ideasFolderId) return ideasFolderId;
+  const { getOrCreateSBOSFolder } = await import("./google-drive");
+  const rootId = await getOrCreateSBOSFolder();
+  ideasFolderId = await getOrCreateFolder("Ideas", rootId);
+  return ideasFolderId;
+}
+
+export async function getIdeasApprovedFolderId(): Promise<string> {
+  if (ideasApprovedFolderId) return ideasApprovedFolderId;
+  const parentId = await getIdeasFolderId();
+  ideasApprovedFolderId = await getOrCreateFolder("Approved", parentId);
+  return ideasApprovedFolderId;
+}
+
+export async function getIdeasRejectedFolderId(): Promise<string> {
+  if (ideasRejectedFolderId) return ideasRejectedFolderId;
+  const parentId = await getIdeasFolderId();
+  ideasRejectedFolderId = await getOrCreateFolder("Rejected", parentId);
+  return ideasRejectedFolderId;
 }
 
 /**
@@ -148,7 +173,8 @@ export async function exportToReview(
   if (!task || !task.result) return {};
 
   const result = task.result as Record<string, any>;
-  const folderId = await getToReviewFolderId();
+  const isIdeaValidation = task.deliverableType === "idea_validation" || result.type === "idea_validation";
+  const folderId = isIdeaValidation ? await getIdeasFolderId() : await getToReviewFolderId();
 
   let driveUrl: string | undefined;
   let vercelUrl: string | undefined;
@@ -243,11 +269,16 @@ export async function promoteDeliverable(taskId: string): Promise<void> {
   const result = task.result as Record<string, any>;
 
   // Move Drive file to appropriate destination
+  const isIdeaValidation = task.deliverableType === "idea_validation" || result.type === "idea_validation";
   if (task.driveFileId) {
     try {
       const { moveFile } = await import("./google-drive");
 
-      if (result.type === "action_items") {
+      if (isIdeaValidation) {
+        // Idea validations go to Ideas/Approved
+        const destFolderId = await getIdeasApprovedFolderId();
+        await moveFile(task.driveFileId, destFolderId);
+      } else if (result.type === "action_items") {
         // Action items go to Approved Deliverables
         const destFolderId = await getApprovedFolderId();
         await moveFile(task.driveFileId, destFolderId);
@@ -311,7 +342,7 @@ export async function promoteDeliverable(taskId: string): Promise<void> {
 }
 
 /**
- * Clean up a rejected deliverable — trash the Drive file.
+ * Clean up a rejected deliverable — trash the Drive file (or move to Ideas/Rejected for idea validations).
  */
 export async function cleanupRejected(taskId: string): Promise<void> {
   const database = await getDb();
@@ -322,11 +353,21 @@ export async function cleanupRejected(taskId: string): Promise<void> {
 
   if (!task?.driveFileId) return;
 
+  const result = task.result as Record<string, any>;
+  const isIdeaValidation = task.deliverableType === "idea_validation" || result?.type === "idea_validation";
+
   try {
-    const { deleteFile } = await import("./google-drive");
-    await deleteFile(task.driveFileId);
+    if (isIdeaValidation) {
+      // Move to Ideas/Rejected instead of trashing — Sayed wants to keep a record
+      const { moveFile } = await import("./google-drive");
+      const destFolderId = await getIdeasRejectedFolderId();
+      await moveFile(task.driveFileId, destFolderId);
+    } else {
+      const { deleteFile } = await import("./google-drive");
+      await deleteFile(task.driveFileId);
+    }
   } catch (err) {
-    logger.warn({ err, taskId }, "Drive file trash on reject failed");
+    logger.warn({ err, taskId }, "Drive file cleanup on reject failed");
   }
 
   // Tear down Vercel preview if exists

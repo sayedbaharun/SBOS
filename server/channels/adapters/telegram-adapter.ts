@@ -48,6 +48,17 @@ const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60000;
 const chatRateLimits = new Map<string, { count: number; resetAt: number }>();
 
+// Deliverable notification batching — 5-second window per agent
+const DELIVERABLE_BATCH_WINDOW_MS = 5000;
+interface PendingDeliverable {
+  taskId: string;
+  title: string;
+  type: string;
+  driveUrl?: string;
+  vercelUrl?: string;
+}
+const deliverableBatchBuffer = new Map<string, { items: PendingDeliverable[]; timer: ReturnType<typeof setTimeout> }>();
+
 function checkRateLimit(chatId: string): boolean {
   const now = Date.now();
   const limit = chatRateLimits.get(chatId);
@@ -191,6 +202,7 @@ class TelegramAdapter implements ChannelAdapter {
         `• /morning — mark all morning habits done\n` +
         `• /shop <item> [#category] — add to shopping list\n` +
         `• /clip <url> — clip article to Knowledge Hub\n` +
+        `• /idea <description> — validate a business idea\n` +
         `• /review — review pending deliverables\n` +
         `• /delegate @<slug> <task> — delegate to agent\n\n` +
         `Tip: Send a bare URL to get a "Clip it?" prompt.`
@@ -874,6 +886,29 @@ class TelegramAdapter implements ChannelAdapter {
         await ctx.reply(`Task delegated to @${slug}\nID: ${result.taskId}`);
       } catch (error: any) {
         await ctx.reply("Error delegating: " + error.message);
+        this.recordError(error.message);
+      }
+    });
+
+    // ---- /idea Command ----
+    this.bot.command("idea", async (ctx) => {
+      try {
+        const description = ctx.message.text.replace(/^\/idea\s*/, "").trim();
+        if (!description) {
+          await ctx.reply("Usage: /idea <description>\nExample: /idea AI-powered invoice parser for SMBs in UAE");
+          return;
+        }
+
+        await ctx.reply("Idea captured — Research Analyst is validating. You'll get one notification when the report is ready.");
+
+        const prompt = `User submitted a new business idea for validation: "${description}". ` +
+          `Delegate to Research Analyst for deep market research. The Research Analyst should conduct a comprehensive idea validation including TAM/SAM/SOM, competitive landscape, financial projections, GTM strategy, risk assessment, and a feasibility score. ` +
+          `The Research Analyst should submit a single comprehensive deliverable of type 'idea_validation' with the title "Idea Validation: ${description.slice(0, 100)}".`;
+
+        const response = await this.routeToAgent(ctx, "chief-of-staff", prompt);
+        this.saveMessageHistory(ctx.chat.id.toString(), `/idea ${description}`, response, "command").catch(() => {});
+      } catch (error: any) {
+        await ctx.reply("Error processing idea: " + error.message);
         this.recordError(error.message);
       }
     });
@@ -1602,8 +1637,9 @@ export function getAuthorizedChatIds(): string[] {
 }
 
 /**
- * Send a Telegram notification when a deliverable is submitted for review.
- * Includes inline keyboard for approve/amend/reject actions.
+ * Queue a deliverable notification into the batch buffer.
+ * After 5 seconds of no new deliverables from the same agent, flushes as ONE consolidated message.
+ * Uses sendProactiveMessage (queued) instead of direct bot.telegram.sendMessage.
  */
 export async function notifyDeliverableSubmitted(
   taskId: string,
@@ -1616,46 +1652,93 @@ export async function notifyDeliverableSubmitted(
   const bot = telegramAdapter.bot;
   if (!bot) return;
 
+  const item: PendingDeliverable = { taskId, title, type, driveUrl, vercelUrl };
+  const existing = deliverableBatchBuffer.get(agentName);
+
+  if (existing) {
+    // Add to existing batch and reset timer
+    clearTimeout(existing.timer);
+    existing.items.push(item);
+    existing.timer = setTimeout(() => flushDeliverableBatch(agentName), DELIVERABLE_BATCH_WINDOW_MS);
+  } else {
+    // Start a new batch
+    const timer = setTimeout(() => flushDeliverableBatch(agentName), DELIVERABLE_BATCH_WINDOW_MS);
+    deliverableBatchBuffer.set(agentName, { items: [item], timer });
+  }
+}
+
+async function flushDeliverableBatch(agentName: string): Promise<void> {
+  const batch = deliverableBatchBuffer.get(agentName);
+  deliverableBatchBuffer.delete(agentName);
+  if (!batch || batch.items.length === 0) return;
+
   const { escapeHtml } = await import("../../infra/telegram-format.js");
+  const { sendProactiveMessage } = await import("../channel-manager");
 
   const typeIcons: Record<string, string> = {
     document: "\u{1F4C4}",
     recommendation: "\u{1F4A1}",
     action_items: "\u{1F4CB}",
     code: "\u{1F4BB}",
+    idea_validation: "\u{1F4A1}",
   };
-  const icon = typeIcons[type] || "\u{1F4CB}";
 
-  // Build inline keyboard rows
-  const viewUrl = vercelUrl || driveUrl;
-  const viewLabel = vercelUrl ? "\u{1F310} Preview Site" : "\u{1F4C2} View in Drive";
-  const inlineKeyboard: any[][] = [];
+  if (batch.items.length === 1) {
+    // Single deliverable — send with inline keyboard for quick review
+    const d = batch.items[0];
+    const icon = typeIcons[d.type] || "\u{1F4CB}";
+    const viewUrl = d.vercelUrl || d.driveUrl;
+    const viewLabel = d.vercelUrl ? "\u{1F310} Preview Site" : "\u{1F4C2} View in Drive";
+    const bot = telegramAdapter.bot;
 
-  if (viewUrl) {
-    inlineKeyboard.push([{ text: viewLabel, url: viewUrl }]);
+    const inlineKeyboard: any[][] = [];
+    if (viewUrl) {
+      inlineKeyboard.push([{ text: viewLabel, url: viewUrl }]);
+    }
+    inlineKeyboard.push([
+      { text: "\u2705 Approve", callback_data: `review:approve:${d.taskId}` },
+      { text: "\u270F\uFE0F Amend", callback_data: `review:amend:${d.taskId}` },
+      { text: "\u274C Reject", callback_data: `review:reject:${d.taskId}` },
+    ]);
+
+    // Single item still uses direct send for inline keyboard support
+    for (const chatId of getAuthorizedChatIds()) {
+      try {
+        await bot!.telegram.sendMessage(chatId,
+          `\u{1F4CB} <b>New Deliverable</b>\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n` +
+          `${icon} <b>${escapeHtml(d.type)}</b> from ${escapeHtml(agentName)}\n\n` +
+          `"${escapeHtml(d.title.slice(0, 200))}"`,
+          {
+            parse_mode: "HTML",
+            reply_markup: { inline_keyboard: inlineKeyboard },
+          }
+        );
+      } catch (err) {
+        logger.error({ err, chatId }, "Failed to send deliverable notification");
+      }
+    }
+    return;
   }
 
-  inlineKeyboard.push([
-    { text: "\u2705 Approve", callback_data: `review:approve:${taskId}` },
-    { text: "\u270F\uFE0F Amend", callback_data: `review:amend:${taskId}` },
-    { text: "\u274C Reject", callback_data: `review:reject:${taskId}` },
-  ]);
+  // Multiple deliverables — send ONE consolidated message via queue
+  const lines = batch.items.map((d, i) => {
+    const icon = typeIcons[d.type] || "\u{1F4CB}";
+    const viewUrl = d.vercelUrl || d.driveUrl;
+    const link = viewUrl ? ` — <a href="${escapeHtml(viewUrl)}">View</a>` : "";
+    return `${i + 1}. ${icon} ${escapeHtml(d.title.slice(0, 150))}${link}`;
+  });
+
+  const message =
+    `\u{1F4CB} <b>${batch.items.length} Deliverables from ${escapeHtml(agentName)}</b>\n` +
+    `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n` +
+    lines.join("\n") +
+    `\n\nReview: /review`;
 
   for (const chatId of getAuthorizedChatIds()) {
     try {
-      await bot.telegram.sendMessage(chatId,
-        `\u{1F4CB} <b>New Deliverable</b>\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n` +
-        `${icon} <b>${escapeHtml(type)}</b> from ${escapeHtml(agentName)}\n\n` +
-        `"${escapeHtml(title.slice(0, 200))}"`,
-        {
-          parse_mode: "HTML",
-          reply_markup: {
-            inline_keyboard: inlineKeyboard,
-          },
-        }
-      );
+      await sendProactiveMessage("telegram", chatId, message);
     } catch (err) {
-      logger.error({ err, chatId }, "Failed to send deliverable notification");
+      logger.error({ err, chatId }, "Failed to send batched deliverable notification");
     }
   }
 }

@@ -122,6 +122,23 @@ export async function approveDeliverable(
       break;
     }
 
+    case "idea_validation": {
+      // Idea validations become research docs in the knowledge base
+      if (!result.title) {
+        return { success: false, promotedTo: [], error: "Idea validation missing title" };
+      }
+      const { doc } = await storage.createDocIfNotExists({
+        title: result.title,
+        body: result.body || result.summary || "",
+        type: "research",
+        domain: result.domain || "venture_ops",
+        ventureId: result.ventureId || undefined,
+        status: "active",
+      });
+      promotedTo.push({ type: "doc", id: String(doc.id) });
+      break;
+    }
+
     default:
       return { success: false, promotedTo: [], error: `Unknown deliverable type: ${result.type}` };
   }
