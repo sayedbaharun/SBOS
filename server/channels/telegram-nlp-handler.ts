@@ -76,7 +76,7 @@ async function handleMorningDoneShortcut(): Promise<string> {
 
   const merged = {
     ...existing,
-    pressUps: { ...existing.pressUps, done: true, reps: existing.pressUps?.reps ?? 50 },
+    press_ups: { ...existing.press_ups, done: true, reps: existing.press_ups?.reps ?? 50 },
     squats: { ...existing.squats, done: true, reps: existing.squats?.reps ?? 50 },
     supplements: { done: true },
     water: { done: true },
@@ -85,7 +85,7 @@ async function handleMorningDoneShortcut(): Promise<string> {
 
   await storage.updateDay(today, { morningRituals: merged } as any);
 
-  return `All morning rituals marked done! ✅\n  ✅ Press-ups: ${merged.pressUps.reps}\n  ✅ Squats: ${merged.squats.reps}\n  ✅ Supplements: done\n  ✅ Water: done\n\n🎉 All morning rituals complete!`;
+  return `All morning rituals marked done! ✅\n  ✅ Press-ups: ${merged.press_ups.reps}\n  ✅ Squats: ${merged.squats.reps}\n  ✅ Supplements: done\n  ✅ Water: done\n\n🎉 All morning rituals complete!`;
 }
 
 function matchesAnyKeyword(text: string): boolean {
@@ -112,8 +112,8 @@ Return ONLY valid JSON (no markdown, no explanation) as an object with an "inten
 Possible intent shapes:
 
 1. Morning ritual update:
-{"intent":"morning_ritual","rituals":{"pressUps":{"done":true,"reps":15},"squats":{"done":true,"reps":10},"water":{"done":true},"supplements":{"done":true}}}
-Only include rituals the user actually mentioned. Possible keys: pressUps, squats, water, supplements.
+{"intent":"morning_ritual","rituals":{"press_ups":{"done":true,"reps":15},"squats":{"done":true,"reps":10},"water":{"done":true},"supplements":{"done":true}}}
+Only include rituals the user actually mentioned. Possible keys: press_ups, squats, water, supplements.
 If user says "morning done" or similar, mark all four as done with default reps of 50.
 IMPORTANT: water and supplements are ALWAYS done by default — only set them to false if the user explicitly says they skipped them (e.g. "no supplements today"). You do NOT need the user to mention them — they are auto-completed daily habits.
 
@@ -204,7 +204,7 @@ async function handleMorningRitual(rituals: Record<string, any>): Promise<string
 
   // Check if all four are done
   const allDone =
-    merged.pressUps?.done &&
+    merged.press_ups?.done &&
     merged.squats?.done &&
     merged.water?.done &&
     merged.supplements?.done;
@@ -216,7 +216,7 @@ async function handleMorningRitual(rituals: Record<string, any>): Promise<string
 
   // Build confirmation
   const parts: string[] = [];
-  if (rituals.pressUps?.done) parts.push(`Press-ups: ${rituals.pressUps.reps ?? "done"}`);
+  if (rituals.press_ups?.done) parts.push(`Press-ups: ${rituals.press_ups.reps ?? "done"}`);
   if (rituals.squats?.done) parts.push(`Squats: ${rituals.squats.reps ?? "done"}`);
   if (rituals.water?.done) parts.push("Water: done");
   if (rituals.supplements?.done) parts.push("Supplements: done");

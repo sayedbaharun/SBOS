@@ -16,13 +16,12 @@ import { Button } from "@/components/ui/button";
 import { Circle, Clock, Flame, AlertTriangle, CheckCircle2, Target, Calendar, Video, MapPin, Sun, ChevronRight } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import QuickLogModal from "@/components/health-hub/quick-log-modal";
 import { useWebSocket } from "@/hooks/use-websocket";
 
 export default function CommandCenterV2() {
     const [, navigate] = useLocation();
     const [time, setTime] = useState(new Date());
-    const [showHealthLog, setShowHealthLog] = useState(false);
+    // Health log now handled by /today page directly
 
     const { connected: wsConnected } = useWebSocket();
 
@@ -217,7 +216,7 @@ export default function CommandCenterV2() {
                         </div>
                         <div className="text-sm text-muted-foreground">Track sleep, energy, and mood for better planning</div>
                     </div>
-                    <Button onClick={() => setShowHealthLog(true)} className="bg-orange-500 hover:bg-orange-600 text-white">
+                    <Button onClick={() => navigate("/today")} className="bg-orange-500 hover:bg-orange-600 text-white">
                         Log Health
                     </Button>
                 </div>
@@ -428,7 +427,6 @@ export default function CommandCenterV2() {
                 </div>
             </main>
 
-            <QuickLogModal open={showHealthLog} onOpenChange={setShowHealthLog} />
         </div>
     );
 }

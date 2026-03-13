@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cleanFormData } from "@/lib/utils";
@@ -37,6 +38,10 @@ export default function QuickLogModal({ open, onOpenChange, defaultDate }: Quick
     weight: "",
     bodyFat: "",
     stressLevel: "medium",
+    steps: "",
+    workoutDone: false,
+    workoutType: "none",
+    workoutDurationMin: "",
     notes: "",
   });
 
@@ -68,6 +73,10 @@ export default function QuickLogModal({ open, onOpenChange, defaultDate }: Quick
         weight: "",
         bodyFat: "",
         stressLevel: "medium",
+        steps: "",
+        workoutDone: false,
+        workoutType: "none",
+        workoutDurationMin: "",
         notes: "",
       });
     },
@@ -92,6 +101,10 @@ export default function QuickLogModal({ open, onOpenChange, defaultDate }: Quick
       weightKg: formData.weight ? parseFloat(formData.weight) : undefined,
       bodyFatPercent: formData.bodyFat ? parseFloat(formData.bodyFat) : undefined,
       stressLevel: formData.stressLevel,
+      steps: formData.steps ? parseInt(formData.steps) : undefined,
+      workoutDone: formData.workoutDone,
+      workoutType: formData.workoutDone ? formData.workoutType : undefined,
+      workoutDurationMin: formData.workoutDone && formData.workoutDurationMin ? parseInt(formData.workoutDurationMin) : undefined,
       notes: formData.notes || undefined,
     };
 
@@ -105,9 +118,9 @@ export default function QuickLogModal({ open, onOpenChange, defaultDate }: Quick
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Morning Health Log</DialogTitle>
+          <DialogTitle>Daily Health Log</DialogTitle>
           <DialogDescription>
-            Record how you feel this morning. Workouts and steps can be logged in the Evening Review.
+            Record your health metrics — sleep, energy, mood, steps, and workout.
           </DialogDescription>
         </DialogHeader>
 
@@ -219,6 +232,58 @@ export default function QuickLogModal({ open, onOpenChange, defaultDate }: Quick
                 <SelectItem value="high">High</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Steps */}
+          <div className="space-y-2">
+            <Label htmlFor="steps">Steps</Label>
+            <Input
+              id="steps"
+              type="number"
+              placeholder="10000"
+              value={formData.steps}
+              onChange={(e) => setFormData({ ...formData, steps: e.target.value })}
+            />
+          </div>
+
+          {/* Workout */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="workoutDone">Workout</Label>
+              <Switch
+                id="workoutDone"
+                checked={formData.workoutDone}
+                onCheckedChange={(checked) => setFormData({ ...formData, workoutDone: checked })}
+              />
+            </div>
+            {formData.workoutDone && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="workoutType">Type</Label>
+                  <Select value={formData.workoutType} onValueChange={(value) => setFormData({ ...formData, workoutType: value })}>
+                    <SelectTrigger id="workoutType">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="strength">Strength</SelectItem>
+                      <SelectItem value="cardio">Cardio</SelectItem>
+                      <SelectItem value="yoga">Yoga</SelectItem>
+                      <SelectItem value="sports">Sports</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="workoutDuration">Duration (min)</Label>
+                  <Input
+                    id="workoutDuration"
+                    type="number"
+                    placeholder="45"
+                    value={formData.workoutDurationMin}
+                    onChange={(e) => setFormData({ ...formData, workoutDurationMin: e.target.value })}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Notes */}
