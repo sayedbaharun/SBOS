@@ -1,7 +1,6 @@
 import { ReactNode, useState } from "react";
 import { Sidebar } from "./sidebar";
 import TopBar from "./top-bar";
-import FocusSessionTimer from "./deep-work/focus-session-timer";
 import MobileBottomNav from "./mobile-bottom-nav";
 import { useSidebarCollapsed } from "@/hooks/use-sidebar-collapsed";
 import { cn } from "@/lib/utils";
@@ -56,9 +55,6 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* Mobile bottom navigation */}
       <MobileBottomNav />
-
-      {/* Global Focus Session Timer */}
-      <FocusSessionTimer />
     </div>
   );
 }

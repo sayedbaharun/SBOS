@@ -294,6 +294,11 @@ export default function LiveTasks() {
           <TabsTrigger value="completed" className="gap-1.5">
             <CheckCircle2 className="h-3.5 w-3.5" />
             Completed
+            {completed.length > 0 && (
+              <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
+                {completed.length}
+              </Badge>
+            )}
           </TabsTrigger>
         </TabsList>
 
@@ -336,14 +341,7 @@ export default function LiveTasks() {
           ) : (
             <div className="space-y-2">
               {pending.map((task) => (
-                <PendingTaskCard
-                  key={task.id}
-                  task={{
-                    ...task,
-                    agentName: (task as any).agentName || "Agent",
-                    agentSlug: (task as any).agentSlug || "unknown",
-                  }}
-                />
+                <PendingTaskCard key={task.id} task={task} />
               ))}
             </div>
           )}
@@ -361,14 +359,7 @@ export default function LiveTasks() {
           ) : (
             <div className="space-y-2">
               {completed.map((task) => (
-                <CompletedTaskCard
-                  key={task.id}
-                  task={{
-                    ...task,
-                    agentName: (task as any).agentName || "Agent",
-                    agentSlug: (task as any).agentSlug || "unknown",
-                  }}
-                />
+                <CompletedTaskCard key={task.id} task={task} />
               ))}
             </div>
           )}

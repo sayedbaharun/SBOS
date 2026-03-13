@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, XCircle, ChevronRight, FileCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { useLocation } from "wouter";
 
 function timeAgo(date: string) {
@@ -51,7 +52,16 @@ export function ReviewQueueWidget() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["review-widget"] });
       queryClient.invalidateQueries({ queryKey: ["review-stats"] });
-      toast({ title: "Approved" });
+      queryClient.invalidateQueries({ queryKey: ["live-tasks-completed"] });
+      toast({
+        title: "Approved",
+        description: "View in Live Tasks",
+        action: (
+          <ToastAction altText="View in Live Tasks" onClick={() => navigate("/live-tasks")}>
+            View
+          </ToastAction>
+        ),
+      });
     },
   });
 

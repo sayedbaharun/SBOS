@@ -5,7 +5,7 @@
  * Handles agent CRUD, chat, delegation, and status.
  */
 import { Router, Request, Response } from "express";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, sql, getTableColumns } from "drizzle-orm";
 import { logger } from "../logger";
 import {
   agents,
@@ -446,18 +446,17 @@ router.get("/delegation/log", async (req: Request, res: Response) => {
     const limit = parseInt(String(req.query.limit || "50"));
     const status = req.query.status as string | undefined;
 
-    const tasks = status
-      ? await database
-          .select()
-          .from(agentTasks)
-          .where(eq(agentTasks.status, status as any))
-          .orderBy(desc(agentTasks.createdAt))
-          .limit(limit)
-      : await database
-          .select()
-          .from(agentTasks)
-          .orderBy(desc(agentTasks.createdAt))
-          .limit(limit);
+    const tasks = await database
+      .select({
+        ...getTableColumns(agentTasks),
+        agentName: agents.name,
+        agentSlug: agents.slug,
+      })
+      .from(agentTasks)
+      .leftJoin(agents, eq(agentTasks.assignedTo, agents.id))
+      .where(status ? eq(agentTasks.status, status as any) : undefined)
+      .orderBy(desc(agentTasks.createdAt))
+      .limit(limit);
     res.json(tasks);
   } catch (error) {
     logger.error({ error }, "Error fetching delegation log");
