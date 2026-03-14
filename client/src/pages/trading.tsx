@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { TrendingUp, Settings, History, Target, Bot, BookOpen } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import TradingJournalEntry from "@/components/command-center/trading-journal-entry";
+import TradingJournalEntry from "@/components/trading/trading-journal-entry";
 import TradingStrategyDashboard from "@/components/trading/trading-strategy-dashboard";
 import TradingStrategiesManager from "@/components/trading/trading-strategies-manager";
 import TradingSessionIndicator from "@/components/trading/trading-session-indicator";
