@@ -890,7 +890,7 @@ class TelegramAdapter implements ChannelAdapter {
       }
     });
 
-    // ---- /idea Command ----
+    // ---- /idea Command (Autonomous Venture Pipeline) ----
     this.bot.command("idea", async (ctx) => {
       try {
         const description = ctx.message.text.replace(/^\/idea\s*/, "").trim();
@@ -899,14 +899,27 @@ class TelegramAdapter implements ChannelAdapter {
           return;
         }
 
-        await ctx.reply("Idea captured — Research Analyst is validating. You'll get one notification when the report is ready.");
+        const chatId = ctx.chat.id.toString();
 
-        const prompt = `User submitted a new business idea for validation: "${description}". ` +
-          `Delegate to Research Analyst for deep market research. The Research Analyst should conduct a comprehensive idea validation including TAM/SAM/SOM, competitive landscape, financial projections, GTM strategy, risk assessment, and a feasibility score. ` +
-          `The Research Analyst should submit a single comprehensive deliverable of type 'idea_validation' with the title "Idea Validation: ${description.slice(0, 100)}".`;
+        // Create venture idea in DB
+        const idea = await storage.createVentureIdea({
+          name: description.slice(0, 100),
+          description,
+          status: "idea",
+        });
 
-        const response = await this.routeToAgent(ctx, "chief-of-staff", prompt);
-        this.saveMessageHistory(ctx.chat.id.toString(), `/idea ${description}`, response, "command").catch(() => {});
+        await ctx.reply(
+          "Idea captured. Running deep research + validation.\n" +
+          "I'll notify you only if both AI reviewers agree it's viable."
+        );
+
+        // Fire-and-forget: start the autonomous pipeline
+        const { startVenturePipeline } = await import("../../agents/venture-pipeline");
+        startVenturePipeline(idea.id, chatId).catch((err: any) => {
+          logger.error({ err: err.message, ideaId: idea.id }, "Venture pipeline failed (unhandled)");
+        });
+
+        this.saveMessageHistory(chatId, `/idea ${description}`, "Pipeline started", "command").catch(() => {});
       } catch (error: any) {
         await ctx.reply("Error processing idea: " + error.message);
         this.recordError(error.message);
@@ -1242,6 +1255,43 @@ class TelegramAdapter implements ChannelAdapter {
             await ctx.reply("Reply with your amendment feedback:", {
               reply_parameters: { message_id: (ctx.callbackQuery as any).message?.message_id },
             } as any);
+          }
+          return;
+        }
+
+        // Venture pipeline actions: GO/KILL from double-yes check
+        if (data.startsWith("venture:")) {
+          const parts = data.split(":");
+          const action = parts[1]; // go or kill
+          const ideaId = parts[2];
+
+          if (!ideaId) {
+            await ctx.answerCbQuery("Invalid action");
+            return;
+          }
+
+          const originalText = (ctx.callbackQuery as any).message?.text || "";
+
+          if (action === "go") {
+            await ctx.answerCbQuery("Launching pipeline...");
+            await ctx.editMessageText(
+              originalText + "\n\n\uD83D\uDE80 <b>GO — Pipeline launching...</b>",
+              { parse_mode: "HTML" }
+            );
+            const { handleUserDecision } = await import("../../agents/venture-pipeline");
+            handleUserDecision(ideaId, "yes").catch((err: any) => {
+              logger.error({ err: err.message, ideaId }, "Venture pipeline GO failed");
+            });
+          } else if (action === "kill") {
+            await ctx.answerCbQuery("Idea killed");
+            await ctx.editMessageText(
+              originalText + "\n\n\uD83D\uDDD1\uFE0F <b>KILLED</b>",
+              { parse_mode: "HTML" }
+            );
+            const { handleUserDecision } = await import("../../agents/venture-pipeline");
+            handleUserDecision(ideaId, "no").catch((err: any) => {
+              logger.error({ err: err.message, ideaId }, "Venture pipeline KILL failed");
+            });
           }
           return;
         }
@@ -1628,6 +1678,13 @@ class TelegramAdapter implements ChannelAdapter {
 // ============================================================================
 
 export const telegramAdapter = new TelegramAdapter();
+
+/**
+ * Get the Telegraf bot instance for direct API calls (inline keyboards, etc.)
+ */
+export function getTelegramBot(): Telegraf | null {
+  return telegramAdapter.bot;
+}
 
 /**
  * Get the authorized chat IDs for sending proactive messages.

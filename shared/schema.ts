@@ -2947,16 +2947,20 @@ export type InsertDocAiTeaching = z.infer<typeof insertDocAiTeachingSchema>;
 // ----------------------------------------------------------------------------
 
 // Idea status lifecycle: idea → researching → scored → approved/rejected/parked → compiled
+// Pipeline lifecycle: idea → researching → validating → validated → pipeline → compiled
 export const ventureIdeaStatusEnum = pgEnum('venture_idea_status', [
   'idea',        // Initial capture
   'researching', // AI research in progress
   'researched',  // Research complete, awaiting scoring
+  'validating',  // Gemini double-check in progress
+  'validated',   // Double-yes, awaiting user go/no-go
   'scoring',     // AI scoring in progress
   'scored',      // Scored, awaiting human decision
   'approved',    // Human approved, ready for compilation
   'rejected',    // Human rejected (killed)
   'parked',      // Human parked for later
   'compiling',   // Compilation in progress
+  'pipeline',    // User said YES, autonomous pipeline running
   'compiled',    // Venture created successfully
   'failed'       // Compilation failed
 ]);
@@ -3027,6 +3031,25 @@ export const ventureIdeas = pgTable(
       tasksCreated: number;
       model: string;
       tokensUsed: number;
+    }>(),
+
+    // Autonomous pipeline data
+    pipelineData: jsonb("pipeline_data").$type<{
+      chatId?: string;
+      perplexityVerdict?: string;
+      geminiValidation?: string;
+      geminiVerdict?: string;
+      ventureCodename?: string;
+      driveFolderId?: string;
+      driveFolderUrl?: string;
+      steps: {
+        branding?: { status: 'pending' | 'running' | 'done' | 'failed'; taskId?: string; driveFileIds?: string[]; error?: string };
+        prd?: { status: 'pending' | 'running' | 'done' | 'failed'; taskId?: string; driveFileId?: string; error?: string };
+        gtm?: { status: 'pending' | 'running' | 'done' | 'failed'; taskId?: string; driveFileId?: string; error?: string };
+        landingPage?: { status: 'pending' | 'running' | 'done' | 'failed'; taskId?: string; vercelUrl?: string; error?: string };
+      };
+      completedAt?: string;
+      totalTokensUsed?: number;
     }>(),
 
     // Metadata

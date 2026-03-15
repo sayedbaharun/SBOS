@@ -63,6 +63,104 @@ const approvalSchema = z.object({
 });
 
 // ============================================================================
+// SHARED RESEARCH PROMPT (also used by venture-pipeline.ts)
+// ============================================================================
+
+/**
+ * Build the Perplexity research prompt for a venture idea.
+ * Shared between the REST endpoint and the autonomous pipeline.
+ */
+export function buildResearchPrompt(idea: {
+  name: string;
+  description: string;
+  domain?: string | null;
+  targetCustomer?: string | null;
+  initialThoughts?: string | null;
+}): string {
+  const domainLabel = idea.domain ? DOMAIN_LABELS[idea.domain] || idea.domain : "Unknown";
+
+  const ideaContext = `
+BUSINESS IDEA:
+- Name: ${idea.name}
+- Description: ${idea.description}
+${idea.domain ? `- Domain/Industry: ${domainLabel}` : ""}
+${idea.targetCustomer ? `- Target Customer: ${idea.targetCustomer}` : ""}
+${idea.initialThoughts ? `- Initial Hypotheses: ${idea.initialThoughts}` : ""}
+`.trim();
+
+  return `You are a skeptical venture research analyst. Be commercial and critical.
+
+${ideaContext}
+
+Produce a comprehensive research document with the following sections. Be specific - name real companies, cite real data where possible, and provide concrete analysis.
+
+## 1. Problem Definition & Market Validation
+- Is this a real problem people/businesses actively pay to solve?
+- Market size estimates (TAM/SAM/SOM)
+- Demand signals and evidence
+- Who is the ideal customer profile?
+
+## 2. Target Buyer Analysis
+- Who exactly will pay for this? (Not users, buyers)
+- What is their budget capacity?
+- What triggers a purchase decision?
+- Current alternatives they use
+
+## 3. Competitive Landscape
+- Direct competitors (name specific companies)
+- Indirect competitors and alternatives
+- Market gaps and underserved segments
+- What moats exist or could be built?
+
+## 4. Business Model Analysis
+- What revenue models work in this space?
+- Typical pricing benchmarks
+- Unit economics in similar businesses
+- Path to profitability
+
+## 5. Distribution & Go-to-Market
+- How do successful players acquire customers?
+- What channels work best?
+- Customer acquisition cost benchmarks
+- Network effects or virality potential
+
+## 6. Execution Requirements
+- What's needed to build an MVP?
+- Key skills or team required
+- Timeline to first revenue
+- Operational complexities
+
+## 7. Risk Assessment
+- Regulatory/legal friction (UAE and global)
+- Market timing factors
+- Key failure modes
+- Barriers to entry
+
+## 8. AI Leverage Opportunities
+- Where can AI provide 10x advantage?
+- Automation opportunities
+- Data moat potential
+
+## 9. Recommendation
+**Verdict:** [PROCEED / PARK / KILL]
+
+**Key Reasons:**
+1. [Primary reason]
+2. [Secondary reason]
+3. [Third reason]
+
+**If PROCEED - First Validation Steps:**
+1. [Step 1]
+2. [Step 2]
+3. [Step 3]
+
+**If PARK/KILL - What Would Change This?**
+[What conditions or changes would make this viable?]
+
+Be thorough, skeptical, and specific. This research will inform a GO/NO-GO decision.`;
+}
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
@@ -220,89 +318,9 @@ router.post("/ideas/:id/research", aiRateLimiter, async (req: Request, res: Resp
     await storage.updateVentureIdea(idea.id, { status: "researching" });
 
     const openai = await getOpenAIClient();
-    const domainLabel = idea.domain ? DOMAIN_LABELS[idea.domain] || idea.domain : "Unknown";
 
-    // Build the idea context
-    const ideaContext = `
-BUSINESS IDEA:
-- Name: ${idea.name}
-- Description: ${idea.description}
-${idea.domain ? `- Domain/Industry: ${domainLabel}` : ""}
-${idea.targetCustomer ? `- Target Customer: ${idea.targetCustomer}` : ""}
-${idea.initialThoughts ? `- Initial Hypotheses: ${idea.initialThoughts}` : ""}
-`.trim();
-
-    // Multi-step research using Perplexity via OpenRouter
-    const researchPrompt = `You are a skeptical venture research analyst. Be commercial and critical.
-
-${ideaContext}
-
-Produce a comprehensive research document with the following sections. Be specific - name real companies, cite real data where possible, and provide concrete analysis.
-
-## 1. Problem Definition & Market Validation
-- Is this a real problem people/businesses actively pay to solve?
-- Market size estimates (TAM/SAM/SOM)
-- Demand signals and evidence
-- Who is the ideal customer profile?
-
-## 2. Target Buyer Analysis
-- Who exactly will pay for this? (Not users, buyers)
-- What is their budget capacity?
-- What triggers a purchase decision?
-- Current alternatives they use
-
-## 3. Competitive Landscape
-- Direct competitors (name specific companies)
-- Indirect competitors and alternatives
-- Market gaps and underserved segments
-- What moats exist or could be built?
-
-## 4. Business Model Analysis
-- What revenue models work in this space?
-- Typical pricing benchmarks
-- Unit economics in similar businesses
-- Path to profitability
-
-## 5. Distribution & Go-to-Market
-- How do successful players acquire customers?
-- What channels work best?
-- Customer acquisition cost benchmarks
-- Network effects or virality potential
-
-## 6. Execution Requirements
-- What's needed to build an MVP?
-- Key skills or team required
-- Timeline to first revenue
-- Operational complexities
-
-## 7. Risk Assessment
-- Regulatory/legal friction (UAE and global)
-- Market timing factors
-- Key failure modes
-- Barriers to entry
-
-## 8. AI Leverage Opportunities
-- Where can AI provide 10x advantage?
-- Automation opportunities
-- Data moat potential
-
-## 9. Recommendation
-**Verdict:** [PROCEED / PARK / KILL]
-
-**Key Reasons:**
-1. [Primary reason]
-2. [Secondary reason]
-3. [Third reason]
-
-**If PROCEED - First Validation Steps:**
-1. [Step 1]
-2. [Step 2]
-3. [Step 3]
-
-**If PARK/KILL - What Would Change This?**
-[What conditions or changes would make this viable?]
-
-Be thorough, skeptical, and specific. This research will inform a GO/NO-GO decision.`;
+    // Use shared research prompt builder
+    const researchPrompt = buildResearchPrompt(idea);
 
     logger.info({ ideaId: idea.id }, "Starting internal research via Perplexity");
 
@@ -336,7 +354,7 @@ Be thorough, skeptical, and specific. This research will inform a GO/NO-GO decis
 ## Idea Summary
 **Name:** ${idea.name}
 **Description:** ${idea.description}
-${idea.domain ? `**Domain:** ${domainLabel}` : ""}
+${idea.domain ? `**Domain:** ${DOMAIN_LABELS[idea.domain] || idea.domain}` : ""}
 ${idea.targetCustomer ? `**Target Customer:** ${idea.targetCustomer}` : ""}
 
 ---
