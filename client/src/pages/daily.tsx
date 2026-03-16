@@ -303,7 +303,7 @@ export default function DailyPage() {
     queryKey: ["/api/tasks", { venture_id: lifeAdminVenture?.id, status: "todo,in_progress" }],
     queryFn: async () => {
       const res = await fetch(
-        `/api/tasks?venture_id=${lifeAdminVenture!.id}&status=todo,in_progress&limit=50`,
+        `/api/tasks?venture_id=${lifeAdminVenture!.id}&status=todo,in_progress`,
         { credentials: "include" }
       );
       if (!res.ok) return [];
