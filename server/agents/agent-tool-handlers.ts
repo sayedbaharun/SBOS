@@ -433,6 +433,19 @@ export async function executeTool(
         };
       }
 
+      case "browser_action": {
+        const { executeBrowserAction } = await import("./tools/browser-action");
+        const result = await executeBrowserAction(args as any);
+        return {
+          result: JSON.stringify(result),
+          action: {
+            actionType: "browser_action",
+            parameters: { action: args.action, url: args.url },
+            status: result.success ? "success" : "failed",
+          },
+        };
+      }
+
       case "web_search": {
         return quickSearch(args.query);
       }

@@ -4003,3 +4003,58 @@ export const insertTokenUsageLogSchema = createInsertSchema(tokenUsageLog).omit(
 
 export type TokenUsageLog = typeof tokenUsageLog.$inferSelect;
 export type InsertTokenUsageLog = z.infer<typeof insertTokenUsageLogSchema>;
+
+// ============================================================================
+// AUTOMATIONS (User-defined cron + webhook triggers)
+// ============================================================================
+
+export const automations = pgTable(
+  "automations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    description: text("description"),
+    type: text("type").$type<"cron" | "webhook">().notNull(),
+    /** Cron expression (5-field) for scheduled automations */
+    cronExpression: text("cron_expression"),
+    /** Unique webhook path slug for webhook automations */
+    webhookSlug: text("webhook_slug"),
+    /** Agent slug to execute when triggered */
+    agentSlug: text("agent_slug").notNull(),
+    /** Message/prompt to send to the agent */
+    prompt: text("prompt").notNull(),
+    /** Whether this automation is currently active */
+    isActive: boolean("is_active").default(true).notNull(),
+    /** Last time this automation ran */
+    lastRunAt: timestamp("last_run_at"),
+    /** Number of times this automation has run */
+    runCount: integer("run_count").default(0).notNull(),
+    /** Last error message if the run failed */
+    lastError: text("last_error"),
+    /** Additional config (e.g., webhook auth, input template) */
+    config: jsonb("config").$type<{
+      webhookAuth?: "none" | "bearer" | "secret";
+      webhookSecret?: string;
+      inputTemplate?: string;
+      [key: string]: any;
+    }>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_automations_type").on(table.type),
+    index("idx_automations_webhook_slug").on(table.webhookSlug),
+  ]
+);
+
+export const insertAutomationSchema = createInsertSchema(automations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastRunAt: true,
+  runCount: true,
+  lastError: true,
+});
+
+export type Automation = typeof automations.$inferSelect;
+export type InsertAutomation = z.infer<typeof insertAutomationSchema>;

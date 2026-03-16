@@ -728,6 +728,34 @@ export function buildCoreTools(agent: Agent, permissions: string[]): OpenAI.Chat
     });
   }
 
+  // Browser automation
+  if (availableTools.includes("browser_action")) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "browser_action",
+        description: "Automate web browser actions: navigate pages, extract text, click elements, fill forms. Use for competitive research, lead verification, price monitoring.",
+        parameters: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              enum: ["navigate", "screenshot", "extract_text", "click", "fill", "evaluate"],
+              description: "The browser action to perform",
+            },
+            url: { type: "string", description: "URL to navigate to (for 'navigate' action)" },
+            selector: { type: "string", description: "CSS selector for element interaction (for click, fill, extract_text)" },
+            value: { type: "string", description: "Value to fill (for 'fill' action)" },
+            script: { type: "string", description: "JavaScript to evaluate (for 'evaluate' action, max 2000 chars)" },
+            sessionId: { type: "string", description: "Reuse an existing browser session by ID" },
+            waitForSelector: { type: "string", description: "CSS selector to wait for after navigation" },
+          },
+          required: ["action"],
+        },
+      },
+    });
+  }
+
   // Syntheliq status — cross-system bridge
   if (availableTools.includes("syntheliq_status")) {
     tools.push({

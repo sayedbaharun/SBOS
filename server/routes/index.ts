@@ -52,6 +52,7 @@ import researchRoutes from "./research";
 import reviewRoutes from "./review";
 import intelligenceRoutes from "./intelligence";
 import syntheliqRoutes from "./syntheliq";
+import automationsRoutes from "./automations";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
@@ -321,6 +322,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // - /api/project-scaffolding/* -> /project-scaffolding/*
   // ============================================================================
   app.use('/api', aiChatRoutes);
+
+  // ============================================================================
+  // AUTOMATIONS (User-defined cron + webhook triggers)
+  // ============================================================================
+  app.use('/api/automations', automationsRoutes);
 
   // ============================================================================
   // HIERARCHICAL AGENT SYSTEM

@@ -471,6 +471,15 @@ app.use((req, res, next) => {
       const { initializeScheduler } = await import('./agents/agent-scheduler');
       await initializeScheduler();
 
+      // Initialize user-defined automations (cron + webhook triggers)
+      try {
+        const { initializeAutomations } = await import('./routes/automations');
+        await initializeAutomations();
+        log('✓ User automations initialized');
+      } catch (automationError) {
+        log('Automations setup skipped:', String(automationError));
+      }
+
       log('✓ SB-OS automations initialized (day creation, reminders, RAG embeddings, agent scheduler)');
     } catch (error) {
       log('SB-OS automations setup skipped:', String(error));
