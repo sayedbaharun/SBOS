@@ -1,14 +1,15 @@
-# Hikma Digital — Comprehensive Overview
+# SyntheLIQ AI — Comprehensive Overview
 
-> **Last updated**: 2026-03-06
+> **Last updated**: 2026-03-16
 > **Venture ID in SB-OS**: `de2a8490`
-> **Website**: [hikmadigital.com](https://hikmadigital.com)
+> **Website**: [hikmadigital.com](https://hikmadigital.com) (domain TBD for rebrand)
+> **Formerly**: Hikma Digital
 
 ---
 
 ## Business Model
 
-Hikma Digital is a **B2B AI automation agency** under Revolv Group, starting with the Middle East market and expanding internationally.
+SyntheLIQ AI is a **B2B AI automation agency** under Revolv Group, starting with the Middle East market and expanding internationally.
 
 ### Value Proposition
 We deploy AI agent teams for SMEs — not chatbots, but autonomous agents that handle real business operations: lead qualification, content creation, outreach, finance, support, and more. Clients get a full AI workforce without hiring, training, or managing it.
@@ -47,6 +48,8 @@ We deploy AI agent teams for SMEs — not chatbots, but autonomous agents that h
    - 14 AI agents, event-driven orchestration, lead pipeline, content queue, Telegram bot
    - Deployed on Railway (project `b196d416`) — **separate Railway project**, not a service under hikmadigital
    - GitHub: `sayedbaharun/hikma-engine` (renamed from `hikmaclaw` on 2026-03-01)
+
+> Note: Repo names remain `hikmadigital` and `hikma-engine` — only the brand name has changed to SyntheLIQ AI.
 
 ### Database
 - **Neon Serverless PostgreSQL**
@@ -118,7 +121,7 @@ All orchestrator responses use envelope format: `{ data, _meta, _guidance }`. Er
 
 ---
 
-## Current State (as of 2026-03-06)
+## Current State (as of 2026-03-16)
 
 ### What's Live
 - Full website with 25+ pages (homepage, agents, quiz, results, blog, industry pages, case studies, legal)
@@ -149,7 +152,7 @@ All orchestrator responses use envelope format: `{ data, _meta, _guidance }`. Er
 
 | Resource | URL |
 |----------|-----|
-| Website | https://hikmadigital.com |
+| Website | https://hikmadigital.com (domain TBD for rebrand) |
 | Quiz Funnel | https://hikmadigital.com/quiz |
 | Admin Dashboard | https://hikmadigital.com/admin |
 | API Demo | https://hikmadigital.com/demo |
@@ -169,14 +172,14 @@ All orchestrator responses use envelope format: `{ data, _meta, _guidance }`. Er
 - **P0 blockers**: Switch Stripe to live keys, E2E payment flow test, Top up OpenRouter credits
 - **Distribution breakdown**: SEO audit, LinkedIn presence, Google Ads, Cold outreach (replaced single vague task)
 - **Phase 4 tasks**: WhatsApp Business API, Sentry error tracking, Conversion funnel analytics, Client success playbook
-- **Agents with Hikma context**: CMO (distribution_check), Growth Specialist (growth_opportunities), SEO Specialist (seo_audit), Social Media Manager (content_queue), Content Strategist (content_calendar), Research Analyst (upstream_feature_scan), Venture Architect (venture_health)
+- **Agents with SyntheLIQ context**: CMO (distribution_check), Growth Specialist (growth_opportunities), SEO Specialist (seo_audit), Social Media Manager (content_queue), Content Strategist (content_calendar), Research Analyst (upstream_feature_scan), Venture Architect (venture_health)
 
 ---
 
 ## Strategic Notes for Agents
 
-- **Distribution is the #1 gap** — the product is built but needs marketing. Any agent working on growth, content, or marketing should prioritize distribution channels for Hikma Digital.
+- **Distribution is the #1 gap** — the product is built but needs marketing. Any agent working on growth, content, or marketing should prioritize distribution channels for SyntheLIQ AI.
 - **Middle East focus** — content and outreach should be relevant to UAE/GCC business culture and pain points. English is primary language.
 - **Agent count is flexible** — currently 14 agents but designed to grow as new business needs emerge. New agents are created by the Director or manually.
-- **OpenClaw/NanoClaw upstream** — Research Analyst monitors these repos for features that could enhance Hikma's agent capabilities.
+- **OpenClaw/NanoClaw upstream** — Research Analyst monitors these repos for features that could enhance SyntheLIQ's agent capabilities.
 - **Competitive positioning** — we're not selling "AI chatbots." We sell autonomous AI teams that replace operational headcount. The messaging should always emphasize autonomy, reliability, and business outcomes over technology.
