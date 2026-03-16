@@ -383,6 +383,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ============================================================================
+  // LLM PROVIDER HEALTH (Gateway Health Monitor)
+  // ============================================================================
+  app.get('/api/providers/health', requireAuth, async (_req: any, res: any) => {
+    try {
+      const { getProviderHealth, getActiveProvider, getModelCascadeInfo } = await import('../model-manager');
+      res.json({
+        providers: getProviderHealth(),
+        activeProvider: getActiveProvider(),
+        cascade: getModelCascadeInfo(),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to get provider health' });
+    }
+  });
+
+  app.post('/api/providers/probe', requireAuth, async (_req: any, res: any) => {
+    try {
+      const { probeProviderHealth } = await import('../model-manager');
+      const results = await probeProviderHealth();
+      res.json({ results, timestamp: new Date().toISOString() });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to probe providers' });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

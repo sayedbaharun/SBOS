@@ -202,6 +202,7 @@ class TelegramAdapter implements ChannelAdapter {
         `• /morning — mark all morning habits done\n` +
         `• /shop <item> [#category] — add to shopping list\n` +
         `• /clip <url> — clip article to Knowledge Hub\n` +
+        `• /btw <question> — side question (no history)\n` +
         `• /idea <description> — validate a business idea\n` +
         `• /review — review pending deliverables\n` +
         `• /delegate @<slug> <task> — delegate to agent\n\n` +
@@ -886,6 +887,35 @@ class TelegramAdapter implements ChannelAdapter {
         await ctx.reply(`Task delegated to @${slug}\nID: ${result.taskId}`);
       } catch (error: any) {
         await ctx.reply("Error delegating: " + error.message);
+        this.recordError(error.message);
+      }
+    });
+
+    // ---- /btw Command (Side Question — no history) ----
+    this.bot.command("btw", async (ctx) => {
+      try {
+        const question = ctx.message.text.replace(/^\/btw\s*/, "").trim();
+        if (!question) {
+          await ctx.reply("Usage: /btw <question>\nAsk a one-off question that won't enter conversation history.");
+          return;
+        }
+
+        const chatId = ctx.chat.id.toString();
+
+        // Route to Chief of Staff but DON'T save to conversation context or history.
+        // This prevents context pollution from tangential questions.
+        const { executeAgentChat } = await import("../../agents/agent-chat");
+        const result = await executeAgentChat(
+          "chief-of-staff",
+          `[Side question — do not reference this in future conversation]\n${question}`,
+          ctx.from.id.toString()
+        );
+
+        // Send response but do NOT add to conversation context or save to history
+        await this.sendLongMessage(chatId, `(btw) ${result.response}`);
+        this.stats.messagesSent++;
+      } catch (error: any) {
+        await ctx.reply("Failed to process side question.");
         this.recordError(error.message);
       }
     });

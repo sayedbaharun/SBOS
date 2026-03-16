@@ -350,6 +350,23 @@ app.use((req, res, next) => {
     log('✓ Telegram webhook route registered at /api/telegram/webhook (before SPA catch-all)');
   }
 
+  // WhatsApp webhook routes (Cloud API requires GET for verification, POST for events)
+  if (process.env.WHATSAPP_ACCESS_TOKEN) {
+    app.get('/api/webhooks/whatsapp', (req, res) => {
+      import('./channels/adapters/whatsapp-adapter').then(({ whatsappWebhookVerify }) => {
+        whatsappWebhookVerify(req, res);
+      }).catch(() => res.sendStatus(500));
+    });
+
+    app.post('/api/webhooks/whatsapp', (req, res) => {
+      import('./channels/adapters/whatsapp-adapter').then(({ whatsappWebhookHandler }) => {
+        whatsappWebhookHandler(req, res);
+      }).catch(() => res.sendStatus(200)); // Always 200 to WhatsApp
+    });
+
+    log('✓ WhatsApp webhook routes registered at /api/webhooks/whatsapp');
+  }
+
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
@@ -459,16 +476,36 @@ app.use((req, res, next) => {
       log('SB-OS automations setup skipped:', String(error));
     }
 
-    // Initialize channel adapters (Telegram, etc.) — runs independently of DISABLE_CRONS
+    // Initialize channel adapters (Telegram, WhatsApp, etc.) — runs independently of DISABLE_CRONS
     try {
       const { registerAdapter, startAllAdapters } = await import('./channels/channel-manager');
       const { telegramAdapter } = await import('./channels/adapters/telegram-adapter');
       registerAdapter(telegramAdapter);
-      await startAllAdapters();
 
+      // Register WhatsApp adapter if configured
+      try {
+        const { whatsappAdapter } = await import('./channels/adapters/whatsapp-adapter');
+        registerAdapter(whatsappAdapter);
+      } catch (waErr) {
+        log('WhatsApp adapter skipped:', String(waErr));
+      }
+
+      await startAllAdapters();
       log('✓ Channel adapters initialized');
     } catch (channelError) {
       log('Channel adapters setup skipped:', String(channelError));
+    }
+
+    // Start LLM provider health probing (every 60s)
+    try {
+      const { probeProviderHealth } = await import('./model-manager');
+      // Initial probe
+      probeProviderHealth().catch(() => {});
+      // Periodic probe every 60s
+      setInterval(() => probeProviderHealth().catch(() => {}), 60_000);
+      log('✓ LLM provider health monitor started');
+    } catch (healthError) {
+      log('Provider health monitor skipped:', String(healthError));
     }
 
     // Start outbound message queue processor (Project Ironclad) — runs independently of DISABLE_CRONS

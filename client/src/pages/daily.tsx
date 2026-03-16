@@ -41,6 +41,7 @@ import {
   Apple,
   Flame,
   Beef,
+  Home,
   type LucideIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -291,6 +292,46 @@ export default function DailyPage() {
       return await res.json();
     },
   });
+
+  // ---- LIFE ADMIN ----
+  const lifeAdminVenture = useMemo(
+    () => ventures.find((v) => v.name.toLowerCase().includes("life admin")),
+    [ventures]
+  );
+
+  const { data: lifeAdminTasks = [] } = useQuery<Task[]>({
+    queryKey: ["/api/tasks", { venture_id: lifeAdminVenture?.id, status: "todo,in_progress" }],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/tasks?venture_id=${lifeAdminVenture!.id}&status=todo,in_progress&limit=50`,
+        { credentials: "include" }
+      );
+      if (!res.ok) return [];
+      return await res.json();
+    },
+    enabled: !!lifeAdminVenture,
+  });
+
+  const completeLifeAdminTask = useMutation({
+    mutationFn: async (taskId: string) => {
+      await apiRequest("PATCH", `/api/tasks/${taskId}`, {
+        status: "completed",
+        completedAt: new Date().toISOString(),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+    },
+  });
+
+  const sortedLifeAdminTasks = useMemo(() => {
+    const priorityOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
+    return [...lifeAdminTasks].sort((a, b) => {
+      const pa = priorityOrder[a.priority ?? "P3"] ?? 3;
+      const pb = priorityOrder[b.priority ?? "P3"] ?? 3;
+      return pa - pb;
+    });
+  }, [lifeAdminTasks]);
 
   // Active tasks for Top 3 picker — filtered by selected venture
   const { data: activeTasks = [] } = useQuery<Task[]>({
@@ -1176,6 +1217,57 @@ export default function DailyPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* ---- LIFE ADMIN ---- */}
+          {lifeAdminVenture && (
+            <Card className="border-emerald-500/20">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-base font-bold">
+                    <Home className="h-4 w-4 text-emerald-500" />
+                    Life Admin
+                  </CardTitle>
+                  <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[10px]">
+                    {sortedLifeAdminTasks.length} open
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {sortedLifeAdminTasks.length === 0 ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    All clear
+                  </div>
+                ) : (
+                  <div className="space-y-1 max-h-[320px] overflow-y-auto">
+                    {sortedLifeAdminTasks.map((task) => (
+                      <div key={task.id} className="flex items-center gap-2 py-1 group">
+                        <Checkbox
+                          checked={false}
+                          onCheckedChange={() => completeLifeAdminTask.mutate(task.id)}
+                          className="h-4 w-4"
+                        />
+                        {task.priority && (
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] px-1 py-0 ${
+                              task.priority === "P0" ? "text-red-400 border-red-500/20" :
+                              task.priority === "P1" ? "text-orange-400 border-orange-500/20" :
+                              task.priority === "P2" ? "text-blue-400 border-blue-500/20" :
+                              "text-muted-foreground border-muted"
+                            }`}
+                          >
+                            {task.priority}
+                          </Badge>
+                        )}
+                        <span className="text-sm truncate">{task.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* ---- EVENING REVIEW ---- */}
           <Card className="border-indigo-500/20">

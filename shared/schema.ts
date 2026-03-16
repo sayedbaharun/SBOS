@@ -3242,6 +3242,7 @@ export const agentConversations = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     agentId: uuid("agent_id").references(() => agents.id, { onDelete: "cascade" }).notNull(),
+    sessionId: text("session_id"), // Scopes conversations by caller (e.g. "telegram:123456", "web:user-uuid")
     role: text("role").$type<'user' | 'assistant' | 'system' | 'delegation'>().notNull(),
     content: text("content").notNull(),
     metadata: jsonb("metadata").$type<{
@@ -3259,6 +3260,7 @@ export const agentConversations = pgTable(
   },
   (table) => [
     index("idx_agent_conversations_agent_id").on(table.agentId),
+    index("idx_agent_conversations_session").on(table.agentId, table.sessionId),
     index("idx_agent_conversations_delegation_from").on(table.delegationFrom),
     index("idx_agent_conversations_created_at").on(table.createdAt),
   ]

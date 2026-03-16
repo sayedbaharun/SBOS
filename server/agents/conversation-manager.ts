@@ -35,6 +35,9 @@ async function getDb() {
 /**
  * Get recent conversation history for an agent, respecting token budget.
  * Returns messages in chronological order (oldest first).
+ *
+ * When sessionId is provided, only returns messages from that session,
+ * preventing context leakage between concurrent conversations.
  */
 export async function getConversationHistory(
   agentId: string,
@@ -42,16 +45,21 @@ export async function getConversationHistory(
     limit?: number;
     maxTokens?: number;
     includeDelegation?: boolean;
+    sessionId?: string;
   } = {}
 ): Promise<AgentConversation[]> {
-  const { limit = 20, maxTokens = 8000, includeDelegation = true } = options;
+  const { limit = 20, maxTokens = 8000, includeDelegation = true, sessionId } = options;
   const database = await getDb();
 
-  // Fetch recent messages
+  // Fetch recent messages — scoped by session if provided
+  const whereClause = sessionId
+    ? and(eq(agentConversations.agentId, agentId), eq(agentConversations.sessionId, sessionId))
+    : eq(agentConversations.agentId, agentId);
+
   const messages = await database
     .select()
     .from(agentConversations)
-    .where(eq(agentConversations.agentId, agentId))
+    .where(whereClause)
     .orderBy(desc(agentConversations.createdAt))
     .limit(limit);
 
@@ -104,6 +112,7 @@ export async function saveMessage(params: {
   agentId: string;
   role: "user" | "assistant" | "system" | "delegation";
   content: string;
+  sessionId?: string;
   metadata?: Record<string, unknown>;
   parentMessageId?: string;
   delegationFrom?: string;
@@ -115,6 +124,7 @@ export async function saveMessage(params: {
     .insert(agentConversations)
     .values({
       agentId: params.agentId,
+      sessionId: params.sessionId,
       role: params.role,
       content: params.content,
       metadata: params.metadata,

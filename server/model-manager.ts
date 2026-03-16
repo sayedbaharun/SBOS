@@ -59,6 +59,9 @@ let openRouterExhaustedAt: number | null = null;
 
 function markOpenRouterExhausted(): void {
   openRouterExhaustedAt = Date.now();
+  providerHealth.openrouter.status = "exhausted";
+  providerHealth.openrouter.lastFailure = Date.now();
+  providerHealth.openrouter.consecutiveFailures++;
   logger.info(`OpenRouter marked as credit-exhausted for ${OPENROUTER_COOLDOWN_MS / 1000}s`);
 }
 
@@ -66,9 +69,170 @@ function isOpenRouterCoolingDown(): boolean {
   if (!openRouterExhaustedAt) return false;
   if (Date.now() - openRouterExhaustedAt > OPENROUTER_COOLDOWN_MS) {
     openRouterExhaustedAt = null; // Reset — try OpenRouter again
+    providerHealth.openrouter.status = "healthy";
     return false;
   }
   return true;
+}
+
+// ============================================================================
+// PROVIDER HEALTH MONITORING
+// ============================================================================
+
+export interface ProviderHealthStatus {
+  status: "healthy" | "degraded" | "down" | "exhausted";
+  lastSuccess: number | null;
+  lastFailure: number | null;
+  consecutiveFailures: number;
+  avgLatencyMs: number;
+  totalRequests: number;
+  totalFailures: number;
+  lastModel: string | null;
+}
+
+const createHealthEntry = (): ProviderHealthStatus => ({
+  status: "healthy",
+  lastSuccess: null,
+  lastFailure: null,
+  consecutiveFailures: 0,
+  avgLatencyMs: 0,
+  totalRequests: 0,
+  totalFailures: 0,
+  lastModel: null,
+});
+
+const providerHealth: Record<string, ProviderHealthStatus> = {
+  openrouter: createHealthEntry(),
+  kilo: createHealthEntry(),
+  local: createHealthEntry(),
+};
+
+// Rolling average for latency (exponential moving average)
+function updateLatency(provider: string, latencyMs: number): void {
+  const h = providerHealth[provider];
+  if (!h) return;
+  const alpha = 0.3; // Weight for new sample
+  h.avgLatencyMs = h.avgLatencyMs === 0
+    ? latencyMs
+    : Math.round(h.avgLatencyMs * (1 - alpha) + latencyMs * alpha);
+}
+
+function recordSuccess(provider: string, latencyMs: number, model: string): void {
+  const h = providerHealth[provider];
+  if (!h) return;
+  h.lastSuccess = Date.now();
+  h.consecutiveFailures = 0;
+  h.status = "healthy";
+  h.totalRequests++;
+  h.lastModel = model;
+  updateLatency(provider, latencyMs);
+}
+
+function recordFailure(provider: string, model: string): void {
+  const h = providerHealth[provider];
+  if (!h) return;
+  h.lastFailure = Date.now();
+  h.consecutiveFailures++;
+  h.totalRequests++;
+  h.totalFailures++;
+  h.lastModel = model;
+  // Mark degraded after 2 failures, down after 5
+  if (h.consecutiveFailures >= 5) h.status = "down";
+  else if (h.consecutiveFailures >= 2) h.status = "degraded";
+}
+
+/**
+ * Get health status for all LLM providers.
+ * Used by the gateway health monitor and the /api/health/providers endpoint.
+ */
+export function getProviderHealth(): Record<string, ProviderHealthStatus & { configured: boolean }> {
+  return {
+    openrouter: {
+      ...providerHealth.openrouter,
+      configured: !!process.env.OPENROUTER_API_KEY,
+    },
+    kilo: {
+      ...providerHealth.kilo,
+      configured: !!process.env.KILOCODE_API_KEY,
+    },
+    local: {
+      ...providerHealth.local,
+      configured: !!process.env.LOCAL_MODEL_URL,
+    },
+  };
+}
+
+/**
+ * Get the active provider for the current request.
+ * Returns which provider will be used based on current health state.
+ */
+export function getActiveProvider(): string {
+  if (isOpenRouterCoolingDown()) {
+    return getKiloClient() ? "kilo" : "openrouter";
+  }
+  return "openrouter";
+}
+
+/**
+ * Run a lightweight health probe against each configured provider.
+ * Call periodically (e.g. every 60s) to detect outages proactively.
+ */
+export async function probeProviderHealth(): Promise<Record<string, "ok" | "error">> {
+  const results: Record<string, "ok" | "error"> = {};
+
+  // OpenRouter probe
+  if (process.env.OPENROUTER_API_KEY) {
+    try {
+      const start = Date.now();
+      const resp = await fetch("https://openrouter.ai/api/v1/models", {
+        headers: { "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (resp.ok) {
+        recordSuccess("openrouter", Date.now() - start, "probe");
+        results.openrouter = "ok";
+      } else {
+        recordFailure("openrouter", "probe");
+        results.openrouter = "error";
+      }
+    } catch {
+      recordFailure("openrouter", "probe");
+      results.openrouter = "error";
+    }
+  }
+
+  // Kilo probe
+  if (process.env.KILOCODE_API_KEY) {
+    try {
+      const start = Date.now();
+      const resp = await fetch("https://api.kilo.ai/api/gateway/models", {
+        headers: { "Authorization": `Bearer ${process.env.KILOCODE_API_KEY}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (resp.ok) {
+        recordSuccess("kilo", Date.now() - start, "probe");
+        results.kilo = "ok";
+      } else {
+        recordFailure("kilo", "probe");
+        results.kilo = "error";
+      }
+    } catch {
+      recordFailure("kilo", "probe");
+      results.kilo = "error";
+    }
+  }
+
+  // Local probe
+  const localAvailable = await isLocalAvailable();
+  if (localAvailable) {
+    recordSuccess("local", 0, "probe");
+    results.local = "ok";
+  } else if (process.env.LOCAL_MODEL_URL) {
+    recordFailure("local", "probe");
+    results.local = "error";
+  }
+
+  return results;
 }
 
 // ============================================================================
@@ -356,6 +520,7 @@ export async function chatCompletion(
 
       const latencyMs = Date.now() - startTime;
       logger.info({ model: selectedModel, latencyMs, provider: "kilo" }, `✅ Kilo direct call successful`);
+      recordSuccess("kilo", latencyMs, selectedModel);
       logTokenUsage(`kilo/${selectedModel}`, response.usage, "web_chat");
 
       return {
@@ -370,6 +535,7 @@ export async function chatCompletion(
         },
       };
     } catch (kiloError: any) {
+      recordFailure("kilo", selectedModel);
       logger.warn({ error: kiloError.message }, `Kilo direct call failed — trying OpenRouter cascade`);
       // Clear cooldown so we fall through to normal cascade
       openRouterExhaustedAt = null;
@@ -435,6 +601,9 @@ export async function chatCompletion(
           finishReason: response.choices[0]?.finish_reason,
         }, `✅ Chat completion successful with ${model}`);
 
+        // Track provider health
+        recordSuccess("openrouter", latencyMs, model);
+
         // Log token usage (fire-and-forget)
         logTokenUsage(model, response.usage, "web_chat");
 
@@ -452,6 +621,9 @@ export async function chatCompletion(
       } catch (error: any) {
         lastError = error;
         const latencyMs = Date.now() - startTime;
+
+        // Track provider health
+        recordFailure("openrouter", model);
 
         logger.warn({
           model,
@@ -503,6 +675,7 @@ export async function chatCompletion(
 
       const latencyMs = Date.now() - startTime;
       logger.info({ model: kiloModel, latencyMs, provider: "kilo" }, `✅ Kilo fallback successful`);
+      recordSuccess("kilo", latencyMs, kiloModel);
       logTokenUsage(`kilo/${kiloModel}`, response.usage, "web_chat");
 
       return {
@@ -517,6 +690,7 @@ export async function chatCompletion(
         },
       };
     } catch (kiloError: any) {
+      recordFailure("kilo", kiloModel);
       logger.error({ error: kiloError.message, model: kiloModel }, `❌ Kilo fallback also failed`);
     }
   }
