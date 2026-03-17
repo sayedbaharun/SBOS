@@ -1218,31 +1218,11 @@ export class DBStorage implements IStorage {
   }
 
   async createTask(insertTask: InsertTask): Promise<Task> {
-    // Quality gate: ensure every task has a ventureId
+    // Log when ventureId is missing — but do NOT override it silently.
+    // The old "quality gate" was silently routing tasks to Operations,
+    // even when users selected a different venture in the UI.
     if (!insertTask.ventureId) {
-      try {
-        // Look for "Operations" catch-all venture
-        const allVentures = await this.db.select().from(ventures).limit(100);
-        let opsVenture = allVentures.find((v: any) =>
-          v.name === "Operations" || v.name === "Personal"
-        );
-        if (!opsVenture) {
-          // Create the catch-all venture
-          const [created] = await this.db.insert(ventures).values({
-            name: "Operations",
-            status: "ongoing",
-            domain: "personal",
-            oneLiner: "Catch-all for tasks without a venture",
-          } as any).returning();
-          opsVenture = created;
-          console.warn(`[storage] Created 'Operations' catch-all venture: ${opsVenture.id}`);
-        }
-        insertTask = { ...insertTask, ventureId: opsVenture.id };
-        console.warn(`[storage] Task "${insertTask.title}" created without venture, assigned to Operations (${opsVenture.id})`);
-      } catch (err: any) {
-        // Don't block task creation if venture lookup fails
-        console.warn(`[storage] Failed to assign default venture to task: ${err.message}`);
-      }
+      console.warn(`[storage] Task "${insertTask.title}" created without ventureId`);
     }
 
     const [task] = await this.db

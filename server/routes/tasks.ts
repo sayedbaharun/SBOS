@@ -168,6 +168,7 @@ router.get("/:id", async (req: Request, res: Response) => {
 router.post("/", async (req: Request, res: Response) => {
   try {
     const sanitizedBody = sanitizeBody(req.body);
+    logger.info({ rawVentureId: req.body.ventureId, sanitizedVentureId: sanitizedBody.ventureId }, "Task creation: ventureId trace");
     const validatedData = insertTaskSchema.parse(sanitizedBody);
     const task = await storage.createTask(validatedData);
     // Normalize tags to ensure they're always arrays
