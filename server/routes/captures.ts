@@ -102,13 +102,18 @@ router.post("/:id/convert", async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Capture not found" });
     }
 
-    // Create task from capture
+    // Create task from capture — merge with user's convert form selections
+    const body = req.body || {};
     const task = await storage.createTask({
       title: capture.title,
       notes: capture.notes,
-      ventureId: capture.ventureId,
-      projectId: capture.projectId,
       status: 'todo',
+      ventureId: body.ventureId || capture.ventureId,
+      projectId: body.projectId || capture.projectId,
+      priority: body.priority,
+      type: body.type,
+      domain: body.domain || capture.domain,
+      dueDate: body.dueDate || undefined,
     });
 
     // Mark capture as clarified and link to task
