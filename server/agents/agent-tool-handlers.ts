@@ -219,6 +219,7 @@ export async function executeTool(
         if (args.priority) updates.priority = args.priority;
         if (args.title) updates.title = args.title;
         if (args.notes) updates.notes = args.notes;
+        if (args.tags) updates.tags = args.tags;
         if (args.status === "completed") updates.completedAt = new Date();
 
         const updated = await storage.updateTask(args.task_id, updates as any);

@@ -104,6 +104,7 @@ export function buildCoreTools(agent: Agent, permissions: string[]): OpenAI.Chat
             priority: { type: "string", enum: ["P0", "P1", "P2", "P3"], description: "New priority" },
             notes: { type: "string", description: "Append to or replace task notes" },
             title: { type: "string", description: "Update task title" },
+            tags: { type: "array", items: { type: "string" }, description: "Set tags on the task (replaces existing tags)" },
           },
           required: ["task_id"],
         },
