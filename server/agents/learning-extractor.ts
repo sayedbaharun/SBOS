@@ -500,37 +500,68 @@ async function upsertToVectorStores(params: {
     logger.debug({ error: err.message }, "Qdrant upsert skipped");
   }
 
-  // 2. Pinecone: upsert compacted extractions (decisions + high-importance learnings)
-  try {
-    const { isPineconeConfigured, upsertToPinecone } = await import("../memory/pinecone-store");
-    if (!isPineconeConfigured()) return;
+  // 2. Qdrant: upsert compacted extractions to compacted_memories collection
+  const highValue = extractions.filter(e =>
+    e.importance >= 0.6 || e.type === "decision" || e.scope === "shared"
+  );
 
-    const highValue = extractions.filter(e =>
-      e.importance >= 0.6 || e.type === "decision" || e.scope === "shared"
-    );
+  if (highValue.length > 0) {
+    try {
+      const { upsertCompactedMemory } = await import("../memory/qdrant-store");
+      const { createHash } = await import("crypto");
 
-    if (highValue.length === 0) return;
+      for (const e of highValue) {
+        const checksum = createHash("sha256").update(e.content).digest("hex");
+        await upsertCompactedMemory({
+          summary: e.content,
+          source_session_ids: [sessionId],
+          source_count: 1,
+          timestamp: Date.now(),
+          time_range_start: Date.now(),
+          time_range_end: Date.now(),
+          domain: ventureId ? "business" : "personal",
+          key_entities: e.tags || [],
+          key_decisions: e.type === "decision" ? [e.content] : [],
+          key_facts: e.type === "learning" ? [e.content] : [],
+          importance: e.importance,
+          compaction_model: "learning-extractor",
+          version: 1,
+          sync_status: "pending",
+          checksum,
+        });
+      }
 
-    const records = highValue.map(e => ({
-      id: `${agentId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      text: e.content,
-      metadata: {
-        agentId,
-        agentSlug,
-        type: e.type,
-        scope: e.scope,
-        importance: e.importance,
-        tags: e.tags || [],
-        ventureId: ventureId || "",
-        timestamp: Date.now(),
-      },
-    }));
+      logger.debug({ agentSlug, count: highValue.length }, "Compacted extractions upserted to Qdrant");
+    } catch (err: any) {
+      logger.debug({ error: err.message }, "Qdrant compacted upsert skipped");
+    }
 
-    const namespace = extractions.some(e => e.type === "decision") ? "decisions" : "compacted";
-    await upsertToPinecone(namespace, records);
+    // 3. Pinecone: also upsert compacted extractions (backup store)
+    try {
+      const { isPineconeConfigured, upsertToPinecone } = await import("../memory/pinecone-store");
+      if (isPineconeConfigured()) {
+        const records = highValue.map(e => ({
+          id: `${agentId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          text: e.content,
+          metadata: {
+            agentId,
+            agentSlug,
+            type: e.type,
+            scope: e.scope,
+            importance: e.importance,
+            tags: e.tags || [],
+            ventureId: ventureId || "",
+            timestamp: Date.now(),
+          },
+        }));
 
-    logger.debug({ agentSlug, count: records.length, namespace }, "Extractions upserted to Pinecone");
-  } catch (err: any) {
-    logger.debug({ error: err.message }, "Pinecone upsert skipped");
+        const namespace = extractions.some(e => e.type === "decision") ? "decisions" : "compacted";
+        await upsertToPinecone(namespace, records);
+
+        logger.debug({ agentSlug, count: records.length, namespace }, "Extractions upserted to Pinecone");
+      }
+    } catch (err: any) {
+      logger.debug({ error: err.message }, "Pinecone upsert skipped");
+    }
   }
 }
