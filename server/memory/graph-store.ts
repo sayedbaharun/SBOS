@@ -41,15 +41,9 @@ async function getGraph() {
 
   const { FalkorDB } = await import("falkordb");
 
-  // FalkorDB Cloud requires TLS. If the URL uses redis:// but points to a cloud host,
-  // upgrade to rediss:// so the underlying @redis/client enables TLS.
-  const isCloudHost = rawUrl.includes('.cloud') || rawUrl.includes('falkordb.com');
-  const needsTls = isCloudHost && rawUrl.startsWith('redis://');
-  const url = needsTls ? rawUrl.replace('redis://', 'rediss://') : rawUrl;
-
-  if (needsTls) {
-    logger.info("FalkorDB: upgraded to TLS (rediss://) for cloud host");
-  }
+  // Use the URL as-is. If TLS is needed, configure rediss:// in the env var directly.
+  // Free-tier FalkorDB Cloud does NOT use TLS despite being a cloud host.
+  const url = rawUrl;
 
   try {
     dbInstance = await FalkorDB.connect({ url });
