@@ -8,7 +8,7 @@
 
 import { eq, gte, sql } from "drizzle-orm";
 import { logger } from "../logger";
-import { agents, agentConversations, sessionLogs, tasks, ventures, projects, deadLetterJobs, agentCompactionEvents, type Agent } from "@shared/schema";
+import { agents, agentConversations, sessionLogs, tasks, ventures, projects, deadLetterJobs, agentCompactionEvents, agentMemory, type Agent } from "@shared/schema";
 import { dailyBriefing, weeklySummary, ventureStatus } from "./tools/report-generator";
 import { executeAgentChat } from "./agent-runtime";
 import { getAllAgentActivity } from "./conversation-manager";
@@ -623,6 +623,20 @@ registerJobHandler("session_log_extraction", async (_agentId: string, agentSlug:
 });
 
 /**
+ * Embedding Backfill — Catches memories that slipped through without embeddings.
+ * Runs every 30 minutes. Processes up to 20 per run.
+ */
+registerJobHandler("embedding_backfill", async (_agentId: string, agentSlug: string) => {
+  try {
+    const { generateEmbeddingsForRecentMemories } = await import("./learning-extractor");
+    await generateEmbeddingsForRecentMemories(_agentId);
+    logger.info({ agentSlug }, "Embedding backfill completed");
+  } catch (err: any) {
+    logger.warn({ agentSlug, error: err.message }, "Embedding backfill failed");
+  }
+});
+
+/**
  * Pipeline Health Check — Monitors the memory pipeline for failures.
  * Checks: session log ingestion, unprocessed backlog, Qdrant status, Pinecone status.
  * Runs every 4 hours. Sends a consolidated Telegram alert if any check fails.
@@ -842,6 +856,9 @@ export interface PipelineHealthResult {
     unprocessedBacklog: { status: "pass" | "fail"; detail: string; count: number };
     qdrantStatus: { status: "pass" | "fail"; detail: string; collections?: Record<string, { count: number }> };
     pineconeStatus: { status: "pass" | "fail"; detail: string };
+    embeddingCoverage: { status: "pass" | "fail"; detail: string; total: number; withEmbeddings: number; ratio: number };
+    memoryStaleness: { status: "pass" | "fail" | "skip"; detail: string; lastMemoryAge?: number };
+    compactionHealth: { status: "pass" | "fail"; detail: string };
   };
   alerts: string[];
 }
@@ -933,12 +950,84 @@ export async function runPipelineHealthCheck(): Promise<PipelineHealthResult> {
       logger.warn({ error: pinecone.error }, "Pipeline health: Pinecone unavailable");
     } else {
       const totalRecords = pinecone.stats?.totalRecordCount || 0;
-      pineconeCheck = { status: "pass", detail: `Pinecone available, ${totalRecords} total records` };
+      if (totalRecords === 0) {
+        pineconeCheck = { status: "fail", detail: `Pinecone connected but empty (0 records)` };
+        alerts.push(`Pinecone empty: connected but 0 records — upsert pipeline not working`);
+      } else {
+        pineconeCheck = { status: "pass", detail: `Pinecone available, ${totalRecords} total records` };
+      }
     }
   } catch (err: any) {
     pineconeCheck = { status: "fail", detail: `Pinecone check failed: ${err.message}` };
     alerts.push(`Pinecone check error: ${err.message}`);
     logger.warn({ error: err.message }, "Pipeline health: Pinecone check threw");
+  }
+
+  // --- Check 5: Embedding coverage (memories with embeddings vs total) ---
+  let embeddingCoverageCheck: PipelineHealthResult["checks"]["embeddingCoverage"];
+  try {
+    const [{ total, withEmb }] = await database
+      .select({
+        total: sql`COUNT(*)::int`,
+        withEmb: sql`COUNT(CASE WHEN embedding IS NOT NULL AND embedding != '' THEN 1 END)::int`,
+      })
+      .from(agentMemory);
+
+    const ratio = total > 0 ? withEmb / total : 0;
+    if (total > 10 && ratio < 0.5) {
+      embeddingCoverageCheck = { status: "fail", detail: `Only ${withEmb}/${total} memories have embeddings (${(ratio * 100).toFixed(0)}%)`, total, withEmbeddings: withEmb, ratio };
+      alerts.push(`Embedding coverage critical: ${withEmb}/${total} (${(ratio * 100).toFixed(0)}%) — vector search is degraded`);
+      logger.warn({ total, withEmb, ratio }, "Pipeline health: Low embedding coverage");
+    } else {
+      embeddingCoverageCheck = { status: "pass", detail: `${withEmb}/${total} memories embedded (${(ratio * 100).toFixed(0)}%)`, total, withEmbeddings: withEmb, ratio };
+    }
+  } catch (err: any) {
+    embeddingCoverageCheck = { status: "fail", detail: `Query failed: ${err.message}`, total: 0, withEmbeddings: 0, ratio: 0 };
+    alerts.push(`Embedding coverage check failed: ${err.message}`);
+  }
+
+  // --- Check 6: Memory staleness (no new memories in 48+ hours) ---
+  let stalenessCheck: PipelineHealthResult["checks"]["memoryStaleness"];
+  try {
+    const [latest] = await database
+      .select({ maxDate: sql`MAX(created_at)` })
+      .from(agentMemory);
+
+    if (latest?.maxDate) {
+      const lastDate = new Date(latest.maxDate as string);
+      const hoursAgo = (Date.now() - lastDate.getTime()) / (1000 * 60 * 60);
+
+      if (hoursAgo > 48) {
+        stalenessCheck = { status: "fail", detail: `Last memory created ${hoursAgo.toFixed(0)}h ago — pipeline may be stalled`, lastMemoryAge: hoursAgo };
+        alerts.push(`Memory pipeline stale: last memory was ${hoursAgo.toFixed(0)} hours ago (>48h threshold)`);
+        logger.warn({ hoursAgo }, "Pipeline health: Memory pipeline stale");
+      } else {
+        stalenessCheck = { status: "pass", detail: `Last memory ${hoursAgo.toFixed(1)}h ago`, lastMemoryAge: hoursAgo };
+      }
+    } else {
+      stalenessCheck = { status: "fail", detail: "No memories found at all" };
+      alerts.push("Memory pipeline: No memories exist in database");
+    }
+  } catch (err: any) {
+    stalenessCheck = { status: "fail", detail: `Query failed: ${err.message}` };
+    alerts.push(`Memory staleness check failed: ${err.message}`);
+  }
+
+  // --- Check 7: Compaction health (compacted_memories should not be empty if raw_memories exists) ---
+  let compactionCheck: PipelineHealthResult["checks"]["compactionHealth"];
+  try {
+    const rawCount = qdrantCheck?.collections?.["raw_memories"]?.count || 0;
+    const compactedCount = qdrantCheck?.collections?.["compacted_memories"]?.count || 0;
+
+    if (rawCount > 50 && compactedCount === 0) {
+      compactionCheck = { status: "fail", detail: `${rawCount} raw memories but 0 compacted — compaction→Qdrant pipeline is broken` };
+      alerts.push(`Compaction pipeline broken: ${rawCount} raw vectors in Qdrant but compacted_memories is empty`);
+      logger.warn({ rawCount, compactedCount }, "Pipeline health: Compaction not reaching Qdrant");
+    } else {
+      compactionCheck = { status: "pass", detail: `raw: ${rawCount}, compacted: ${compactedCount}` };
+    }
+  } catch (err: any) {
+    compactionCheck = { status: "fail", detail: `Check failed: ${err.message}` };
   }
 
   const overall = alerts.length > 0 ? "fail" : "pass";
@@ -951,6 +1040,9 @@ export async function runPipelineHealthCheck(): Promise<PipelineHealthResult> {
       unprocessedBacklog: unprocessedCheck,
       qdrantStatus: qdrantCheck,
       pineconeStatus: pineconeCheck,
+      embeddingCoverage: embeddingCoverageCheck,
+      memoryStaleness: stalenessCheck,
+      compactionHealth: compactionCheck,
     },
     alerts,
   };

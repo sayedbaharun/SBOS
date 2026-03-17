@@ -9,7 +9,7 @@
  * and task outcome learning (learn from delegation success/failure).
  */
 
-import { eq, lt, and, desc } from "drizzle-orm";
+import { eq, lt, and, desc, isNull, or, sql } from "drizzle-orm";
 import { logger } from "../logger";
 import * as modelManager from "../model-manager";
 import { agentMemory, agents } from "@shared/schema";
@@ -231,23 +231,29 @@ export async function extractConversationLearnings(params: {
 // EMBEDDING GENERATION
 // ============================================================================
 
-async function generateEmbeddingsForRecentMemories(agentId: string): Promise<void> {
+export async function generateEmbeddingsForRecentMemories(agentId: string): Promise<void> {
   const database = await getDb();
 
-  // Find memories without embeddings (for this agent or shared)
+  // Find ALL memories without embeddings (not just for this agent)
+  // The old query used eq(embedding, null) which doesn't work — use isNull() or empty string check
   const memoriesNeedingEmbeddings = await database
     .select()
     .from(agentMemory)
     .where(
-      eq(agentMemory.embedding, null as any)
+      or(
+        isNull(agentMemory.embedding),
+        sql`${agentMemory.embedding} = ''`
+      )
     )
     .orderBy(desc(agentMemory.createdAt))
     .limit(20);
 
-  // Filter to only those that actually have null embedding
-  const toEmbed = memoriesNeedingEmbeddings.filter((m: any) => !m.embedding);
+  if (memoriesNeedingEmbeddings.length === 0) return;
 
-  for (const memory of toEmbed) {
+  logger.info({ count: memoriesNeedingEmbeddings.length }, "Generating embeddings for memories without them");
+
+  let embedded = 0;
+  for (const memory of memoriesNeedingEmbeddings) {
     try {
       const result = await generateEmbedding(memory.content);
       await database
@@ -257,9 +263,14 @@ async function generateEmbeddingsForRecentMemories(agentId: string): Promise<voi
           embeddingModel: result.model,
         })
         .where(eq(agentMemory.id, memory.id));
-    } catch {
-      // Skip individual failures
+      embedded++;
+    } catch (err: any) {
+      logger.warn({ memoryId: memory.id, error: err.message }, "Failed to embed memory, skipping");
     }
+  }
+
+  if (embedded > 0) {
+    logger.info({ embedded, attempted: memoriesNeedingEmbeddings.length }, "Embedding generation batch complete");
   }
 }
 
