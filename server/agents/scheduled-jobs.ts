@@ -1679,3 +1679,87 @@ registerJobHandler("check_credit_balance", async (_agentId: string, _agentSlug: 
     logger.error({ error: err.message }, "check_credit_balance: unexpected error");
   }
 });
+
+// ============================================================================
+// CONTENT QUEUE — Venture-scoped social media draft production
+// ============================================================================
+
+registerJobHandler("content_queue", async (agentId: string, agentSlug: string) => {
+  const database = await getDb();
+
+  // Load agent to get ventureId
+  const [agent] = await database
+    .select()
+    .from(agents)
+    .where(eq(agents.id, agentId));
+
+  if (!agent) {
+    logger.warn({ agentId, agentSlug }, "content_queue: agent not found");
+    return;
+  }
+
+  if (!agent.ventureId) {
+    logger.warn({ agentSlug }, "content_queue: agent has no ventureId — skipping");
+    return;
+  }
+
+  // Fetch venture context
+  let ventureContext = "";
+  try {
+    const { getCachedOrBuildContext } = await import("../venture-context-builder");
+    ventureContext = await getCachedOrBuildContext(agent.ventureId);
+  } catch (err: any) {
+    logger.debug({ err: err.message }, "content_queue: venture context fetch failed");
+  }
+
+  // Fetch venture name for the prompt
+  let ventureName = "the venture";
+  try {
+    const [venture] = await database.select({ name: ventures.name }).from(ventures).where(eq(ventures.id, agent.ventureId));
+    if (venture) ventureName = venture.name;
+  } catch { /* fallback */ }
+
+  const today = getUserDate();
+  const dayOfWeek = new Date().toLocaleDateString("en-US", { weekday: "long" });
+
+  const prompt = `You are producing this week's social media content batch for ${ventureName}. Today is ${dayOfWeek}, ${today}.
+
+${ventureContext ? `## Venture Context\n${ventureContext}\n` : ""}
+
+## Your Task
+Create 3-5 platform-ready social media post drafts. For each draft, provide:
+
+1. **Platform** (e.g., LinkedIn, X/Twitter, Instagram, TikTok)
+2. **Post copy** — full ready-to-publish text including hooks, body, and CTA
+3. **Visual direction** — describe the image/graphic/video concept (so a designer or AI tool can create it)
+4. **Suggested posting time** — day and time slot optimized for the platform's audience
+5. **Hashtags** — 3-8 relevant hashtags
+6. **Content type** — educational, promotional, engagement, thought leadership, or behind-the-scenes
+
+## Guidelines
+- Match the brand voice defined in your soul
+- Mix content types across the batch (don't make all posts the same type)
+- Reference real venture activities, features, or milestones from the venture context
+- Make posts specific and actionable, not generic
+- Each post should stand alone and be ready for human review
+
+Use the submit_deliverable tool to submit your drafts for review.`;
+
+  try {
+    await executeAgentChat(agentSlug, prompt, "scheduler");
+    logger.info({ agentSlug, ventureId: agent.ventureId }, "content_queue: draft posts generated");
+  } catch (err: any) {
+    logger.error({ agentSlug, error: err.message }, "content_queue: failed to generate drafts");
+
+    // Dead letter
+    try {
+      await database.insert(deadLetterJobs).values({
+        agentId,
+        agentSlug,
+        jobName: "content_queue",
+        error: err.message || "Unknown error",
+        payload: { ventureId: agent.ventureId },
+      });
+    } catch { /* best effort */ }
+  }
+});

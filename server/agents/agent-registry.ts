@@ -16,7 +16,7 @@ import fs from "fs";
 import path from "path";
 import { eq, and, inArray } from "drizzle-orm";
 import { logger } from "../logger";
-import { agents, type Agent } from "@shared/schema";
+import { agents, ventures, type Agent } from "@shared/schema";
 import type { AgentSoulFrontmatter } from "./types";
 
 // ============================================================================
@@ -362,6 +362,19 @@ export async function seedFromTemplates(
         }
       }
 
+      // Resolve ventureId for existing agent update
+      let updateVentureId: string | null = null;
+      if (frontmatter.venture && frontmatter.venture !== "null") {
+        try {
+          const [ventureRow] = await database
+            .select({ id: ventures.id })
+            .from(ventures)
+            .where(eq(ventures.slug, frontmatter.venture))
+            .limit(1);
+          if (ventureRow) updateVentureId = ventureRow.id;
+        } catch { /* best effort */ }
+      }
+
       // Update existing agent's soul, schedule, tools, hierarchy, etc. from template
       const soul = `---\n${buildYamlBlock(frontmatter)}\n---\n\n${body}`.trim();
       try {
@@ -371,6 +384,7 @@ export async function seedFromTemplates(
             name: frontmatter.name,
             role: frontmatter.role,
             parentId: updateParentId,
+            ventureId: updateVentureId,
             soul,
             expertise: frontmatter.expertise,
             availableTools: frontmatter.tools,
@@ -411,10 +425,27 @@ export async function seedFromTemplates(
       }
     }
 
-    // Resolve ventureId: for now, venture is stored as a slug/name reference
-    // but the schema uses a UUID foreign key. We skip auto-resolution here
-    // and leave it null unless a ventureId is supplied directly.
-    // Callers can update the agent's ventureId after seeding if needed.
+    // Resolve ventureId from venture slug
+    let ventureId: string | null = null;
+    if (frontmatter.venture && frontmatter.venture !== "null") {
+      try {
+        const [ventureRow] = await database
+          .select({ id: ventures.id })
+          .from(ventures)
+          .where(eq(ventures.slug, frontmatter.venture))
+          .limit(1);
+        if (ventureRow) {
+          ventureId = ventureRow.id;
+        } else {
+          logger.warn(
+            { slug: frontmatter.slug, ventureSlug: frontmatter.venture },
+            "Venture not found by slug — inserting agent without ventureId"
+          );
+        }
+      } catch (err) {
+        logger.debug({ slug: frontmatter.slug, err }, "Venture lookup failed");
+      }
+    }
 
     const soul = `---\n${buildYamlBlock(frontmatter)}\n---\n\n${body}`.trim();
 
@@ -424,6 +455,7 @@ export async function seedFromTemplates(
         slug: frontmatter.slug,
         role: frontmatter.role,
         parentId,
+        ventureId,
         soul,
         expertise: frontmatter.expertise,
         availableTools: frontmatter.tools,
@@ -442,6 +474,25 @@ export async function seedFromTemplates(
     } catch (err) {
       logger.error({ slug: frontmatter.slug, file, err: err instanceof Error ? err.message : String(err) }, "Failed to insert agent — skipping");
       skipped++;
+    }
+  }
+
+  // Deactivate agents whose templates have been disabled (.md.disabled)
+  const disabledFiles = fs.readdirSync(templateDir).filter((f) => f.endsWith(".md.disabled"));
+  for (const file of disabledFiles) {
+    const filePath = path.join(templateDir, file);
+    try {
+      const markdown = fs.readFileSync(filePath, "utf-8");
+      const { frontmatter } = parseSoulTemplate(markdown);
+      if (frontmatter.slug) {
+        await database
+          .update(agents)
+          .set({ isActive: false })
+          .where(eq(agents.slug, frontmatter.slug));
+        logger.info({ slug: frontmatter.slug }, "Agent deactivated (template disabled)");
+      }
+    } catch {
+      // Skip unparseable disabled templates
     }
   }
 

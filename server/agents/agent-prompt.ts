@@ -10,8 +10,9 @@ import type { DelegationContext } from "./types";
 
 /**
  * Build the system prompt for an agent from its soul definition.
+ * @param ventureContext - Optional pre-fetched venture context string to inject
  */
-export function buildSystemPrompt(agent: Agent, delegationContext?: DelegationContext): string {
+export function buildSystemPrompt(agent: Agent, delegationContext?: DelegationContext, ventureContext?: string): string {
   // The soul IS the system prompt — the agent's identity
   let prompt = agent.soul;
 
@@ -34,6 +35,11 @@ export function buildSystemPrompt(agent: Agent, delegationContext?: DelegationCo
     prompt += `\n\n## Your Team (agents you can delegate to)\n`;
     prompt += canDelegateTo.map((slug) => `- ${slug}`).join("\n");
     prompt += `\n\nUse the \`delegate\` tool to assign sub-tasks to your team members when their expertise is needed.`;
+  }
+
+  // Inject venture context if available (auto-fetched for venture-scoped agents)
+  if (ventureContext) {
+    prompt += `\n\n## Venture Context\n${ventureContext}`;
   }
 
   // Inject persistent context memory if set (per-agent CLAUDE.md equivalent)

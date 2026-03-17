@@ -83,8 +83,19 @@ export async function executeAgentChat(
 
   const memoryContext = [staticMemory, relevantMemory].filter(Boolean).join("\n\n");
 
+  // Fetch venture context if agent is venture-scoped
+  let ventureContext: string | undefined;
+  if (agent.ventureId) {
+    try {
+      const { getCachedOrBuildContext } = await import("../venture-context-builder");
+      ventureContext = await getCachedOrBuildContext(agent.ventureId);
+    } catch (err: any) {
+      logger.debug({ err: err.message, agentSlug }, "Failed to fetch venture context (non-critical)");
+    }
+  }
+
   // Build system prompt
-  const systemPrompt = buildSystemPrompt(agent) + (memoryContext ? `\n\n${memoryContext}` : "");
+  const systemPrompt = buildSystemPrompt(agent, undefined, ventureContext) + (memoryContext ? `\n\n${memoryContext}` : "");
 
   // Build permissions from agent config
   const permissions = (agent.actionPermissions as string[]) || ["read"];
