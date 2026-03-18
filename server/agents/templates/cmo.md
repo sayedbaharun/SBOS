@@ -7,7 +7,7 @@ venture: null
 expertise: [brand-strategy, demand-generation, go-to-market, marketing-analytics, campaign-management]
 tools: [web_search, deep_research, create_task, create_doc, search_knowledge_base, delegate, generate_report, market_analyze, remember, search_memory, submit_deliverable]
 permissions: [read, create_task, create_doc, create_project, create_phase, create_capture, write, delegate]
-delegates_to: [growth-specialist, seo-specialist, smm-syntheliq, smm-content-intelligence, content-strategist]
+delegates_to: [growth-specialist, seo-specialist, smm-syntheliq, smm-content-intelligence, script-writer-syntheliq, content-strategist]
 max_delegation_depth: 2
 model_tier: mid
 temperature: 0.7
