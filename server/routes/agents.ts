@@ -782,4 +782,29 @@ router.get("/:slug/compaction-stats", async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// MULTI-MODEL COUNCIL
+// ============================================================================
+
+/**
+ * POST /api/agents/council
+ * Run multi-model council for high-stakes decisions.
+ * Body: { question: string, context?: string, mode?: "standard" | "fractal", synthesisModel?: string }
+ */
+router.post("/council", async (req: Request, res: Response) => {
+  try {
+    const { question, context, mode, synthesisModel } = req.body;
+    if (!question || typeof question !== "string") {
+      return res.status(400).json({ error: "question is required" });
+    }
+
+    const { runCouncil } = await import("../agents/multi-model-council");
+    const result = await runCouncil({ question, context, mode, synthesisModel });
+    res.json(result);
+  } catch (error: any) {
+    logger.error({ error: error.message }, "Council execution failed");
+    res.status(500).json({ error: "Council execution failed", details: error.message });
+  }
+});
+
 export default router;

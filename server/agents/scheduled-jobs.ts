@@ -1763,3 +1763,50 @@ Use the submit_deliverable tool to submit your drafts for review.`;
     } catch { /* best effort */ }
   }
 });
+
+// ============================================================================
+// MEMORY LIFECYCLE CRONS (Rasputin-inspired)
+// ============================================================================
+
+/**
+ * Hot Commit — Pattern-match facts from recent conversations every 30 minutes.
+ * No LLM needed, sub-100ms per message. Captures decisions, preferences, deadlines.
+ */
+registerJobHandler("hot_commit", async (_agentId: string, _agentSlug: string) => {
+  const { hotCommitFacts } = await import("../memory/memory-lifecycle");
+  const result = await hotCommitFacts();
+  logger.info({ factsExtracted: result.factsExtracted }, "hot_commit job complete");
+});
+
+/**
+ * Importance Enrichment — Re-score agent memories with default importance.
+ * Uses GPT-4o-mini to batch-score up to 50 memories per run.
+ * Runs nightly.
+ */
+registerJobHandler("importance_enrichment", async (_agentId: string, _agentSlug: string) => {
+  const { enrichImportance } = await import("../memory/memory-lifecycle");
+  const result = await enrichImportance();
+  logger.info({ scored: result.scored }, "importance_enrichment job complete");
+});
+
+/**
+ * Graph Deepening — Discover new entity relationships from co-occurrence patterns.
+ * Finds entity pairs that appear together in memories but aren't linked in graph.
+ * Runs weekly.
+ */
+registerJobHandler("graph_deepening", async (_agentId: string, _agentSlug: string) => {
+  const { deepenGraph } = await import("../memory/memory-lifecycle");
+  const result = await deepenGraph();
+  logger.info({ newEdges: result.newEdges }, "graph_deepening job complete");
+});
+
+/**
+ * Memory Cleanup — Prune stale, low-importance memories older than 90 days.
+ * Keeps all memories with importance >= 0.7.
+ * Runs weekly.
+ */
+registerJobHandler("memory_prune", async (_agentId: string, _agentSlug: string) => {
+  const { cleanupMemories } = await import("../memory/memory-lifecycle");
+  const result = await cleanupMemories();
+  logger.info({ pruned: result.pruned }, "memory_prune job complete");
+});

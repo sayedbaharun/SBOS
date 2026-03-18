@@ -461,18 +461,24 @@ export interface ChatCompletionParams {
 }
 
 /**
- * Determine optimal model based on task complexity
+ * Determine optimal model based on task complexity.
+ * $0-first routing: prefers local model for simple/moderate tasks when available.
  */
 export function selectModelForTask(complexity: TaskComplexity): string {
+  // Check if local model is available (use cached result to avoid blocking)
+  const localReady = localAvailableCache?.available && (Date.now() - localAvailableCache.checkedAt < LOCAL_HEALTH_CACHE_TTL);
+
   switch (complexity) {
     case "simple":
-      // Use faster, cheaper model for simple tasks (categorization, summaries)
+      // $0-first: use local model for simple tasks when available
+      if (localReady) return `local/${LOCAL_MODEL_NAME}`;
       return "openai/gpt-4o-mini";
     case "moderate":
-      // Use balanced model for typical tasks
+      // $0-first: use local model for moderate tasks when available
+      if (localReady) return `local/${LOCAL_MODEL_NAME}`;
       return "openai/gpt-4o-mini";
     case "complex":
-      // Use most capable model for complex reasoning (multi-step planning, analysis)
+      // Complex tasks always use cloud for quality
       return "openai/gpt-4o";
     default:
       return "openai/gpt-4o";

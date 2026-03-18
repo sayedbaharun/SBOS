@@ -291,4 +291,64 @@ router.post("/context/preview", async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// MEMORY LIFECYCLE (manual triggers)
+// ============================================================================
+
+/**
+ * POST /api/rag/lifecycle/hot-commit — Trigger hot commit (pattern-based fact extraction)
+ */
+router.post("/lifecycle/hot-commit", async (_req: Request, res: Response) => {
+  try {
+    const { hotCommitFacts } = await import("../memory/memory-lifecycle");
+    const result = await hotCommitFacts();
+    res.json(result);
+  } catch (error: any) {
+    logger.error({ error: error.message }, "Hot commit failed");
+    res.status(500).json({ error: "Hot commit failed" });
+  }
+});
+
+/**
+ * POST /api/rag/lifecycle/enrich — Trigger importance enrichment
+ */
+router.post("/lifecycle/enrich", async (_req: Request, res: Response) => {
+  try {
+    const { enrichImportance } = await import("../memory/memory-lifecycle");
+    const result = await enrichImportance();
+    res.json(result);
+  } catch (error: any) {
+    logger.error({ error: error.message }, "Importance enrichment failed");
+    res.status(500).json({ error: "Importance enrichment failed" });
+  }
+});
+
+/**
+ * POST /api/rag/lifecycle/deepen-graph — Trigger graph deepening
+ */
+router.post("/lifecycle/deepen-graph", async (_req: Request, res: Response) => {
+  try {
+    const { deepenGraph } = await import("../memory/memory-lifecycle");
+    const result = await deepenGraph();
+    res.json(result);
+  } catch (error: any) {
+    logger.error({ error: error.message }, "Graph deepening failed");
+    res.status(500).json({ error: "Graph deepening failed" });
+  }
+});
+
+/**
+ * POST /api/rag/lifecycle/cleanup — Trigger memory cleanup
+ */
+router.post("/lifecycle/cleanup", async (_req: Request, res: Response) => {
+  try {
+    const { cleanupMemories } = await import("../memory/memory-lifecycle");
+    const result = await cleanupMemories();
+    res.json(result);
+  } catch (error: any) {
+    logger.error({ error: error.message }, "Memory cleanup failed");
+    res.status(500).json({ error: "Memory cleanup failed" });
+  }
+});
+
 export default router;

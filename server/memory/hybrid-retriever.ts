@@ -21,6 +21,8 @@ import {
   type QdrantSearchResult,
 } from "./qdrant-store";
 import { QDRANT_COLLECTIONS, type MemorySearchOptions } from "./schemas";
+import { expandQuery } from "./query-expander";
+import { rerankResults } from "./reranker";
 
 // ============================================================================
 // SCORING
@@ -76,7 +78,15 @@ export interface RetrievedMemory {
 // ============================================================================
 
 /**
- * Retrieve relevant memories using hybrid scoring
+ * Retrieve relevant memories using hybrid scoring with multi-angle query expansion
+ * and cross-encoder reranking.
+ *
+ * Pipeline:
+ *   1. Expand query into 3-5 angles (LLM or rule-based)
+ *   2. Run triple-arm search for each query variant
+ *   3. RRF fusion across all results
+ *   4. Cross-encoder reranking for precision
+ *   5. Deduplicate and return top-K
  */
 export async function retrieveMemories(
   query: string,
@@ -100,93 +110,117 @@ export async function retrieveMemories(
   if (include_entities) collections.push(QDRANT_COLLECTIONS.ENTITY_INDEX);
 
   try {
-    // Step 1: Run all three search arms in parallel
-    const [localResults, keywordResults, graphResults] = await Promise.all([
-      // Arm 1 — Vector: Qdrant ANN with metadata pre-filters
-      searchAllCollections(query, {
-        limit: limit * 2,
-        min_score: min_score * 0.7,
-        collections,
-        domainFilter: domains?.[0],
-        minImportance,
-        maxAgeDays,
-        entityTypes,
-      }),
-      // Arm 2 — Keyword: PostgreSQL ILIKE on agent_memory table
-      keywordSearchMemories(query, limit * 2).catch(() => []),
-      // Arm 3 — Graph: FalkorDB structural traversal (if available)
-      graphSearchArm(query, limit).catch(() => []),
-    ]);
+    // Step 1: Multi-angle query expansion
+    const expanded = await expandQuery(query);
+    const allQueries = [expanded.original, ...expanded.expansions];
+    logger.debug(
+      { original: query, expansions: expanded.expansions.length, method: expanded.method },
+      "Query expansion complete"
+    );
 
-    // Step 2: Re-score vector results with full formula
-    const vectorScored: RetrievedMemory[] = localResults.map((r) => {
-      const payload = r.payload;
-      const timestamp = (payload.timestamp as number) || Date.now();
-      const importance = (payload.importance as number) || 0.5;
-      const text = extractText(r);
+    // Step 2: Run triple-arm search for each query variant in parallel
+    const searchOpts = {
+      limit: limit * 2,
+      min_score: min_score * 0.7,
+      collections,
+      domainFilter: domains?.[0],
+      minImportance,
+      maxAgeDays,
+      entityTypes,
+    };
 
-      return {
-        id: r.id,
-        collection: r.collection,
-        rawScore: r.score,
-        finalScore: calculateFinalScore(r.score, timestamp, importance),
-        text,
-        timestamp,
-        domain: payload.domain as string | undefined,
-        metadata: payload,
-        source: "local" as const,
-      };
+    const allVectorResults: RetrievedMemory[] = [];
+    const allKeywordResults: RetrievedMemory[] = [];
+    const allGraphResults: RetrievedMemory[] = [];
+
+    // Search all query variants in parallel
+    const searchPromises = allQueries.map(async (q) => {
+      const [localResults, keywordResults, graphResults] = await Promise.all([
+        searchAllCollections(q, searchOpts),
+        keywordSearchMemories(q, limit).catch(() => []),
+        graphSearchArm(q, Math.ceil(limit / 2)).catch(() => []),
+      ]);
+      return { localResults, keywordResults, graphResults };
     });
 
-    // Step 3: Convert keyword results to RetrievedMemory
-    const keywordScored: RetrievedMemory[] = keywordResults.map((r) => ({
-      id: r.id,
-      collection: "pg:agent_memory",
-      rawScore: r.score,
-      finalScore: r.score,
-      text: r.content,
-      timestamp: r.timestamp,
-      domain: undefined,
-      metadata: { memoryType: r.memoryType, importance: r.importance },
-      source: "local" as const,
-    }));
+    const searchResults = await Promise.all(searchPromises);
 
-    // Step 4: Convert graph results to RetrievedMemory
-    const graphScored: RetrievedMemory[] = graphResults.map((r) => ({
-      id: r.id,
-      collection: "graph:falkordb",
-      rawScore: r.score,
-      finalScore: r.score,
-      text: r.text,
-      timestamp: Date.now(),
-      domain: undefined,
-      metadata: r.metadata,
-      source: "local" as const,
-    }));
+    for (const { localResults, keywordResults, graphResults } of searchResults) {
+      // Convert vector results
+      for (const r of localResults) {
+        const payload = r.payload;
+        const timestamp = (payload.timestamp as number) || Date.now();
+        const importance = (payload.importance as number) || 0.5;
+        allVectorResults.push({
+          id: r.id,
+          collection: r.collection,
+          rawScore: r.score,
+          finalScore: calculateFinalScore(r.score, timestamp, importance),
+          text: extractText(r),
+          timestamp,
+          domain: payload.domain as string | undefined,
+          metadata: payload,
+          source: "local" as const,
+        });
+      }
 
-    // Step 5: Triple-arm Reciprocal Rank Fusion
-    const merged = tripleArmRRF(vectorScored, keywordScored, graphScored);
+      // Convert keyword results
+      for (const r of keywordResults) {
+        allKeywordResults.push({
+          id: r.id,
+          collection: "pg:agent_memory",
+          rawScore: r.score,
+          finalScore: r.score,
+          text: r.content,
+          timestamp: r.timestamp,
+          domain: undefined,
+          metadata: { memoryType: r.memoryType, importance: r.importance },
+          source: "local" as const,
+        });
+      }
 
-    // Step 5: Filter by min_score
+      // Convert graph results
+      for (const r of graphResults) {
+        allGraphResults.push({
+          id: r.id,
+          collection: "graph:falkordb",
+          rawScore: r.score,
+          finalScore: r.score,
+          text: r.text,
+          timestamp: Date.now(),
+          domain: undefined,
+          metadata: r.metadata,
+          source: "local" as const,
+        });
+      }
+    }
+
+    // Step 3: Triple-arm Reciprocal Rank Fusion
+    const merged = tripleArmRRF(allVectorResults, allKeywordResults, allGraphResults);
+
+    // Step 4: Filter by min_score
     const filtered = merged.filter((r) => r.finalScore >= min_score);
 
-    // Step 6: Deduplicate by content checksum
+    // Step 5: Deduplicate by content checksum
     const deduped = deduplicateResults(filtered);
 
+    // Step 6: Cross-encoder reranking for precision
+    const reranked = await rerankResults(query, deduped, Math.min(15, deduped.length));
+
     // Step 7: If local yields < 3 quality results, try cloud fallback
-    if (deduped.length < 3) {
+    if (reranked.length < 3) {
       try {
         const cloudResults = await cloudFallback(query, {
-          limit: limit - deduped.length,
+          limit: limit - reranked.length,
           min_score,
         });
-        deduped.push(...cloudResults);
+        reranked.push(...cloudResults);
       } catch (error) {
         logger.debug({ error }, "Cloud fallback unavailable");
       }
     }
 
-    return deduped.slice(0, limit);
+    return reranked.slice(0, limit);
   } catch (error) {
     logger.error({ error, query }, "Memory retrieval failed");
     return [];
