@@ -16,6 +16,9 @@ import {
   ChevronUp,
   ExternalLink,
   Globe,
+  MessageSquare,
+  Film,
+  Layers,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -71,6 +74,9 @@ const typeIcons: Record<string, typeof FileText> = {
   recommendation: Lightbulb,
   action_items: ListChecks,
   code: Code,
+  social_post: MessageSquare,
+  video_script: Film,
+  carousel: Layers,
 };
 
 const typeColors: Record<string, string> = {
@@ -78,6 +84,9 @@ const typeColors: Record<string, string> = {
   recommendation: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
   action_items: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
   code: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  social_post: "bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200",
+  video_script: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200",
+  carousel: "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200",
 };
 
 const statusColors: Record<string, string> = {
@@ -177,6 +186,96 @@ function DeliverableContent({ result }: { result: Record<string, any> }) {
           </pre>
           {result.language && (
             <Badge variant="outline" className="text-xs">{result.language}</Badge>
+          )}
+        </div>
+      );
+
+    case "social_post":
+      return (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            {result.platform && <Badge variant="outline" className="text-xs">{result.platform}</Badge>}
+            {result.contentType && <Badge variant="outline" className="text-xs">{result.contentType}</Badge>}
+            {result.postingTime && (
+              <span className="text-xs text-muted-foreground">Post at: {result.postingTime}</span>
+            )}
+          </div>
+          <div className="whitespace-pre-wrap text-sm bg-muted/50 p-3 rounded">{result.copy}</div>
+          {result.visualDirection && (
+            <div>
+              <p className="text-xs font-medium mb-1">Visual Direction</p>
+              <p className="text-sm text-muted-foreground">{result.visualDirection}</p>
+            </div>
+          )}
+          {result.hashtags?.length > 0 && (
+            <p className="text-sm text-blue-600 dark:text-blue-400">{result.hashtags.join(" ")}</p>
+          )}
+        </div>
+      );
+
+    case "video_script":
+      return (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            {result.format && <Badge variant="outline" className="text-xs capitalize">{result.format}</Badge>}
+            {result.platform && <Badge variant="outline" className="text-xs">{result.platform}</Badge>}
+            {result.duration && <span className="text-xs text-muted-foreground">{result.duration}</span>}
+            {result.wordCount && <span className="text-xs text-muted-foreground">{result.wordCount} words</span>}
+          </div>
+          {result.hookLine && (
+            <div className="bg-indigo-50 dark:bg-indigo-950/30 p-3 rounded border-l-4 border-indigo-500">
+              <p className="text-xs font-medium text-indigo-600 dark:text-indigo-400 mb-1">Hook</p>
+              <p className="text-sm font-medium">{result.hookLine}</p>
+            </div>
+          )}
+          <div className="whitespace-pre-wrap text-sm bg-muted/50 p-3 rounded">{result.script}</div>
+          {result.sceneDirections?.length > 0 && (
+            <div>
+              <p className="text-xs font-medium mb-1">Scene Directions</p>
+              <div className="space-y-1">
+                {result.sceneDirections.map((d: string, i: number) => (
+                  <p key={i} className="text-sm text-muted-foreground italic">[{i + 1}] {d}</p>
+                ))}
+              </div>
+            </div>
+          )}
+          {result.onScreenText?.length > 0 && (
+            <div>
+              <p className="text-xs font-medium mb-1">On-Screen Text</p>
+              <div className="flex gap-2 flex-wrap">
+                {result.onScreenText.map((t: string, i: number) => (
+                  <Badge key={i} variant="secondary" className="text-xs">{t}</Badge>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+
+    case "carousel":
+      return (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            {result.platform && <Badge variant="outline" className="text-xs">{result.platform}</Badge>}
+            <span className="text-xs text-muted-foreground">{(result.slides || []).length} slides</span>
+          </div>
+          <div className="grid gap-2">
+            {(result.slides || []).map((slide: any, i: number) => (
+              <div key={i} className="bg-muted/50 p-3 rounded border-l-4 border-teal-500">
+                <p className="text-xs text-muted-foreground mb-1">Slide {i + 1}</p>
+                <p className="text-sm font-medium">{slide.headline}</p>
+                <p className="text-sm text-muted-foreground mt-1">{slide.body}</p>
+              </div>
+            ))}
+          </div>
+          {result.ctaSlide && (
+            <div className="bg-teal-50 dark:bg-teal-950/30 p-3 rounded">
+              <p className="text-xs font-medium text-teal-600 dark:text-teal-400 mb-1">CTA Slide</p>
+              <p className="text-sm">{result.ctaSlide}</p>
+            </div>
+          )}
+          {result.hashtags?.length > 0 && (
+            <p className="text-sm text-blue-600 dark:text-blue-400">{result.hashtags.join(" ")}</p>
           )}
         </div>
       );
@@ -419,6 +518,9 @@ const typeFilterOptions = [
   { value: "recommendation", label: "Recommendation" },
   { value: "action_items", label: "Action Items" },
   { value: "code", label: "Code" },
+  { value: "social_post", label: "Social Post" },
+  { value: "video_script", label: "Video Script" },
+  { value: "carousel", label: "Carousel" },
 ];
 
 export default function ReviewQueue() {

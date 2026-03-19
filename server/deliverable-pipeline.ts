@@ -148,6 +148,57 @@ function formatAsDoc(result: Record<string, any>): string {
       ].join("\n");
     }
 
+    case "social_post":
+      return [
+        `# ${result.title}`,
+        "",
+        `**Platform:** ${result.platform || "—"}`,
+        result.contentType ? `**Content Type:** ${result.contentType}` : "",
+        result.postingTime ? `**Posting Time:** ${result.postingTime}` : "",
+        "",
+        "## Copy",
+        result.copy || "",
+        "",
+        result.visualDirection ? `## Visual Direction\n${result.visualDirection}` : "",
+        result.hashtags?.length ? `\n**Hashtags:** ${result.hashtags.join(" ")}` : "",
+      ].filter(Boolean).join("\n");
+
+    case "video_script":
+      return [
+        `# ${result.title}`,
+        "",
+        result.format ? `**Format:** ${result.format}` : "",
+        result.platform ? `**Platform:** ${result.platform}` : "",
+        result.duration ? `**Duration:** ${result.duration}` : "",
+        result.wordCount ? `**Word Count:** ${result.wordCount}` : "",
+        "",
+        result.hookLine ? `## Hook\n${result.hookLine}\n` : "",
+        "## Script",
+        result.script || "",
+        "",
+        result.sceneDirections?.length
+          ? `## Scene Directions\n${result.sceneDirections.map((d: string, i: number) => `${i + 1}. ${d}`).join("\n")}`
+          : "",
+        result.onScreenText?.length
+          ? `\n## On-Screen Text\n${result.onScreenText.map((t: string) => `- ${t}`).join("\n")}`
+          : "",
+      ].filter(Boolean).join("\n");
+
+    case "carousel":
+      return [
+        `# ${result.title}`,
+        "",
+        result.platform ? `**Platform:** ${result.platform}` : "",
+        `**Slides:** ${(result.slides || []).length}`,
+        "",
+        ...(result.slides || []).map((slide: any, i: number) =>
+          `## Slide ${i + 1}\n**${slide.headline}**\n${slide.body}`
+        ),
+        "",
+        result.ctaSlide ? `## CTA Slide\n${result.ctaSlide}` : "",
+        result.hashtags?.length ? `\n**Hashtags:** ${result.hashtags.join(" ")}` : "",
+      ].filter(Boolean).join("\n");
+
     default:
       return `# ${result.title || "Deliverable"}\n\n${JSON.stringify(result, null, 2)}`;
   }
@@ -281,6 +332,26 @@ export async function promoteDeliverable(taskId: string): Promise<void> {
       } else if (result.type === "action_items") {
         // Action items go to Approved Deliverables
         const destFolderId = await getApprovedFolderId();
+        await moveFile(task.driveFileId, destFolderId);
+      } else if (["social_post", "video_script", "carousel"].includes(result.type)) {
+        // Content deliverables go to venture subfolder in Knowledge Base
+        const ventureId = result.ventureId;
+        let destFolderId: string;
+        if (ventureId) {
+          try {
+            const venture = await storage.getVenture(String(ventureId));
+            if (venture) {
+              const { createVentureFolder } = await import("./google-drive");
+              destFolderId = await createVentureFolder(venture.name);
+            } else {
+              destFolderId = await getApprovedFolderId();
+            }
+          } catch {
+            destFolderId = await getApprovedFolderId();
+          }
+        } else {
+          destFolderId = await getApprovedFolderId();
+        }
         await moveFile(task.driveFileId, destFolderId);
       } else {
         // Documents, recommendations, code go to Knowledge Base (venture subfolder if available)

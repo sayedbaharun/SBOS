@@ -3312,7 +3312,7 @@ export const agentTasks = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
 
     // Deliverable review system
-    deliverableType: text("deliverable_type").$type<'document' | 'recommendation' | 'action_items' | 'code'>(),
+    deliverableType: text("deliverable_type").$type<'document' | 'recommendation' | 'action_items' | 'code' | 'social_post' | 'video_script' | 'carousel'>(),
     reviewFeedback: text("review_feedback"),
     promotedTo: jsonb("promoted_to").$type<Array<{ type: string; id: string }>>(),
 
@@ -3386,11 +3386,53 @@ export const deliverableCodeSchema = z.object({
   ventureId: z.string().optional(),
 });
 
+export const deliverableSocialPostSchema = z.object({
+  type: z.literal("social_post"),
+  title: z.string(),
+  platform: z.string(),
+  copy: z.string(),
+  visualDirection: z.string().optional(),
+  hashtags: z.array(z.string()).optional(),
+  postingTime: z.string().optional(),
+  contentType: z.string().optional(),
+  ventureId: z.string().optional(),
+});
+
+export const deliverableVideoScriptSchema = z.object({
+  type: z.literal("video_script"),
+  title: z.string(),
+  format: z.enum(["podcast", "educational"]).optional(),
+  platform: z.string().optional(),
+  script: z.string(),
+  sceneDirections: z.array(z.string()).optional(),
+  duration: z.string().optional(),
+  wordCount: z.number().optional(),
+  onScreenText: z.array(z.string()).optional(),
+  hookLine: z.string().optional(),
+  ventureId: z.string().optional(),
+});
+
+export const deliverableCarouselSchema = z.object({
+  type: z.literal("carousel"),
+  title: z.string(),
+  platform: z.string().optional(),
+  slides: z.array(z.object({
+    headline: z.string(),
+    body: z.string(),
+  })),
+  ctaSlide: z.string().optional(),
+  hashtags: z.array(z.string()).optional(),
+  ventureId: z.string().optional(),
+});
+
 export const deliverableResultSchema = z.discriminatedUnion("type", [
   deliverableDocumentSchema,
   deliverableRecommendationSchema,
   deliverableActionItemsSchema,
   deliverableCodeSchema,
+  deliverableSocialPostSchema,
+  deliverableVideoScriptSchema,
+  deliverableCarouselSchema,
 ]);
 
 export type DeliverableResult = z.infer<typeof deliverableResultSchema>;

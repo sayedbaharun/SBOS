@@ -99,4 +99,55 @@ router.delete("/:id", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/ventures/:ventureId/content — Venture-scoped content deliverables
+router.get("/:ventureId/content", async (req: Request, res: Response) => {
+  try {
+    const ventureId = String(req.params.ventureId);
+    const { status, format, limit = "50" } = req.query;
+
+    const { eq, and, desc, sql, inArray } = await import("drizzle-orm");
+    const { agentTasks, agents } = await import("@shared/schema");
+    const db = (storage as any).db;
+
+    const contentTypes = ["social_post", "video_script", "carousel"];
+    const conditions: any[] = [
+      sql`${agentTasks.deliverableType} IN ('social_post', 'video_script', 'carousel')`,
+    ];
+
+    // Filter by agent's ventureId — join agents to check
+    conditions.push(eq(agents.ventureId, ventureId));
+
+    if (status && status !== "all") {
+      conditions.push(eq(agentTasks.status, status as any));
+    }
+
+    if (format && format !== "all" && contentTypes.includes(format as string)) {
+      conditions.push(sql`${agentTasks.deliverableType} = ${format}`);
+    }
+
+    const rows = await db
+      .select({
+        task: agentTasks,
+        agentName: agents.name,
+        agentSlug: agents.slug,
+      })
+      .from(agentTasks)
+      .innerJoin(agents, eq(agentTasks.assignedTo, agents.id))
+      .where(and(...conditions))
+      .orderBy(desc(agentTasks.createdAt))
+      .limit(parseInt(String(limit), 10));
+
+    const enriched = rows.map((r: any) => ({
+      ...r.task,
+      agentName: r.agentName || "Unknown Agent",
+      agentSlug: r.agentSlug || "unknown",
+    }));
+
+    res.json(enriched);
+  } catch (error) {
+    logger.error({ error }, "Error fetching venture content");
+    res.status(500).json({ error: "Failed to fetch venture content" });
+  }
+});
+
 export default router;

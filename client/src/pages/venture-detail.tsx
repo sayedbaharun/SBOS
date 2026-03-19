@@ -15,6 +15,7 @@ import ProjectWizard from "@/components/venture-hq/project-wizard";
 import AiAgentConfig from "@/components/venture-hq/ai-agent-config";
 import VentureAiChat from "@/components/venture-hq/venture-ai-chat";
 import { ForesightTab } from "@/components/foresight";
+import VentureContent from "@/components/venture-hq/venture-content";
 
 interface Venture {
   id: string;
@@ -102,6 +103,7 @@ export default function VentureDetail() {
               <TabsTrigger value="phases" className="text-xs sm:text-sm">Phases</TabsTrigger>
               <TabsTrigger value="tasks" className="text-xs sm:text-sm">Tasks</TabsTrigger>
               <TabsTrigger value="docs" className="text-xs sm:text-sm whitespace-nowrap">Knowledge</TabsTrigger>
+              <TabsTrigger value="content" className="text-xs sm:text-sm whitespace-nowrap">Content</TabsTrigger>
               <TabsTrigger value="foresight" className="text-xs sm:text-sm whitespace-nowrap">Foresight</TabsTrigger>
               <TabsTrigger value="ai-agent" className="text-xs sm:text-sm whitespace-nowrap">AI Agent</TabsTrigger>
             </TabsList>
@@ -135,6 +137,10 @@ export default function VentureDetail() {
 
         <TabsContent value="docs">
           <VentureDocs ventureId={venture.id} />
+        </TabsContent>
+
+        <TabsContent value="content">
+          <VentureContent ventureId={venture.id} />
         </TabsContent>
 
         <TabsContent value="foresight">

@@ -345,6 +345,33 @@ export async function executeTool(
             deliverableResult.ventureId = args.ventureId || agent.ventureId;
             deliverableResult.isWebPage = args.isWebPage || false;
             break;
+          case "social_post":
+            deliverableResult.platform = args.platform;
+            deliverableResult.copy = args.copy;
+            deliverableResult.visualDirection = args.visualDirection;
+            deliverableResult.hashtags = args.hashtags || [];
+            deliverableResult.postingTime = args.postingTime;
+            deliverableResult.contentType = args.contentType;
+            deliverableResult.ventureId = args.ventureId || agent.ventureId;
+            break;
+          case "video_script":
+            deliverableResult.format = args.format;
+            deliverableResult.platform = args.platform;
+            deliverableResult.script = args.script;
+            deliverableResult.sceneDirections = args.sceneDirections || [];
+            deliverableResult.duration = args.duration;
+            deliverableResult.wordCount = args.wordCount;
+            deliverableResult.onScreenText = args.onScreenText || [];
+            deliverableResult.hookLine = args.hookLine;
+            deliverableResult.ventureId = args.ventureId || agent.ventureId;
+            break;
+          case "carousel":
+            deliverableResult.platform = args.platform;
+            deliverableResult.slides = args.slides || [];
+            deliverableResult.ctaSlide = args.ctaSlide;
+            deliverableResult.hashtags = args.hashtags || [];
+            deliverableResult.ventureId = args.ventureId || agent.ventureId;
+            break;
         }
 
         // Create agentTask with status needs_review
