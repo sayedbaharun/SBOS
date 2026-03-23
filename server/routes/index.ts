@@ -34,7 +34,6 @@ import peopleRoutes from "./people";
 import { strategiesRouter, checklistsRouter } from "./trading";
 import ticktickRoutes from "./ticktick";
 import aiChatRoutes from "./ai-chat";
-import foresightRoutes from "./foresight";
 import fearSettingsRoutes from "./fear-settings";
 import decisionMemoriesRoutes from "./decision-memories";
 import aiDocsRoutes from "./ai-docs";
@@ -292,12 +291,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
   app.use('/api/trading-strategies', strategiesRouter);
   app.use('/api/trading-checklists', checklistsRouter);
-
-  // ============================================================================
-  // STRATEGIC FORESIGHT
-  // Venture-scoped scenario planning, indicators, signals, analyses
-  // ============================================================================
-  app.use('/api/ventures/:ventureId/foresight', foresightRoutes);
 
   // ============================================================================
   // DECISION MAKING
