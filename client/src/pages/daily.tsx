@@ -49,6 +49,57 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Link, useRoute, useLocation } from "wouter";
 
 // ============================================================================
+// MANTRA BANNER (shows today's mantras, rules, and gym schedule)
+// ============================================================================
+
+function MantraBanner() {
+  const { data: mantras } = useQuery<Array<{
+    id: string;
+    text: string;
+    category: string;
+    days: string[] | null;
+    durationMin: number | null;
+    isActive: boolean;
+    order: number;
+  }>>({
+    queryKey: ["mantras", "today"],
+    queryFn: async () => {
+      const res = await fetch("/api/mantras/today", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+
+  if (!mantras || mantras.length === 0) return null;
+
+  const habits = mantras.filter((m) => m.category === "habit");
+  const rules = mantras.filter((m) => m.category === "rule");
+  const mantrasOnly = mantras.filter((m) => m.category === "mantra" || m.category === "reminder");
+
+  return (
+    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 flex flex-wrap items-center gap-3 text-sm">
+      {habits.map((h) => (
+        <Badge key={h.id} variant="outline" className="bg-green-500/10 text-green-400 border-green-500/20 gap-1">
+          <Dumbbell className="h-3 w-3" />
+          {h.text}{h.durationMin ? ` (${Math.floor(h.durationMin / 60)}hr)` : ""}
+        </Badge>
+      ))}
+      {rules.map((r) => (
+        <Badge key={r.id} variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20">
+          {r.text}
+        </Badge>
+      ))}
+      {mantrasOnly.map((m) => (
+        <span key={m.id} className="text-amber-400/80 font-medium italic">
+          "{m.text}"
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================================
 // TYPES
 // ============================================================================
 
@@ -780,6 +831,9 @@ export default function DailyPage() {
           </div>
         ))}
       </div>
+
+      {/* ---- TODAY'S MANTRAS & RULES ---- */}
+      <MantraBanner />
 
       {/* ================================================================ */}
       {/* TWO-COLUMN GRID                                                  */}

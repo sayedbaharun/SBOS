@@ -52,6 +52,9 @@ import reviewRoutes from "./review";
 import intelligenceRoutes from "./intelligence";
 import syntheliqRoutes from "./syntheliq";
 import automationsRoutes from "./automations";
+import domainsRoutes from "./domains";
+import aiModelsRoutes from "./ai-models";
+import mantrasRoutes from "./mantras";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
@@ -320,6 +323,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // AUTOMATIONS (User-defined cron + webhook triggers)
   // ============================================================================
   app.use('/api/automations', automationsRoutes);
+
+  // ============================================================================
+  // REGISTRIES (Domains, AI Models, Mantras)
+  // ============================================================================
+  app.use('/api/domains', requireAuth, domainsRoutes);
+  app.use('/api/ai-models-registry', requireAuth, aiModelsRoutes);
+  app.use('/api/mantras', requireAuth, mantrasRoutes);
 
   // ============================================================================
   // HIERARCHICAL AGENT SYSTEM

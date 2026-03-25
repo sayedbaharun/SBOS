@@ -163,6 +163,15 @@ import {
   type SubAgentRun,
   type InsertSubAgentRun,
   subAgentRuns,
+  type Domain,
+  type InsertDomain,
+  domains,
+  type AiModel,
+  type InsertAiModel,
+  aiModelsRegistry,
+  type Mantra,
+  type InsertMantra,
+  mantras,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { eq, desc, and, or, gte, lte, not, inArray, like, sql, asc, isNull } from "drizzle-orm";
@@ -513,6 +522,27 @@ export interface IStorage {
   updateSubAgentRun(id: string, data: Partial<SubAgentRun>): Promise<SubAgentRun | undefined>;
   getSubAgentRuns(options?: { chatId?: string; status?: string; limit?: number }): Promise<SubAgentRun[]>;
   getSubAgentRun(id: string): Promise<SubAgentRun | undefined>;
+
+  // Domains Registry
+  getDomains(filters?: { ventureId?: string; status?: string }): Promise<Domain[]>;
+  getDomain(id: string): Promise<Domain | undefined>;
+  createDomain(data: InsertDomain): Promise<Domain>;
+  updateDomain(id: string, data: Partial<InsertDomain>): Promise<Domain | undefined>;
+  deleteDomain(id: string): Promise<void>;
+
+  // AI Models Registry
+  getAiModels(filters?: { provider?: string; category?: string; isActive?: boolean }): Promise<AiModel[]>;
+  getAiModel(id: string): Promise<AiModel | undefined>;
+  createAiModel(data: InsertAiModel): Promise<AiModel>;
+  updateAiModel(id: string, data: Partial<InsertAiModel>): Promise<AiModel | undefined>;
+  deleteAiModel(id: string): Promise<void>;
+
+  // Mantras
+  getMantras(filters?: { category?: string; isActive?: boolean }): Promise<Mantra[]>;
+  getMantra(id: string): Promise<Mantra | undefined>;
+  createMantra(data: InsertMantra): Promise<Mantra>;
+  updateMantra(id: string, data: Partial<InsertMantra>): Promise<Mantra | undefined>;
+  deleteMantra(id: string): Promise<void>;
 }
 
 // PostgreSQL Storage Implementation
@@ -4972,6 +5002,103 @@ export class DBStorage implements IStorage {
       .from(subAgentRuns)
       .where(eq(subAgentRuns.id, id));
     return row;
+  }
+
+  // ============================================================================
+  // DOMAINS REGISTRY
+  // ============================================================================
+
+  async getDomains(filters?: { ventureId?: string; status?: string }): Promise<Domain[]> {
+    const conditions = [];
+    if (filters?.ventureId) conditions.push(eq(domains.ventureId, filters.ventureId));
+    if (filters?.status) conditions.push(eq(domains.status, filters.status as any));
+    return this.db.select().from(domains)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(domains.domain);
+  }
+
+  async getDomain(id: string): Promise<Domain | undefined> {
+    const [row] = await this.db.select().from(domains).where(eq(domains.id, id)).limit(1);
+    return row;
+  }
+
+  async createDomain(data: InsertDomain): Promise<Domain> {
+    const [row] = await this.db.insert(domains).values(data).returning();
+    return row;
+  }
+
+  async updateDomain(id: string, data: Partial<InsertDomain>): Promise<Domain | undefined> {
+    const [row] = await this.db.update(domains).set({ ...data, updatedAt: new Date() }).where(eq(domains.id, id)).returning();
+    return row;
+  }
+
+  async deleteDomain(id: string): Promise<void> {
+    await this.db.delete(domains).where(eq(domains.id, id));
+  }
+
+  // ============================================================================
+  // AI MODELS REGISTRY
+  // ============================================================================
+
+  async getAiModels(filters?: { provider?: string; category?: string; isActive?: boolean }): Promise<AiModel[]> {
+    const conditions = [];
+    if (filters?.provider) conditions.push(eq(aiModelsRegistry.provider, filters.provider));
+    if (filters?.category) conditions.push(eq(aiModelsRegistry.category, filters.category as any));
+    if (filters?.isActive !== undefined) conditions.push(eq(aiModelsRegistry.isActive, filters.isActive));
+    return this.db.select().from(aiModelsRegistry)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(aiModelsRegistry.provider, aiModelsRegistry.modelName);
+  }
+
+  async getAiModel(id: string): Promise<AiModel | undefined> {
+    const [row] = await this.db.select().from(aiModelsRegistry).where(eq(aiModelsRegistry.id, id)).limit(1);
+    return row;
+  }
+
+  async createAiModel(data: InsertAiModel): Promise<AiModel> {
+    const [row] = await this.db.insert(aiModelsRegistry).values(data).returning();
+    return row;
+  }
+
+  async updateAiModel(id: string, data: Partial<InsertAiModel>): Promise<AiModel | undefined> {
+    const [row] = await this.db.update(aiModelsRegistry).set({ ...data, updatedAt: new Date() }).where(eq(aiModelsRegistry.id, id)).returning();
+    return row;
+  }
+
+  async deleteAiModel(id: string): Promise<void> {
+    await this.db.delete(aiModelsRegistry).where(eq(aiModelsRegistry.id, id));
+  }
+
+  // ============================================================================
+  // MANTRAS
+  // ============================================================================
+
+  async getMantras(filters?: { category?: string; isActive?: boolean }): Promise<Mantra[]> {
+    const conditions = [];
+    if (filters?.category) conditions.push(eq(mantras.category, filters.category as any));
+    if (filters?.isActive !== undefined) conditions.push(eq(mantras.isActive, filters.isActive));
+    return this.db.select().from(mantras)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(mantras.order, mantras.createdAt);
+  }
+
+  async getMantra(id: string): Promise<Mantra | undefined> {
+    const [row] = await this.db.select().from(mantras).where(eq(mantras.id, id)).limit(1);
+    return row;
+  }
+
+  async createMantra(data: InsertMantra): Promise<Mantra> {
+    const [row] = await this.db.insert(mantras).values(data).returning();
+    return row;
+  }
+
+  async updateMantra(id: string, data: Partial<InsertMantra>): Promise<Mantra | undefined> {
+    const [row] = await this.db.update(mantras).set(data).where(eq(mantras.id, id)).returning();
+    return row;
+  }
+
+  async deleteMantra(id: string): Promise<void> {
+    await this.db.delete(mantras).where(eq(mantras.id, id));
   }
 
 }

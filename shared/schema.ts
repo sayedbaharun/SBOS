@@ -3793,3 +3793,102 @@ export const insertAutomationSchema = createInsertSchema(automations).omit({
 
 export type Automation = typeof automations.$inferSelect;
 export type InsertAutomation = z.infer<typeof insertAutomationSchema>;
+
+// ============================================================================
+// DOMAINS REGISTRY
+// ============================================================================
+
+export const domains = pgTable(
+  "domains",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    domain: text("domain").notNull(),
+    registrar: text("registrar"),
+    ventureId: uuid("venture_id").references(() => ventures.id),
+    dnsProvider: text("dns_provider"),
+    expiryDate: date("expiry_date"),
+    autoRenew: boolean("auto_renew").default(false),
+    status: text("status").$type<"active" | "expired" | "transferring" | "parked">().default("active").notNull(),
+    emails: jsonb("emails").$type<string[]>(),
+    sslProvider: text("ssl_provider"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_domains_venture").on(table.ventureId),
+  ]
+);
+
+export const insertDomainSchema = createInsertSchema(domains).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type Domain = typeof domains.$inferSelect;
+export type InsertDomain = z.infer<typeof insertDomainSchema>;
+
+// ============================================================================
+// AI MODELS REGISTRY
+// ============================================================================
+
+export const aiModelsRegistry = pgTable(
+  "ai_models_registry",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: text("provider").notNull(),
+    modelName: text("model_name").notNull(),
+    modelId: text("model_id"),
+    accessType: text("access_type").$type<"api_key" | "free" | "paid" | "trial">().default("api_key").notNull(),
+    category: text("category").$type<"llm" | "image" | "video" | "audio" | "embedding" | "code" | "other">().default("llm").notNull(),
+    usedIn: jsonb("used_in").$type<string[]>(),
+    monthlyCostUsd: real("monthly_cost_usd"),
+    apiKeyEnvVar: text("api_key_env_var"),
+    capabilities: text("capabilities"),
+    notes: text("notes"),
+    isActive: boolean("is_active").default(true).notNull(),
+    addedAt: timestamp("added_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_ai_models_provider").on(table.provider),
+  ]
+);
+
+export const insertAiModelSchema = createInsertSchema(aiModelsRegistry).omit({
+  id: true,
+  addedAt: true,
+  updatedAt: true,
+});
+
+export type AiModel = typeof aiModelsRegistry.$inferSelect;
+export type InsertAiModel = z.infer<typeof insertAiModelSchema>;
+
+// ============================================================================
+// MANTRAS / WEEKLY RULES
+// ============================================================================
+
+export const mantras = pgTable(
+  "mantras",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    text: text("text").notNull(),
+    category: text("category").$type<"mantra" | "rule" | "habit" | "reminder">().default("mantra").notNull(),
+    /** For habits: which days this applies (e.g., ["mon","wed","sat"]) */
+    days: jsonb("days").$type<string[]>(),
+    /** Duration in minutes (for gym blocks, etc.) */
+    durationMin: integer("duration_min"),
+    isActive: boolean("is_active").default(true).notNull(),
+    order: integer("sort_order").default(0).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  }
+);
+
+export const insertMantraSchema = createInsertSchema(mantras).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type Mantra = typeof mantras.$inferSelect;
+export type InsertMantra = z.infer<typeof insertMantraSchema>;
