@@ -23,6 +23,7 @@ import {
 import { QDRANT_COLLECTIONS, type MemorySearchOptions } from "./schemas";
 import { expandQuery } from "./query-expander";
 import { rerankResults } from "./reranker";
+import { recordRetrieval, type RetrievalEvent } from "./retrieval-metrics";
 
 // ============================================================================
 // SCORING
@@ -133,13 +134,30 @@ export async function retrieveMemories(
     const allKeywordResults: RetrievedMemory[] = [];
     const allGraphResults: RetrievedMemory[] = [];
 
+    // Instrumentation accumulators
+    const t0 = Date.now();
+    let qdrantLatency = 0, keywordLatency = 0, graphLatency = 0;
+    let qdrantTotal = 0, keywordTotal = 0, graphTotal = 0;
+    let graphSkipped = false;
+
     // Search all query variants in parallel
     const searchPromises = allQueries.map(async (q) => {
-      const [localResults, keywordResults, graphResults] = await Promise.all([
-        searchAllCollections(q, searchOpts),
-        keywordSearchMemories(q, limit).catch(() => []),
-        graphSearchArm(q, Math.ceil(limit / 2)).catch(() => []),
-      ]);
+      const qt0 = Date.now();
+      const localResults = await searchAllCollections(q, searchOpts);
+      qdrantLatency = Math.max(qdrantLatency, Date.now() - qt0);
+
+      const kt0 = Date.now();
+      const keywordResults = await keywordSearchMemories(q, limit).catch(() => []);
+      keywordLatency = Math.max(keywordLatency, Date.now() - kt0);
+
+      const gt0 = Date.now();
+      const graphResults = await graphSearchArm(q, Math.ceil(limit / 2)).catch(() => []);
+      graphLatency = Math.max(graphLatency, Date.now() - gt0);
+
+      qdrantTotal += localResults.length;
+      keywordTotal += keywordResults.length;
+      graphTotal += graphResults.length;
+
       return { localResults, keywordResults, graphResults };
     });
 
@@ -208,19 +226,47 @@ export async function retrieveMemories(
     const reranked = await rerankResults(query, deduped, Math.min(15, deduped.length));
 
     // Step 7: If local yields < 3 quality results, try cloud fallback
+    let cloudFallbackTriggered = false;
+    let cloudFallbackCount = 0;
+    let cloudFallbackLatency = 0;
+
     if (reranked.length < 3) {
       try {
+        cloudFallbackTriggered = true;
+        const ct0 = Date.now();
         const cloudResults = await cloudFallback(query, {
           limit: limit - reranked.length,
           min_score,
         });
+        cloudFallbackLatency = Date.now() - ct0;
+        cloudFallbackCount = cloudResults.length;
         reranked.push(...cloudResults);
       } catch (error) {
+        cloudFallbackLatency = Date.now() - t0; // rough fallback
         logger.debug({ error }, "Cloud fallback unavailable");
       }
     }
 
-    return reranked.slice(0, limit);
+    // Record retrieval metrics
+    const finalResults = reranked.slice(0, limit);
+    recordRetrieval({
+      timestamp: Date.now(),
+      queryLength: query.length,
+      qdrantCount: qdrantTotal,
+      qdrantLatencyMs: qdrantLatency,
+      keywordCount: keywordTotal,
+      keywordLatencyMs: keywordLatency,
+      graphCount: graphTotal,
+      graphLatencyMs: graphLatency,
+      graphSkipped: graphTotal === 0 && graphLatency < 5,
+      cloudFallbackTriggered,
+      cloudFallbackCount,
+      cloudFallbackLatencyMs: cloudFallbackLatency,
+      totalResults: finalResults.length,
+      totalLatencyMs: Date.now() - t0,
+    });
+
+    return finalResults;
   } catch (error) {
     logger.error({ error, query }, "Memory retrieval failed");
     return [];

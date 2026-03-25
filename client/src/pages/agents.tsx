@@ -699,6 +699,15 @@ export default function AgentsPage() {
     },
   });
 
+  const { data: metricsData } = useQuery<AgentMetricsResponse>({
+    queryKey: ["/api/agents/metrics"],
+    queryFn: async () => {
+      const res = await fetch("/api/agents/metrics?days=7", { credentials: "include" });
+      if (!res.ok) return { window: { days: 7, since: "" }, agents: [] };
+      return res.json();
+    },
+  });
+
   const { data: runningData } = useQuery<RunningData>({
     queryKey: ["/api/agents/admin/running"],
     queryFn: async () => {
@@ -819,6 +828,81 @@ export default function AgentsPage() {
           pulse={runningCount > 0}
         />
       </div>
+
+      {/* ── Agent Health (7-day metrics) ── */}
+      {metricsData && metricsData.agents.length > 0 && (
+        <div className="rounded-lg border border-border/50 bg-card overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border/50 flex items-center justify-between">
+            <p className="text-[13px] font-medium">Agent Health <span className="text-muted-foreground font-normal">(7 days)</span></p>
+            <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" /> Active</span>
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-zinc-400 inline-block" /> Dormant</span>
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500 inline-block" /> Failing</span>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-border/30 text-muted-foreground">
+                  <th className="text-left font-medium px-4 py-2">Agent</th>
+                  <th className="text-right font-medium px-3 py-2">Chats</th>
+                  <th className="text-right font-medium px-3 py-2">Scheduled</th>
+                  <th className="text-right font-medium px-3 py-2">Delegations</th>
+                  <th className="text-right font-medium px-3 py-2">Avg Time</th>
+                  <th className="text-right font-medium px-3 py-2">Tokens</th>
+                  <th className="text-right font-medium px-4 py-2">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metricsData.agents.map((m) => (
+                  <tr
+                    key={m.agentId}
+                    onClick={() => handleSelect(m.slug)}
+                    className="border-b border-border/20 hover:bg-muted/30 cursor-pointer transition-colors"
+                  >
+                    <td className="px-4 py-2 flex items-center gap-2">
+                      <span className={`h-2 w-2 rounded-full flex-shrink-0 ${
+                        m.status === "active" ? "bg-emerald-500" :
+                        m.status === "failing" ? "bg-red-500" : "bg-zinc-400"
+                      }`} />
+                      <span className="font-medium truncate max-w-[140px]">{m.name}</span>
+                    </td>
+                    <td className="text-right px-3 py-2 tabular-nums">{m.chatInvocations}</td>
+                    <td className="text-right px-3 py-2 tabular-nums">
+                      {m.scheduledRuns}
+                      {m.scheduledErrors > 0 && (
+                        <span className="text-red-500 ml-1">({m.scheduledErrors} err)</span>
+                      )}
+                    </td>
+                    <td className="text-right px-3 py-2 tabular-nums">
+                      {m.delegationsReceived > 0
+                        ? `${m.delegationsCompleted}/${m.delegationsReceived}`
+                        : "—"}
+                    </td>
+                    <td className="text-right px-3 py-2 tabular-nums text-muted-foreground">
+                      {m.avgExecutionTimeMs
+                        ? m.avgExecutionTimeMs > 60000
+                          ? `${(m.avgExecutionTimeMs / 60000).toFixed(1)}m`
+                          : `${(m.avgExecutionTimeMs / 1000).toFixed(1)}s`
+                        : "—"}
+                    </td>
+                    <td className="text-right px-3 py-2 tabular-nums text-muted-foreground">
+                      {m.totalTokens > 1000000
+                        ? `${(m.totalTokens / 1000000).toFixed(1)}M`
+                        : m.totalTokens > 1000
+                          ? `${(m.totalTokens / 1000).toFixed(0)}K`
+                          : m.totalTokens || "—"}
+                    </td>
+                    <td className="text-right px-4 py-2 tabular-nums">
+                      {m.totalCostCents > 0 ? `$${(m.totalCostCents / 100).toFixed(2)}` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* ── Search + Filters ── */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">

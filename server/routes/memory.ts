@@ -414,4 +414,27 @@ router.post("/tasks/process", async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// RETRIEVAL METRICS
+// ============================================================================
+
+/**
+ * GET /api/memory/metrics
+ * Returns aggregated retrieval pipeline metrics from in-memory ring buffer.
+ * Shows per-arm latency, hit rates, cloud fallback trigger rate.
+ */
+router.get("/metrics", async (req: Request, res: Response) => {
+  try {
+    const { getMetrics } = await import("../memory/retrieval-metrics");
+    const windowMinutes = req.query.minutes
+      ? parseInt(String(req.query.minutes), 10)
+      : undefined;
+    const metrics = getMetrics(windowMinutes);
+    res.json(metrics);
+  } catch (error) {
+    logger.error({ error }, "Failed to fetch retrieval metrics");
+    res.status(500).json({ error: "Failed to fetch retrieval metrics" });
+  }
+});
+
 export default router;

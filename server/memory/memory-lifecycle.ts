@@ -78,7 +78,7 @@ export async function hotCommitFacts(): Promise<{ factsExtracted: number }> {
   return { factsExtracted };
 }
 
-interface ExtractedFact {
+export interface ExtractedFact {
   text: string;
   importance: number;
   pattern: string;
@@ -87,7 +87,7 @@ interface ExtractedFact {
 /**
  * Pattern-based fact extraction — no LLM needed, sub-ms per message.
  */
-function extractFactsWithPatterns(text: string): ExtractedFact[] {
+export function extractFactsWithPatterns(text: string): ExtractedFact[] {
   const facts: ExtractedFact[] = [];
 
   // Decision patterns
