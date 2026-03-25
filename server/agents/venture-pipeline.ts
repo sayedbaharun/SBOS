@@ -122,7 +122,7 @@ function generateCodename(): string {
 // STEP 1: PERPLEXITY RESEARCH
 // ============================================================================
 
-async function runPerplexityResearch(ideaId: string): Promise<{ content: string; tokensUsed: number }> {
+async function runPerplexityResearch(ideaId: string, maxTokens: number = 4000): Promise<{ content: string; tokensUsed: number }> {
   const idea = await storage.getVentureIdea(ideaId);
   if (!idea) throw new Error("Idea not found");
 
@@ -137,7 +137,7 @@ async function runPerplexityResearch(ideaId: string): Promise<{ content: string;
     model: "perplexity/sonar-pro",
     messages: [{ role: "user", content: researchPrompt }],
     temperature: 0.7,
-    max_tokens: 8000,
+    max_tokens: maxTokens,
   });
 
   const content = completion.choices[0]?.message?.content;
@@ -624,13 +624,18 @@ async function sendFinalNotification(ideaId: string) {
  * Start the venture pipeline for a new idea.
  * Called from /idea Telegram command. Fire-and-forget.
  */
-export async function startVenturePipeline(ideaId: string, chatId: string): Promise<void> {
+export interface PipelineOptions {
+  deep?: boolean;
+}
+
+export async function startVenturePipeline(ideaId: string, chatId: string, options: PipelineOptions = {}): Promise<void> {
   try {
     // Initialize pipeline data
     await updatePipelineData(ideaId, { chatId, steps: {} });
 
     // Step 1: Perplexity research
-    const { content: researchContent, tokensUsed: researchTokens } = await runPerplexityResearch(ideaId);
+    const researchTokenLimit = options.deep ? 8000 : 4000;
+    const { content: researchContent, tokensUsed: researchTokens } = await runPerplexityResearch(ideaId, researchTokenLimit);
     await updatePipelineData(ideaId, { totalTokensUsed: researchTokens });
 
     // Progress notification

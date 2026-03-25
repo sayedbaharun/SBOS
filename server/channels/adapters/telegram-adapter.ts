@@ -923,9 +923,11 @@ class TelegramAdapter implements ChannelAdapter {
     // ---- /idea Command (Autonomous Venture Pipeline) ----
     this.bot.command("idea", async (ctx) => {
       try {
-        const description = ctx.message.text.replace(/^\/idea\s*/, "").trim();
+        const rawInput = ctx.message.text.replace(/^\/idea\s*/, "").trim();
+        const isDeep = rawInput.startsWith("-deep ");
+        const description = isDeep ? rawInput.replace(/^-deep\s+/, "").trim() : rawInput;
         if (!description) {
-          await ctx.reply("Usage: /idea <description>\nExample: /idea AI-powered invoice parser for SMBs in UAE");
+          await ctx.reply("Usage: /idea <description>\n  /idea -deep <description> (thorough research)\nExample: /idea AI-powered invoice parser for SMBs in UAE");
           return;
         }
 
@@ -939,13 +941,13 @@ class TelegramAdapter implements ChannelAdapter {
         });
 
         await ctx.reply(
-          "Idea captured. Running deep research + validation.\n" +
+          `Idea captured. Running ${isDeep ? "deep" : "standard"} research + validation.\n` +
           "I'll notify you only if both AI reviewers agree it's viable."
         );
 
         // Fire-and-forget: start the autonomous pipeline
         const { startVenturePipeline } = await import("../../agents/venture-pipeline");
-        startVenturePipeline(idea.id, chatId).catch((err: any) => {
+        startVenturePipeline(idea.id, chatId, { deep: isDeep }).catch((err: any) => {
           logger.error({ err: err.message, ideaId: idea.id }, "Venture pipeline failed (unhandled)");
         });
 
