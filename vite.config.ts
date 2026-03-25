@@ -20,6 +20,14 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          blocknote: ["@blocknote/core", "@blocknote/react", "@blocknote/mantine"],
+          recharts: ["recharts"],
+        },
+      },
+    },
   },
   server: {
     fs: {

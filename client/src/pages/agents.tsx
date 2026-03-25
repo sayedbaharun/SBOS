@@ -92,6 +92,29 @@ interface ScheduleJob {
   errorCount: number;
 }
 
+interface AgentMetric {
+  agentId: string;
+  slug: string;
+  name: string;
+  isActive: boolean;
+  chatInvocations: number;
+  scheduledRuns: number;
+  scheduledErrors: number;
+  delegationsReceived: number;
+  delegationsCompleted: number;
+  delegationsFailed: number;
+  avgExecutionTimeMs: number | null;
+  totalTokens: number;
+  totalCostCents: number;
+  lastActivity: string | null;
+  status: "active" | "dormant" | "failing";
+}
+
+interface AgentMetricsResponse {
+  window: { days: number; since: string };
+  agents: AgentMetric[];
+}
+
 interface RunningData {
   agentTasks: Array<{
     id: string;

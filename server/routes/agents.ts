@@ -214,6 +214,140 @@ router.get("/compaction-stats", async (_req: Request, res: Response) => {
   }
 });
 
+// Unified agent metrics dashboard (MUST be before /:slug routes)
+router.get("/metrics", async (req: Request, res: Response) => {
+  try {
+    const database = await getDb();
+    const { tokenUsageLog } = await import("@shared/schema");
+    const { getScheduleStatus } = await import("../agents/agent-scheduler");
+
+    const days = parseInt(String(req.query.days) || "7", 10);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // 1. All active agents
+    const allAgents = await database
+      .select({ id: agents.id, slug: agents.slug, name: agents.name, isActive: agents.isActive })
+      .from(agents)
+      .where(eq(agents.isActive, true));
+
+    // 2. Token usage per agent
+    const tokensByAgent = await database
+      .select({
+        agentId: tokenUsageLog.agentId,
+        totalTokens: sql<number>`COALESCE(SUM(${tokenUsageLog.totalTokens}), 0)`.as("total_tokens"),
+        totalCostCents: sql<number>`COALESCE(SUM(${tokenUsageLog.estimatedCostCents}), 0)`.as("total_cost_cents"),
+        callCount: sql<number>`COUNT(*)`.as("call_count"),
+      })
+      .from(tokenUsageLog)
+      .where(gte(tokenUsageLog.createdAt, since))
+      .groupBy(tokenUsageLog.agentId);
+
+    // 3. Chat invocations per agent (count user messages)
+    const chatByAgent = await database
+      .select({
+        agentId: agentConversations.agentId,
+        chatInvocations: sql<number>`COUNT(*)`.as("chat_invocations"),
+        lastChat: sql<string>`MAX(${agentConversations.createdAt})`.as("last_chat"),
+      })
+      .from(agentConversations)
+      .where(and(
+        eq(agentConversations.role, "user"),
+        gte(agentConversations.createdAt, since)
+      ))
+      .groupBy(agentConversations.agentId);
+
+    // 4. Delegation stats per agent
+    const delegationByAgent = await database
+      .select({
+        assignedTo: agentTasks.assignedTo,
+        total: sql<number>`COUNT(*)`.as("total"),
+        completed: sql<number>`COUNT(*) FILTER (WHERE ${agentTasks.status} = 'completed')`.as("completed"),
+        failed: sql<number>`COUNT(*) FILTER (WHERE ${agentTasks.status} = 'failed')`.as("failed"),
+        avgExecMs: sql<number>`AVG(EXTRACT(EPOCH FROM (${agentTasks.completedAt} - ${agentTasks.startedAt})) * 1000) FILTER (WHERE ${agentTasks.completedAt} IS NOT NULL AND ${agentTasks.startedAt} IS NOT NULL)`.as("avg_exec_ms"),
+        lastTask: sql<string>`MAX(${agentTasks.createdAt})`.as("last_task"),
+      })
+      .from(agentTasks)
+      .where(gte(agentTasks.createdAt, since))
+      .groupBy(agentTasks.assignedTo);
+
+    // 5. Scheduler stats (in-memory)
+    const scheduleStatus = getScheduleStatus();
+
+    // Build lookup maps
+    const tokenMap = new Map(tokensByAgent.map(t => [t.agentId, t]));
+    const chatMap = new Map(chatByAgent.map(c => [c.agentId, c]));
+    const delegationMap = new Map(delegationByAgent.map(d => [d.assignedTo, d]));
+
+    // Aggregate scheduler stats per agent slug
+    const scheduleMap = new Map<string, { runs: number; errors: number }>();
+    for (const s of scheduleStatus) {
+      const existing = scheduleMap.get(s.agentSlug) || { runs: 0, errors: 0 };
+      existing.runs += s.runCount;
+      existing.errors += s.errorCount;
+      scheduleMap.set(s.agentSlug, existing);
+    }
+
+    // Combine into unified response
+    const agentMetrics = allAgents.map(agent => {
+      const tokens = tokenMap.get(agent.id);
+      const chat = chatMap.get(agent.id);
+      const delegation = delegationMap.get(agent.id);
+      const schedule = scheduleMap.get(agent.slug);
+
+      const chatInvocations = chat ? Number(chat.chatInvocations) : 0;
+      const scheduledRuns = schedule?.runs || 0;
+      const scheduledErrors = schedule?.errors || 0;
+      const delegationsReceived = delegation ? Number(delegation.total) : 0;
+      const delegationsCompleted = delegation ? Number(delegation.completed) : 0;
+      const delegationsFailed = delegation ? Number(delegation.failed) : 0;
+      const totalActivity = chatInvocations + scheduledRuns + delegationsReceived;
+      const totalErrors = scheduledErrors + delegationsFailed;
+      const errorRate = totalActivity > 0 ? totalErrors / totalActivity : 0;
+
+      // Determine last activity timestamp
+      const timestamps = [chat?.lastChat, delegation?.lastTask].filter(Boolean);
+      const lastActivity = timestamps.length > 0
+        ? new Date(Math.max(...timestamps.map(t => new Date(t!).getTime()))).toISOString()
+        : null;
+
+      let status: "active" | "dormant" | "failing" = "dormant";
+      if (totalActivity > 0) {
+        status = errorRate > 0.3 ? "failing" : "active";
+      }
+
+      return {
+        agentId: agent.id,
+        slug: agent.slug,
+        name: agent.name,
+        isActive: agent.isActive,
+        chatInvocations,
+        scheduledRuns,
+        scheduledErrors,
+        delegationsReceived,
+        delegationsCompleted,
+        delegationsFailed,
+        avgExecutionTimeMs: delegation?.avgExecMs ? Math.round(Number(delegation.avgExecMs)) : null,
+        totalTokens: tokens ? Number(tokens.totalTokens) : 0,
+        totalCostCents: tokens ? Number(tokens.totalCostCents) : 0,
+        lastActivity,
+        status,
+      };
+    });
+
+    // Sort by total activity descending
+    agentMetrics.sort((a, b) => {
+      const aTotal = a.chatInvocations + a.scheduledRuns + a.delegationsReceived;
+      const bTotal = b.chatInvocations + b.scheduledRuns + b.delegationsReceived;
+      return bTotal - aTotal;
+    });
+
+    res.json({ window: { days, since: since.toISOString() }, agents: agentMetrics });
+  } catch (error) {
+    logger.error({ error }, "Error fetching agent metrics");
+    res.status(500).json({ error: "Failed to fetch agent metrics" });
+  }
+});
+
 // Get single agent by slug
 router.get("/:slug", async (req: Request, res: Response) => {
   try {

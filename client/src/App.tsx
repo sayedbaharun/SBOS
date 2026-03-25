@@ -10,45 +10,48 @@ import CaptureModal from "@/components/capture-modal";
 import TaskDetailModal from "@/components/task-detail-modal";
 import DecisionQuickCapture from "@/components/decision-quick-capture";
 import Layout from "@/components/layout";
-import Landing from "@/pages/landing";
-import VentureHQ from "@/pages/venture-hq";
-import VentureDetail from "@/pages/venture-detail";
-import HealthHub from "@/pages/health-hub";
-import KnowledgeHub from "@/pages/knowledge-hub";
-import DocDetail from "@/pages/doc-detail";
-import DeepWork from "@/pages/deep-work";
-import NotificationsPage from "@/pages/notifications";
-import SettingsPage from "@/pages/settings";
-import SettingsAIPage from "@/pages/settings-ai";
-import SettingsIntegrationsPage from "@/pages/settings-integrations";
-import SettingsCategoriesPage from "@/pages/settings-categories";
-import CalendarPage from "@/pages/calendar";
-import MorningRitual from "@/pages/morning-ritual";
-import EveningReview from "@/pages/evening-review";
-import DailyPage from "@/pages/daily";
-import WeeklyPlanning from "@/pages/weekly-planning";
-import Shopping from "@/pages/shopping";
-import Books from "@/pages/books";
-import Finance from "@/pages/finance";
-import CapturePage from "@/pages/capture";
-import TradingPage from "@/pages/trading";
-import AiChat from "@/pages/ai-chat";
-import AllTasks from "@/pages/all-tasks";
-import AgentsPage from "@/pages/agents";
-import AgentDetailPage from "@/pages/agent-detail";
-import DelegationLogPage from "@/pages/delegation-log";
-import CommandCenterV2 from "@/pages/command-center-v2";
-import PeoplePage from "@/pages/people";
-import VentureLab from "@/pages/venture-lab";
-import ResearchInbox from "@/pages/research-inbox";
-import ReviewQueue from "@/pages/review-queue";
-import LiveTasks from "@/pages/live-tasks";
-import SettingsExternalAgents from "@/pages/settings-external-agents";
-import NotFound from "@/pages/not-found";
 import MobileQuickActions from "@/components/mobile/mobile-quick-actions";
 import InstallPrompt from "@/components/mobile/install-prompt";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
+import { Loader2 } from "lucide-react";
 import { dailyRemindersService } from "@/lib/daily-reminders";
+
+// Static imports — core paths loaded every session
+import Landing from "@/pages/landing";
+import CommandCenterV2 from "@/pages/command-center-v2";
+import DailyPage from "@/pages/daily";
+import NotFound from "@/pages/not-found";
+
+// Lazy-loaded pages — split into separate chunks
+const VentureHQ = lazy(() => import("@/pages/venture-hq"));
+const VentureDetail = lazy(() => import("@/pages/venture-detail"));
+const HealthHub = lazy(() => import("@/pages/health-hub"));
+const KnowledgeHub = lazy(() => import("@/pages/knowledge-hub"));
+const DocDetail = lazy(() => import("@/pages/doc-detail"));
+const DeepWork = lazy(() => import("@/pages/deep-work"));
+const NotificationsPage = lazy(() => import("@/pages/notifications"));
+const SettingsPage = lazy(() => import("@/pages/settings"));
+const SettingsAIPage = lazy(() => import("@/pages/settings-ai"));
+const SettingsIntegrationsPage = lazy(() => import("@/pages/settings-integrations"));
+const SettingsCategoriesPage = lazy(() => import("@/pages/settings-categories"));
+const CalendarPage = lazy(() => import("@/pages/calendar"));
+const WeeklyPlanning = lazy(() => import("@/pages/weekly-planning"));
+const Shopping = lazy(() => import("@/pages/shopping"));
+const Books = lazy(() => import("@/pages/books"));
+const Finance = lazy(() => import("@/pages/finance"));
+const CapturePage = lazy(() => import("@/pages/capture"));
+const TradingPage = lazy(() => import("@/pages/trading"));
+const AiChat = lazy(() => import("@/pages/ai-chat"));
+const AllTasks = lazy(() => import("@/pages/all-tasks"));
+const AgentsPage = lazy(() => import("@/pages/agents"));
+const AgentDetailPage = lazy(() => import("@/pages/agent-detail"));
+const DelegationLogPage = lazy(() => import("@/pages/delegation-log"));
+const PeoplePage = lazy(() => import("@/pages/people"));
+const VentureLab = lazy(() => import("@/pages/venture-lab"));
+const ResearchInbox = lazy(() => import("@/pages/research-inbox"));
+const ReviewQueue = lazy(() => import("@/pages/review-queue"));
+const LiveTasks = lazy(() => import("@/pages/live-tasks"));
+const SettingsExternalAgents = lazy(() => import("@/pages/settings-external-agents"));
 
 function Router() {
   // Initialize daily reminders service on app load
@@ -64,6 +67,7 @@ function Router() {
       {/* Main app with layout */}
       <Route>
         <Layout>
+          <Suspense fallback={<div className="flex items-center justify-center h-full min-h-[50vh]"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>}>
           <Switch>
             <Route path="/dashboard" component={CommandCenterV2} />
             <Route path="/ventures" component={VentureHQ} />
@@ -103,6 +107,7 @@ function Router() {
             <Route path="/agents/:slug" component={AgentDetailPage} />
             <Route component={NotFound} />
           </Switch>
+          </Suspense>
         </Layout>
       </Route>
     </Switch>
