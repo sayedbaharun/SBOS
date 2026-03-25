@@ -1,6 +1,9 @@
-import { Heart, Plus, Download } from "lucide-react";
+import { Heart, Plus, Download, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface HealthHubHeaderProps {
   dateRange: string;
@@ -15,9 +18,38 @@ export default function HealthHubHeader({
   onOpenQuickLog,
   hideTitle = false,
 }: HealthHubHeaderProps) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [syncing, setSyncing] = useState(false);
+
   const handleExport = () => {
     // TODO: Implement CSV export
     console.log("Export to CSV");
+  };
+
+  const handleWhoopSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/whoop/sync", { method: "POST", credentials: "include" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Sync failed");
+
+      toast({
+        title: "WHOOP synced",
+        description: `${data.synced} day${data.synced !== 1 ? "s" : ""} updated${data.errors?.length ? ` (${data.errors.length} errors)` : ""}`,
+      });
+      // Refresh health data
+      queryClient.invalidateQueries({ queryKey: ["health-entries"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    } catch (err: any) {
+      toast({
+        title: "WHOOP sync failed",
+        description: err.message || "Could not sync WHOOP data",
+        variant: "destructive",
+      });
+    } finally {
+      setSyncing(false);
+    }
   };
 
   return (
@@ -45,6 +77,16 @@ export default function HealthHubHeader({
             <SelectItem value="all">All time</SelectItem>
           </SelectContent>
         </Select>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleWhoopSync}
+          disabled={syncing}
+          title="Sync WHOOP data"
+        >
+          <RefreshCw className={`h-4 w-4 sm:mr-2 ${syncing ? "animate-spin" : ""}`} />
+          <span className="hidden sm:inline">{syncing ? "Syncing..." : "WHOOP"}</span>
+        </Button>
         <Button variant="outline" size="sm" onClick={handleExport} className="hidden sm:flex">
           <Download className="h-4 w-4 mr-2" />
           Export
