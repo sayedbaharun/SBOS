@@ -788,9 +788,15 @@ export const healthEntries = pgTable(
     weightKg: real("weight_kg"),
     bodyFatPercent: real("body_fat_percent"),
     stressLevel: stressLevelEnum("stress_level"),
+    // WHOOP integration fields
+    recoveryScore: integer("recovery_score"), // 0-100%
+    hrv: real("hrv"), // HRV RMSSD in ms
+    restingHeartRate: integer("resting_heart_rate"), // bpm
+    strainScore: real("strain_score"), // 0-21 scale
     tags: jsonb("tags").$type<string[]>().default([]),
     notes: text("notes"),
     externalId: text("external_id"),
+    whoopSyncedAt: timestamp("whoop_synced_at"), // Last WHOOP sync timestamp
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
@@ -918,6 +924,24 @@ export const insertNutritionEntrySchema = createInsertSchema(nutritionEntries)
 
 export type InsertNutritionEntry = z.infer<typeof insertNutritionEntrySchema>;
 export type NutritionEntry = typeof nutritionEntries.$inferSelect;
+
+// INTEGRATION TOKENS: OAuth tokens for external services (WHOOP, etc.)
+export const integrationTokens = pgTable(
+  "integration_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: text("provider").notNull().unique(), // e.g. "whoop"
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token"),
+    expiresAt: timestamp("expires_at"),
+    scopes: text("scopes"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  }
+);
+
+export type IntegrationToken = typeof integrationTokens.$inferSelect;
 
 // DOCS: Pages, SOPs, prompts, playbooks, specs, strategies
 export const docs = pgTable(

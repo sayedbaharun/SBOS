@@ -338,6 +338,44 @@ async function checkTelegram(): Promise<IntegrationInfo> {
 }
 
 /**
+ * Check WHOOP connection
+ */
+async function checkWhoop(): Promise<IntegrationInfo> {
+  const clientId = process.env.WHOOP_CLIENT_ID;
+
+  if (!clientId) {
+    return {
+      name: "WHOOP",
+      status: "not_configured",
+      description: "Health & recovery data from WHOOP band",
+      lastChecked: new Date().toISOString(),
+    };
+  }
+
+  try {
+    // Dynamic import to avoid circular deps
+    const { isWhoopConnected } = await import("./integrations/whoop");
+    const connected = await isWhoopConnected();
+
+    return {
+      name: "WHOOP",
+      status: connected ? "connected" : "not_configured",
+      description: "Health & recovery data from WHOOP band",
+      lastChecked: new Date().toISOString(),
+      errorMessage: connected ? undefined : "OAuth not completed — visit /api/whoop/authorize",
+    };
+  } catch (error: any) {
+    return {
+      name: "WHOOP",
+      status: "error",
+      description: "Health & recovery data from WHOOP band",
+      lastChecked: new Date().toISOString(),
+      errorMessage: error.message || "Connection check failed",
+    };
+  }
+}
+
+/**
  * Get status of all integrations
  */
 export async function getAllIntegrationStatuses(): Promise<IntegrationInfo[]> {
@@ -348,6 +386,7 @@ export async function getAllIntegrationStatuses(): Promise<IntegrationInfo[]> {
     checkGmail(),
     checkTelegram(),
     checkTickTick(),
+    checkWhoop(),
   ]);
 
   return results;
@@ -364,6 +403,7 @@ export async function getIntegrationStatus(name: string): Promise<IntegrationInf
     gmail: checkGmail,
     telegram: checkTelegram,
     ticktick: checkTickTick,
+    whoop: checkWhoop,
   };
 
   const checkFn = checks[name.toLowerCase()];

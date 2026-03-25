@@ -172,6 +172,8 @@ import {
   type Mantra,
   type InsertMantra,
   mantras,
+  type IntegrationToken,
+  integrationTokens,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { eq, desc, and, or, gte, lte, not, inArray, like, sql, asc, isNull } from "drizzle-orm";
@@ -282,6 +284,12 @@ export interface IStorage {
   getHealthEntry(id: string): Promise<HealthEntry | undefined>;
   createHealthEntry(data: InsertHealthEntry): Promise<HealthEntry>;
   updateHealthEntry(id: string, data: Partial<InsertHealthEntry>): Promise<HealthEntry | undefined>;
+  getHealthEntryByDate(date: string): Promise<HealthEntry | undefined>;
+
+  // Integration Tokens
+  getIntegrationToken(provider: string): Promise<IntegrationToken | undefined>;
+  upsertIntegrationToken(provider: string, data: { accessToken: string; refreshToken?: string; expiresAt?: Date; scopes?: string }): Promise<IntegrationToken>;
+  deleteIntegrationToken(provider: string): Promise<void>;
 
   // Bloodwork Entries
   getBloodworkEntries(filters?: { dateGte?: string; dateLte?: string }): Promise<BloodworkEntry[]>;
@@ -1627,6 +1635,61 @@ export class DBStorage implements IStorage {
       .where(eq(healthEntries.id, id))
       .returning();
     return updated;
+  }
+
+  async getHealthEntryByDate(date: string): Promise<HealthEntry | undefined> {
+    const [entry] = await this.db
+      .select()
+      .from(healthEntries)
+      .where(eq(healthEntries.date, date))
+      .limit(1);
+    return entry;
+  }
+
+  // ============================================================================
+  // INTEGRATION TOKENS
+  // ============================================================================
+
+  async getIntegrationToken(provider: string): Promise<IntegrationToken | undefined> {
+    const [token] = await this.db
+      .select()
+      .from(integrationTokens)
+      .where(eq(integrationTokens.provider, provider))
+      .limit(1);
+    return token;
+  }
+
+  async upsertIntegrationToken(
+    provider: string,
+    data: { accessToken: string; refreshToken?: string; expiresAt?: Date; scopes?: string }
+  ): Promise<IntegrationToken> {
+    const [token] = await this.db
+      .insert(integrationTokens)
+      .values({
+        provider,
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken ?? null,
+        expiresAt: data.expiresAt ?? null,
+        scopes: data.scopes ?? null,
+      } as any)
+      .onConflictDoUpdate({
+        target: integrationTokens.provider,
+        set: {
+          accessToken: data.accessToken,
+          refreshToken: data.refreshToken ?? undefined,
+          expiresAt: data.expiresAt ?? undefined,
+          scopes: data.scopes ?? undefined,
+          updatedAt: new Date(),
+        } as any,
+      })
+      .returning();
+    return token;
+  }
+
+  async deleteIntegrationToken(provider: string): Promise<void> {
+    await this.db
+      .delete(integrationTokens)
+      .where(eq(integrationTokens.provider, provider));
   }
 
   // ============================================================================
