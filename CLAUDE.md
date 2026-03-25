@@ -1360,10 +1360,10 @@ Components appear in `client/src/components/ui/`.
 
 ### Railway (Production)
 
-SB-OS is deployed on **Railway** with auto-deploy from `sayedbaharun/aura` on push to `main`.
+SB-OS is deployed on **Railway** with auto-deploy from `sayedbaharun/SBOS` on push to `main`.
 
 - **Live URL**: `https://sbaura.up.railway.app`
-- **Builder**: Docker (`Dockerfile` in project root — bypasses Railpack caching issues)
+- **Builder**: Railpack (switched from Dockerfile 2026-03-25)
 - **Port**: 8080 (set via `ENV PORT=8080` in Dockerfile)
 - **Database**: Railway-managed PostgreSQL
 
