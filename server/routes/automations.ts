@@ -242,14 +242,15 @@ async function registerCronAutomation(automation: any): Promise<void> {
     return;
   }
 
+  const tz = automation.timezone || "Asia/Dubai";
   const task = cron.default.schedule(automation.cronExpression, () => {
     executeAutomation(automation).catch((err: any) =>
       logger.error({ error: err.message, automationId: automation.id }, "Cron automation failed")
     );
-  });
+  }, { timezone: tz });
 
   activeCrons.set(automation.id, task);
-  logger.info({ id: automation.id, name: automation.name, cron: automation.cronExpression }, "Cron automation registered");
+  logger.info({ id: automation.id, name: automation.name, cron: automation.cronExpression, timezone: tz }, "Cron automation registered");
 }
 
 function unregisterCronAutomation(automationId: string): void {

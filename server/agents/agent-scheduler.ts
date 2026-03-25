@@ -34,6 +34,7 @@ interface ScheduledCronJob {
   agentSlug: string;
   jobName: string;
   cronExpression: string;
+  timezone: string;
   task: ReturnType<typeof cron.schedule>;
   lastRun: Date | null;
   nextRun: Date | null;
@@ -98,8 +99,9 @@ export async function initializeScheduler(): Promise<void> {
 /**
  * Register a single cron job for an agent.
  */
-function registerJob(agent: Agent, jobName: string, cronExpression: string): void {
+function registerJob(agent: Agent, jobName: string, cronExpression: string, timezone?: string): void {
   const jobKey = `${agent.slug}:${jobName}`;
+  const tz = timezone || (agent as any).scheduleTimezone || "Asia/Dubai";
 
   // Stop existing job if re-registering
   if (activeJobs.has(jobKey)) {
@@ -170,13 +172,14 @@ function registerJob(agent: Agent, jobName: string, cronExpression: string): voi
         logger.error({ error: dlErr.message }, "Failed to create dead letter entry");
       }
     }
-  });
+  }, { timezone: tz });
 
   activeJobs.set(jobKey, {
     agentId: agent.id,
     agentSlug: agent.slug,
     jobName,
     cronExpression,
+    timezone: tz,
     task,
     lastRun: null,
     nextRun: null,
@@ -185,7 +188,7 @@ function registerJob(agent: Agent, jobName: string, cronExpression: string): voi
   });
 
   logger.debug(
-    { agentSlug: agent.slug, jobName, cronExpression },
+    { agentSlug: agent.slug, jobName, cronExpression, timezone: tz },
     "Registered scheduled job"
   );
 }
@@ -269,6 +272,7 @@ export function getScheduleStatus(): Array<{
   agentSlug: string;
   jobName: string;
   cronExpression: string;
+  timezone: string;
   lastRun: string | null;
   runCount: number;
   errorCount: number;
@@ -277,6 +281,7 @@ export function getScheduleStatus(): Array<{
     agentSlug: string;
     jobName: string;
     cronExpression: string;
+    timezone: string;
     lastRun: string | null;
     runCount: number;
     errorCount: number;
@@ -287,6 +292,7 @@ export function getScheduleStatus(): Array<{
       agentSlug: job.agentSlug,
       jobName: job.jobName,
       cronExpression: job.cronExpression,
+      timezone: job.timezone,
       lastRun: job.lastRun?.toISOString() || null,
       runCount: job.runCount,
       errorCount: job.errorCount,

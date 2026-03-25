@@ -7,7 +7,7 @@ import { logger } from '../logger';
  * Future enhancement: Send email or push notification.
  */
 export function scheduleWeeklyPlanningReminder() {
-  // Run every Sunday at 18:00 (6 PM)
+  // Run every Sunday at 18:00 (6 PM Dubai time)
   cron.schedule('0 18 * * 0', async () => {
     try {
       logger.info('📅 Weekly Planning Reminder: Time to plan your week!');
@@ -22,7 +22,7 @@ export function scheduleWeeklyPlanningReminder() {
     } catch (error) {
       logger.error({ error }, 'Failed to send weekly planning reminder');
     }
-  });
+  }, { timezone: 'Asia/Dubai' });
 
-  logger.info('📆 Weekly planning reminder scheduled (Sundays at 6 PM)');
+  logger.info('📆 Weekly planning reminder scheduled (Sundays at 6 PM Dubai time)');
 }

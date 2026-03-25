@@ -2888,6 +2888,8 @@ export const agents = pgTable(
 
     // Schedule (cron-based proactive execution)
     schedule: jsonb("schedule").$type<Record<string, string>>(),
+    /** IANA timezone for scheduled jobs (default: Asia/Dubai) */
+    scheduleTimezone: text("schedule_timezone").default("Asia/Dubai"),
 
     // Persistent context memory — injected into system prompt every call (like per-group CLAUDE.md)
     contextMemory: text("context_memory"),
@@ -3748,6 +3750,8 @@ export const automations = pgTable(
     type: text("type").$type<"cron" | "webhook">().notNull(),
     /** Cron expression (5-field) for scheduled automations */
     cronExpression: text("cron_expression"),
+    /** IANA timezone for cron execution (default: Asia/Dubai) */
+    timezone: text("timezone").default("Asia/Dubai"),
     /** Unique webhook path slug for webhook automations */
     webhookSlug: text("webhook_slug"),
     /** Agent slug to execute when triggered */

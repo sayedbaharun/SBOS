@@ -8,10 +8,10 @@ import { logger } from '../logger';
  * This ensures the day is ready for health/nutrition entries and tasks.
  */
 export function scheduleDailyDayCreation() {
-  // Run every day at 00:00 (midnight)
+  // Run every day at 00:00 (midnight Dubai time)
   cron.schedule('0 0 * * *', async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' });
 
       // Check if day already exists
       const existing = await storage.getDay(today);
@@ -29,7 +29,7 @@ export function scheduleDailyDayCreation() {
     } catch (error) {
       logger.error({ error }, 'Failed to auto-create day record');
     }
-  });
+  }, { timezone: 'Asia/Dubai' });
 
-  logger.info('📅 Daily day creation automation scheduled (runs at midnight)');
+  logger.info('📅 Daily day creation automation scheduled (runs at midnight Dubai time)');
 }

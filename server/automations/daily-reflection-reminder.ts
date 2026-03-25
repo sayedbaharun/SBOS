@@ -7,7 +7,7 @@ import { logger } from '../logger';
  * Future enhancement: Send email or push notification.
  */
 export function scheduleDailyReflectionReminder() {
-  // Run every day at 21:00 (9 PM)
+  // Run every day at 21:00 (9 PM Dubai time)
   cron.schedule('0 21 * * *', async () => {
     try {
       logger.info('🌙 Daily Reflection Reminder: How was your day?');
@@ -22,7 +22,7 @@ export function scheduleDailyReflectionReminder() {
     } catch (error) {
       logger.error({ error }, 'Failed to send daily reflection reminder');
     }
-  });
+  }, { timezone: 'Asia/Dubai' });
 
-  logger.info('🌙 Daily reflection reminder scheduled (every day at 9 PM)');
+  logger.info('🌙 Daily reflection reminder scheduled (every day at 9 PM Dubai time)');
 }
