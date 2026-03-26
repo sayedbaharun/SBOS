@@ -562,12 +562,21 @@ app.use((req, res, next) => {
         );
       }
 
-      // Pinecone: validate connection
+      // Pinecone: validate connection + trigger backfill if empty
       import('./memory/pinecone-store').then(({ getPineconeStatus }) =>
         getPineconeStatus()
           .then((status) => {
             if (status.available) {
-              log(`✓ Pinecone connected (${status.indexName}, ${status.stats?.totalRecordCount || 0} records)`);
+              const count = status.stats?.totalRecordCount || 0;
+              log(`✓ Pinecone connected (${status.indexName}, ${count} records)`);
+              if (count === 0) {
+                log('⚡ Pinecone has 0 records — triggering backfill');
+                import('./agents/scheduled-jobs').then(({ executeScheduledJob }) =>
+                  executeScheduledJob('_system', '_system', 'pinecone_backfill')
+                    .then(() => log('✓ Pinecone backfill complete'))
+                    .catch((err: any) => log('⚠ Pinecone backfill failed:', err.message))
+                ).catch(() => {});
+              }
             } else {
               log(`⚠ Pinecone unavailable: ${status.error}`);
             }

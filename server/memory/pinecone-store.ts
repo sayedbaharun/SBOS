@@ -227,8 +227,50 @@ export async function getPineconeStatus(): Promise<{
 }
 
 /**
- * Check if Pinecone is configured
+ * Check if Pinecone is configured (env var only — does not test connectivity)
  */
 export function isPineconeConfigured(): boolean {
   return !!process.env.PINECONE_API_KEY;
+}
+
+// ============================================================================
+// CONNECTIVITY CACHE
+// ============================================================================
+
+let _readyCache: { ready: boolean; checkedAt: number } | null = null;
+const READY_CACHE_TTL_MS = 60_000; // 60 seconds
+
+/**
+ * Check if Pinecone is configured AND reachable.
+ * Result is cached for 60s to avoid hammering on every write.
+ */
+export async function isPineconeReady(): Promise<boolean> {
+  if (!process.env.PINECONE_API_KEY) return false;
+
+  const now = Date.now();
+  if (_readyCache && now - _readyCache.checkedAt < READY_CACHE_TTL_MS) {
+    return _readyCache.ready;
+  }
+
+  try {
+    await getIndex().describeIndexStats();
+    _readyCache = { ready: true, checkedAt: now };
+    return true;
+  } catch (err: any) {
+    logger.warn({ error: err.message }, "Pinecone connectivity check failed");
+    _readyCache = { ready: false, checkedAt: now };
+    return false;
+  }
+}
+
+/**
+ * Get current record count from Pinecone (returns 0 on failure)
+ */
+export async function getPineconeRecordCount(): Promise<number> {
+  try {
+    const stats = await getIndex().describeIndexStats();
+    return stats.totalRecordCount || 0;
+  } catch {
+    return 0;
+  }
 }

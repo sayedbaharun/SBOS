@@ -142,6 +142,8 @@ export async function ensurePayloadIndexes(): Promise<void> {
   const indexSpecs: Array<{ collection: string; field: string; schema: string }> = [
     { collection: QDRANT_COLLECTIONS.RAW_MEMORIES, field: "importance", schema: "float" },
     { collection: QDRANT_COLLECTIONS.COMPACTED_MEMORIES, field: "importance", schema: "float" },
+    { collection: QDRANT_COLLECTIONS.RAW_MEMORIES, field: "archived", schema: "bool" },
+    { collection: QDRANT_COLLECTIONS.COMPACTED_MEMORIES, field: "archived", schema: "bool" },
   ];
 
   for (const spec of indexSpecs) {
@@ -178,7 +180,7 @@ function computeChecksum(text: string): string {
  * Store a raw memory (conversation message) in Qdrant
  */
 export async function upsertRawMemory(
-  payload: Omit<RawMemoryPayload, "checksum" | "version" | "compacted"> & {
+  payload: Omit<RawMemoryPayload, "checksum" | "version" | "compacted" | "archived" | "last_accessed_at"> & {
     id?: string;
   }
 ): Promise<string> {
@@ -191,6 +193,7 @@ export async function upsertRawMemory(
   const fullPayload: RawMemoryPayload = {
     ...payload,
     compacted: false,
+    archived: false,
     version: 1,
     checksum,
   };
@@ -214,7 +217,7 @@ export async function upsertRawMemory(
  */
 export async function upsertRawMemories(
   memories: Array<
-    Omit<RawMemoryPayload, "checksum" | "version" | "compacted"> & { id?: string }
+    Omit<RawMemoryPayload, "checksum" | "version" | "compacted" | "archived" | "last_accessed_at"> & { id?: string }
   >
 ): Promise<string[]> {
   if (memories.length === 0) return [];
@@ -234,6 +237,7 @@ export async function upsertRawMemories(
       payload: {
         ...mem,
         compacted: false,
+        archived: false,
         version: 1,
         checksum: computeChecksum(mem.text),
       } as Record<string, unknown>,
@@ -559,31 +563,39 @@ export async function searchAllCollections(
 
   // Build per-collection filters (different collections have different indexed fields)
   const buildFilter = (collection: string) => {
-    const conditions: Array<Record<string, unknown>> = [];
+    const must: Array<Record<string, unknown>> = [];
+    const must_not: Array<Record<string, unknown>> = [];
 
     // Domain filter (indexed on raw_memories and compacted_memories)
     if (domainFilter && collection !== QDRANT_COLLECTIONS.ENTITY_INDEX) {
-      conditions.push({ key: "domain", match: { value: domainFilter } });
+      must.push({ key: "domain", match: { value: domainFilter } });
     }
 
     // Importance pre-filter (available on raw_memories and compacted_memories)
     if (minImportance !== undefined && collection !== QDRANT_COLLECTIONS.ENTITY_INDEX) {
-      conditions.push({ key: "importance", range: { gte: minImportance } });
+      must.push({ key: "importance", range: { gte: minImportance } });
     }
 
     // Timestamp pre-filter (indexed on raw_memories and compacted_memories)
     if (maxAgeDays !== undefined && collection !== QDRANT_COLLECTIONS.ENTITY_INDEX) {
       const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
-      conditions.push({ key: "timestamp", range: { gte: cutoffMs } });
+      must.push({ key: "timestamp", range: { gte: cutoffMs } });
     }
 
     // Entity type filter (only on entity_index)
     if (entityTypes && entityTypes.length > 0 && collection === QDRANT_COLLECTIONS.ENTITY_INDEX) {
-      // Use must with any_of for multiple entity types
-      conditions.push({ key: "entity_type", match: { any: entityTypes } });
+      must.push({ key: "entity_type", match: { any: entityTypes } });
     }
 
-    return conditions.length > 0 ? { must: conditions } : undefined;
+    // Exclude archived memories (must_not so records without the field are still included)
+    if (collection !== QDRANT_COLLECTIONS.ENTITY_INDEX) {
+      must_not.push({ key: "archived", match: { value: true } });
+    }
+
+    const filter: Record<string, unknown> = {};
+    if (must.length > 0) filter.must = must;
+    if (must_not.length > 0) filter.must_not = must_not;
+    return Object.keys(filter).length > 0 ? filter : undefined;
   };
 
   const searchPromises = collections.map((col) =>
@@ -596,6 +608,105 @@ export async function searchAllCollections(
   allResults.sort((a, b) => b.score - a.score);
 
   return allResults.slice(0, limit);
+}
+
+// ============================================================================
+// ARCHIVE (SOFT DELETE)
+// ============================================================================
+
+/**
+ * Mark a memory as archived — non-destructive soft delete.
+ * Archived memories are excluded from search but not deleted.
+ */
+export async function archiveMemory(id: string, collection: string): Promise<void> {
+  const qdrant = getClient();
+  await qdrant.setPayload(collection, {
+    payload: { archived: true, last_accessed_at: Date.now() },
+    points: [id],
+  });
+}
+
+/**
+ * Find old low-importance memories eligible for archiving.
+ * Only returns IDs (no payload) for efficiency.
+ */
+export async function getOldLowImportanceMemories(
+  collection: string,
+  olderThanDays: number,
+  maxImportance: number,
+  limit: number = 200
+): Promise<string[]> {
+  const qdrant = getClient();
+  const cutoffMs = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+
+  const result = await qdrant.scroll(collection, {
+    filter: {
+      must: [
+        { key: "timestamp", range: { lt: cutoffMs } },
+        { key: "importance", range: { lte: maxImportance } },
+      ],
+      must_not: [
+        { key: "archived", match: { value: true } },
+      ],
+    } as any,
+    limit,
+    with_payload: false,
+  });
+
+  return result.points.map((p) => p.id as string);
+}
+
+/**
+ * Get compacted memories for Pinecone sync (by sync_status, excluding archived).
+ * Used by the nightly sync job.
+ */
+export async function getCompactedMemoriesForSync(
+  limit: number = 200
+): Promise<Array<{ id: string; payload: CompactedMemoryPayload }>> {
+  const qdrant = getClient();
+
+  const result = await qdrant.scroll(QDRANT_COLLECTIONS.COMPACTED_MEMORIES, {
+    filter: {
+      must: [{ key: "sync_status", match: { value: "pending" } }],
+      must_not: [{ key: "archived", match: { value: true } }],
+    } as any,
+    limit,
+    with_payload: true,
+  });
+
+  return result.points.map((p) => ({
+    id: p.id as string,
+    payload: p.payload as unknown as CompactedMemoryPayload,
+  }));
+}
+
+/**
+ * Scroll compacted memories for Pinecone backfill (high importance, not archived).
+ */
+export async function scrollHighValueCompacted(
+  minImportance: number = 0.5,
+  limit: number = 100,
+  offset?: string
+): Promise<{ points: Array<{ id: string; payload: CompactedMemoryPayload }>; nextOffset?: string }> {
+  const qdrant = getClient();
+
+  const result = await qdrant.scroll(QDRANT_COLLECTIONS.COMPACTED_MEMORIES, {
+    filter: {
+      must: [{ key: "importance", range: { gte: minImportance } }],
+      must_not: [{ key: "archived", match: { value: true } }],
+    } as any,
+    limit,
+    offset: offset as any,
+    with_payload: true,
+  });
+
+  return {
+    points: result.points.map((p) => ({
+      id: p.id as string,
+      payload: p.payload as unknown as CompactedMemoryPayload,
+    })),
+    nextOffset: result.next_page_offset as string | undefined,
+  };
 }
 
 // ============================================================================

@@ -415,6 +415,114 @@ router.post("/tasks/process", async (req: Request, res: Response) => {
 });
 
 // ============================================================================
+// CLAUDE MEMORY BRIDGE — Ingest markdown from Claude file-based memory
+// ============================================================================
+
+/**
+ * POST /api/memory/ingest-markdown
+ * Accept markdown content from Claude Code's file-based memory system and
+ * store it as compacted memories in Qdrant (and Pinecone if ready).
+ *
+ * Auth: x-memory-api-key header (same key as cloud agent)
+ * Body: { content: string, source?: string, tags?: string[] }
+ */
+router.post("/ingest-markdown", async (req: Request, res: Response) => {
+  try {
+    // Auth check
+    const apiKey = String(req.headers["x-memory-api-key"] || "");
+    const expectedKey = process.env.MEMORY_API_KEY;
+    if (expectedKey && apiKey !== expectedKey) {
+      return res.status(401).json({ error: "Invalid API key" });
+    }
+
+    const body = z
+      .object({
+        content: z.string().min(1).max(50_000),
+        source: z.string().default("claude-memory"),
+        tags: z.array(z.string()).default(["claude-memory"]),
+      })
+      .parse(req.body);
+
+    const { generateEmbedding } = await import("../embeddings");
+    const { upsertCompactedMemory } = await import("../memory/qdrant-store");
+    const { isPineconeReady, upsertToPinecone } = await import("../memory/pinecone-store");
+    const { createHash } = await import("crypto");
+    const { randomUUID } = await import("crypto");
+
+    // Split content into sections by ## headings
+    const sections = body.content
+      .split(/\n(?=##\s)/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 50); // Skip very short sections
+
+    if (sections.length === 0) {
+      return res.json({ success: true, sections: 0, message: "No substantial sections found" });
+    }
+
+    const now = Date.now();
+    const pineconeReady = await isPineconeReady();
+    const pineconeRecords: Array<{ id: string; text: string; metadata: Record<string, unknown> }> = [];
+    let stored = 0;
+
+    for (const section of sections) {
+      try {
+        const id = randomUUID();
+        const checksum = createHash("sha256").update(section).digest("hex");
+
+        await upsertCompactedMemory(
+          {
+            summary: section,
+            source_session_ids: [],
+            source_count: 1,
+            timestamp: now,
+            time_range_start: now,
+            time_range_end: now,
+            domain: "personal",
+            key_entities: [],
+            key_decisions: [],
+            key_facts: [],
+            importance: 0.7,
+            compaction_model: body.source,
+            version: 1,
+            sync_status: pineconeReady ? "synced" : "pending",
+            archived: false,
+            checksum,
+          },
+          id
+        );
+
+        if (pineconeReady) {
+          pineconeRecords.push({
+            id,
+            text: section,
+            metadata: { source: body.source, tags: body.tags, timestamp: now, domain: "personal", importance: 0.7 },
+          });
+        }
+
+        stored++;
+      } catch (err: any) {
+        logger.warn({ error: err.message }, "Failed to store markdown section");
+      }
+    }
+
+    // Batch upsert to Pinecone
+    if (pineconeReady && pineconeRecords.length > 0) {
+      await upsertToPinecone("compacted", pineconeRecords).catch((err: any) =>
+        logger.warn({ error: err.message }, "Pinecone upsert failed for markdown ingest")
+      );
+    }
+
+    res.json({ success: true, sections: stored, totalSections: sections.length, pinecone: pineconeReady });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Invalid input", details: error.message });
+    }
+    logger.error({ error }, "Markdown ingest failed");
+    res.status(500).json({ error: "Markdown ingest failed" });
+  }
+});
+
+// ============================================================================
 // RETRIEVAL METRICS
 // ============================================================================
 

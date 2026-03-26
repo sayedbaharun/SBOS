@@ -527,6 +527,7 @@ async function upsertToVectorStores(params: {
           compaction_model: "learning-extractor",
           version: 1,
           sync_status: "pending",
+          archived: false,
           checksum,
         });
       }
@@ -538,8 +539,8 @@ async function upsertToVectorStores(params: {
 
     // 3. Pinecone: also upsert compacted extractions (backup store)
     try {
-      const { isPineconeConfigured, upsertToPinecone } = await import("../memory/pinecone-store");
-      if (isPineconeConfigured()) {
+      const { isPineconeReady, upsertToPinecone } = await import("../memory/pinecone-store");
+      if (await isPineconeReady()) {
         const records = highValue.map(e => ({
           id: `${agentId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           text: e.content,
@@ -561,7 +562,7 @@ async function upsertToVectorStores(params: {
         logger.debug({ agentSlug, count: records.length, namespace }, "Extractions upserted to Pinecone");
       }
     } catch (err: any) {
-      logger.debug({ error: err.message }, "Pinecone upsert skipped");
+      logger.warn({ error: err.message, agentSlug }, "Pinecone upsert failed — records not stored in cloud backup");
     }
   }
 }

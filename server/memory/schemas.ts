@@ -55,6 +55,8 @@ export const rawMemoryPayloadSchema = z.object({
   entities: z.array(z.string()).default([]),
   importance: z.number().min(0).max(1).default(0.5),
   compacted: z.boolean().default(false),
+  archived: z.boolean().default(false),
+  last_accessed_at: z.number().optional(),
   version: z.number().int().default(1),
   checksum: z.string(), // SHA-256
 });
@@ -64,6 +66,8 @@ export const rawMemoryInputSchema = rawMemoryPayloadSchema.omit({
   checksum: true,
   version: true,
   compacted: true,
+  archived: true,
+  last_accessed_at: true,
 });
 export type RawMemoryInput = z.infer<typeof rawMemoryInputSchema>;
 
@@ -86,6 +90,8 @@ export const compactedMemoryPayloadSchema = z.object({
   compaction_model: z.string(),
   version: z.number().int().default(1),
   sync_status: syncStatusSchema.default("pending"),
+  archived: z.boolean().default(false),
+  last_accessed_at: z.number().optional(),
   checksum: z.string(),
 });
 export type CompactedMemoryPayload = z.infer<typeof compactedMemoryPayloadSchema>;

@@ -1810,3 +1810,161 @@ registerJobHandler("memory_prune", async (_agentId: string, _agentSlug: string) 
   const result = await cleanupMemories();
   logger.info({ pruned: result.pruned }, "memory_prune job complete");
 });
+
+// ============================================================================
+// PINECONE BACKFILL — One-time job, triggered on startup when Pinecone is empty
+// ============================================================================
+
+/**
+ * Pinecone Backfill — Reads high-importance compacted memories from Qdrant
+ * and upserts them to Pinecone in batches of 100.
+ * Triggered automatically on startup if Pinecone has 0 records.
+ */
+registerJobHandler("pinecone_backfill", async (_agentId: string, _agentSlug: string) => {
+  const { isPineconeReady, upsertToPinecone, getPineconeRecordCount } = await import("../memory/pinecone-store");
+  const { scrollHighValueCompacted } = await import("../memory/qdrant-store");
+
+  const ready = await isPineconeReady();
+  if (!ready) {
+    logger.warn("pinecone_backfill: Pinecone not reachable — skipping");
+    return;
+  }
+
+  const existing = await getPineconeRecordCount();
+  if (existing > 0) {
+    logger.info({ existing }, "pinecone_backfill: Pinecone already has records — skipping");
+    return;
+  }
+
+  let totalUpserted = 0;
+  let offset: string | undefined = undefined;
+
+  do {
+    const { points, nextOffset } = await scrollHighValueCompacted(0.5, 100, offset);
+    if (points.length === 0) break;
+
+    const records = points.map((p) => ({
+      id: p.id,
+      text: p.payload.summary,
+      metadata: {
+        domain: p.payload.domain,
+        importance: p.payload.importance,
+        timestamp: p.payload.timestamp,
+        key_entities: p.payload.key_entities,
+        source: "qdrant-backfill",
+      },
+    }));
+
+    await upsertToPinecone("compacted", records);
+    totalUpserted += records.length;
+    offset = nextOffset;
+  } while (offset);
+
+  logger.info({ totalUpserted }, "pinecone_backfill: Backfill complete");
+});
+
+// ============================================================================
+// PINECONE NIGHTLY SYNC — Pushes pending compacted memories to Pinecone
+// ============================================================================
+
+/**
+ * Pinecone Nightly Sync — Finds compacted memories with sync_status "pending"
+ * and upserts them to Pinecone, then marks them as "synced".
+ * Runs nightly at 23:00 UTC (3am Dubai).
+ */
+registerJobHandler("pinecone_nightly_sync", async (_agentId: string, _agentSlug: string) => {
+  const { isPineconeReady, upsertToPinecone } = await import("../memory/pinecone-store");
+  const { getCompactedMemoriesForSync, updateSyncStatus } = await import("../memory/qdrant-store");
+
+  const ready = await isPineconeReady();
+  if (!ready) {
+    logger.warn("pinecone_nightly_sync: Pinecone not reachable — skipping");
+    return;
+  }
+
+  const pending = await getCompactedMemoriesForSync(200);
+  if (pending.length === 0) {
+    logger.info("pinecone_nightly_sync: No pending memories to sync");
+    return;
+  }
+
+  const records = pending.map((p) => ({
+    id: p.id,
+    text: p.payload.summary,
+    metadata: {
+      domain: p.payload.domain,
+      importance: p.payload.importance,
+      timestamp: p.payload.timestamp,
+      key_entities: p.payload.key_entities,
+      source: "nightly-sync",
+    },
+  }));
+
+  await upsertToPinecone("compacted", records);
+
+  // Mark all as synced
+  for (const p of pending) {
+    await updateSyncStatus(p.id, "synced").catch(() => {});
+  }
+
+  logger.info({ synced: pending.length }, "pinecone_nightly_sync: Sync complete");
+});
+
+// ============================================================================
+// QDRANT ARCHIVE STALE — Weekly soft-delete of old low-importance memories
+// ============================================================================
+
+/**
+ * Archive Stale Memories — Marks old, low-importance memories as archived=true.
+ * Archived memories are excluded from search but not deleted — fully recoverable.
+ * Runs weekly (Sunday 2am Dubai).
+ *
+ * Thresholds:
+ * - Raw memories: older than 90 days AND importance < 0.4
+ * - Compacted memories: older than 180 days AND importance < 0.5
+ */
+registerJobHandler("qdrant_archive_stale", async (_agentId: string, _agentSlug: string) => {
+  const { getOldLowImportanceMemories, archiveMemory } = await import("../memory/qdrant-store");
+  const { QDRANT_COLLECTIONS } = await import("../memory/schemas");
+
+  let totalArchived = 0;
+
+  // Archive old raw memories
+  const staleRaw = await getOldLowImportanceMemories(
+    QDRANT_COLLECTIONS.RAW_MEMORIES,
+    90,   // older than 90 days
+    0.4,  // importance < 0.4
+    500
+  );
+
+  for (const id of staleRaw) {
+    try {
+      await archiveMemory(id, QDRANT_COLLECTIONS.RAW_MEMORIES);
+      totalArchived++;
+    } catch (err: any) {
+      logger.debug({ id, error: err.message }, "Failed to archive raw memory");
+    }
+  }
+
+  // Archive old compacted memories
+  const staleCompacted = await getOldLowImportanceMemories(
+    QDRANT_COLLECTIONS.COMPACTED_MEMORIES,
+    180,  // older than 180 days
+    0.5,  // importance < 0.5
+    200
+  );
+
+  for (const id of staleCompacted) {
+    try {
+      await archiveMemory(id, QDRANT_COLLECTIONS.COMPACTED_MEMORIES);
+      totalArchived++;
+    } catch (err: any) {
+      logger.debug({ id, error: err.message }, "Failed to archive compacted memory");
+    }
+  }
+
+  logger.info(
+    { totalArchived, rawArchived: staleRaw.length, compactedArchived: staleCompacted.length },
+    "qdrant_archive_stale: Archive complete"
+  );
+});

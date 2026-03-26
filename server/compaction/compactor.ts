@@ -154,6 +154,7 @@ export async function compactSession(
       compaction_model: completion.model,
       version: 1,
       sync_status: "pending",
+      archived: false,
       checksum,
     };
 
@@ -305,6 +306,7 @@ export async function compactMessages(
     compaction_model: completion.model,
     version: 1,
     sync_status: "pending",
+    archived: false,
     checksum,
   };
 

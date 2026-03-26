@@ -225,8 +225,8 @@ export async function processSessionLogs(): Promise<ProcessSessionLogsResult> {
 
       // Upsert high-value to Pinecone
       try {
-        const { isPineconeConfigured, upsertToPinecone } = await import("../memory/pinecone-store");
-        if (isPineconeConfigured()) {
+        const { isPineconeReady, upsertToPinecone } = await import("../memory/pinecone-store");
+        if (await isPineconeReady()) {
           const highValue = parsed.extractions.filter(
             (e) => e.importance >= 0.6 || e.type === "decision"
           );
@@ -252,7 +252,7 @@ export async function processSessionLogs(): Promise<ProcessSessionLogsResult> {
           }
         }
       } catch (err: any) {
-        logger.debug({ error: err.message }, "Pinecone upsert skipped (session logs)");
+        logger.warn({ error: err.message }, "Pinecone upsert failed (session logs) — records not stored in cloud backup");
       }
 
       processedIds.push(...batch.map((l: any) => l.id));

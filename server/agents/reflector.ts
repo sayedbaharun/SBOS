@@ -141,6 +141,7 @@ async function routeToSharedMemory(
       compaction_model: "reflector",
       version: 1,
       sync_status: "pending",
+      archived: false,
       checksum,
     });
 
