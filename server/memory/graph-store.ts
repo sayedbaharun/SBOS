@@ -82,6 +82,8 @@ export async function initGraphSchema(): Promise<void> {
   await graph.createNodeRangeIndex("Agent", "id", "slug").catch(() => {});
   await graph.createNodeRangeIndex("Venture", "id").catch(() => {});
   await graph.createEdgeRangeIndex("RELATES_TO", "relationship").catch(() => {});
+  // Full-text index for graphContextSearch — replaces O(n) CONTAINS scan
+  await graph.query("CALL db.idx.fulltext.createNodeIndex('Entity', 'name', 'description')").catch(() => {});
 
   logger.info("FalkorDB graph schema initialized");
 }
@@ -168,7 +170,9 @@ export async function linkEntities(
   await graph.query(
     `MATCH (e1:Entity {name: $name1}), (e2:Entity {name: $name2})
      MERGE (e1)-[r:RELATES_TO]->(e2)
-     SET r.relationship = $relationship, r.strength = $strength, r.timestamp = timestamp()`,
+     SET r.relationship = $relationship,
+         r.strength = CASE WHEN r.strength IS NULL THEN $strength ELSE LEAST(1.0, r.strength + 0.1) END,
+         r.timestamp = timestamp()`,
     { params: { name1: entity1Name, name2: entity2Name, relationship, strength } }
   );
 }
@@ -284,16 +288,28 @@ export async function graphContextSearch(
   try {
     const graph = await getGraph();
 
-    // Full-text search on entity names and descriptions
-    const result = await graph.query(
-      `MATCH (e:Entity)
-       WHERE toLower(e.name) CONTAINS toLower($query) OR toLower(e.description) CONTAINS toLower($query)
+    // Primary: full-text index (fast, indexed on name + description)
+    let result = await graph.query(
+      `CALL db.idx.fulltext.queryNodes('Entity', $query) YIELD node AS e
        OPTIONAL MATCH (e)-[r]-(connected)
        RETURN e, collect(DISTINCT connected)[0..3] as connections, e.mention_count as mentions
        ORDER BY e.mention_count DESC
        LIMIT $limit`,
       { params: { query, limit } }
     );
+
+    // Fallback: CONTAINS scan for very short or partial queries that skip full-text tokenization
+    if (!result.data || result.data.length === 0) {
+      result = await graph.query(
+        `MATCH (e:Entity)
+         WHERE toLower(e.name) CONTAINS toLower($query) OR toLower(e.description) CONTAINS toLower($query)
+         OPTIONAL MATCH (e)-[r]-(connected)
+         RETURN e, collect(DISTINCT connected)[0..3] as connections, e.mention_count as mentions
+         ORDER BY e.mention_count DESC
+         LIMIT $limit`,
+        { params: { query, limit } }
+      );
+    }
 
     if (!result.data) return [];
 
