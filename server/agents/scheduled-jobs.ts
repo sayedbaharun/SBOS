@@ -1968,3 +1968,91 @@ registerJobHandler("qdrant_archive_stale", async (_agentId: string, _agentSlug: 
     "qdrant_archive_stale: Archive complete"
   );
 });
+
+// ============================================================================
+// GITHUB ACTIONS SHA AUDIT — Weekly check that all workflow actions are pinned
+// ============================================================================
+
+const REPOS_TO_AUDIT = [
+  { owner: "sayedbaharun", repo: "SBOS" },
+  { owner: "sayedbaharun", repo: "SBMyDub.ai" },
+  { owner: "aivantrealty", repo: "aivantprop_AI" },
+  { owner: "aivantrealty", repo: "aivant-realty-website" },
+  { owner: "qwibitai", repo: "nanoclaw" },
+  { owner: "sayedbaharun", repo: "syntheliq" },
+];
+
+/**
+ * GitHub Actions SHA Audit — scans all workflow files across repos via GitHub API.
+ * Flags any `uses:` lines that reference a mutable tag (@v4, @main, @latest)
+ * instead of an immutable commit SHA.
+ * Sends a Telegram alert if anything is unpinned.
+ * Runs weekly (Monday 9am Dubai).
+ */
+registerJobHandler("github_actions_sha_audit", async (_agentId: string, _agentSlug: string) => {
+  const githubToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  const issues: string[] = [];
+
+  for (const { owner, repo } of REPOS_TO_AUDIT) {
+    try {
+      // List workflow files via GitHub API
+      const headers: Record<string, string> = {
+        "User-Agent": "sbos-security-audit",
+        "Accept": "application/vnd.github.v3+json",
+      };
+      if (githubToken) headers["Authorization"] = `Bearer ${githubToken}`;
+
+      const listUrl = `https://api.github.com/repos/${owner}/${repo}/contents/.github/workflows`;
+      const listRes = await fetch(listUrl, { headers });
+      if (!listRes.ok) continue; // Repo has no workflows — skip
+
+      const files: Array<{ name: string; download_url: string }> = await listRes.json();
+
+      for (const file of files) {
+        if (!file.name.endsWith(".yml") && !file.name.endsWith(".yaml")) continue;
+
+        const contentRes = await fetch(file.download_url, { headers });
+        if (!contentRes.ok) continue;
+        const content = await contentRes.text();
+
+        // Find any uses: lines with mutable refs (@v1, @main, @latest, @master)
+        const mutablePattern = /uses:\s+([^\s]+)@(v\d+(?:\.\d+)*|main|master|latest)/g;
+        let match;
+        while ((match = mutablePattern.exec(content)) !== null) {
+          issues.push(`${owner}/${repo} → ${file.name}: \`${match[1]}@${match[2]}\` is unpinned`);
+        }
+      }
+    } catch (err: any) {
+      logger.debug({ owner, repo, error: err.message }, "SHA audit: could not check repo");
+    }
+  }
+
+  if (issues.length === 0) {
+    logger.info("github_actions_sha_audit: All workflow actions are SHA-pinned ✓");
+    return;
+  }
+
+  // Send Telegram alert
+  logger.warn({ count: issues.length, issues }, "github_actions_sha_audit: Unpinned actions found");
+
+  try {
+    const { sendProactiveMessage } = await import("../channels/channel-manager");
+    const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+    const body = [
+      `Found ${issues.length} workflow${issues.length > 1 ? "s" : ""} using mutable action refs:`,
+      "",
+      ...issues.map((i) => `• ${i}`),
+      "",
+      "Fix: re-run the SHA pinning script or check Dependabot PRs.",
+    ].join("\n");
+
+    for (const chatId of getAuthorizedChatIds()) {
+      await sendProactiveMessage("telegram", chatId, formatMessage({
+        header: "⚠️ Security: Unpinned GitHub Actions",
+        sections: [{ content: body }],
+      }));
+    }
+  } catch (err: any) {
+    logger.warn({ error: err.message }, "github_actions_sha_audit: Could not send Telegram alert");
+  }
+});
