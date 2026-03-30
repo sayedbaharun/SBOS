@@ -88,7 +88,6 @@ async function refreshAccessToken(refreshToken: string): Promise<{
       refresh_token: refreshToken,
       client_id: getClientId(),
       client_secret: getClientSecret(),
-      scope: "offline",
     }),
   });
 
