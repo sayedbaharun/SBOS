@@ -197,8 +197,8 @@ router.get("/token-usage", async (req: Request, res: Response) => {
 
     res.json({ days, since: since.toISOString(), totals, dailyByModel, byAgent });
   } catch (error) {
-    logger.error({ error }, "Error fetching token usage");
-    res.status(500).json({ error: "Failed to fetch token usage" });
+    logger.error({ err: error, msg: String(error) }, "Error fetching token usage");
+    res.status(500).json({ error: "Failed to fetch token usage", detail: String(error) });
   }
 });
 
