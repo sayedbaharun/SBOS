@@ -43,6 +43,23 @@ function getKiloClient(): OpenAI | null {
   return kiloClient;
 }
 
+// ============================================================================
+// GROQ FALLBACK (cheap fast-tier LLM on LPU hardware)
+// ============================================================================
+
+let groqClient: OpenAI | null = null;
+
+function getGroqClient(): OpenAI | null {
+  if (!process.env.GROQ_API_KEY) return null;
+  if (!groqClient) {
+    groqClient = new OpenAI({
+      apiKey: process.env.GROQ_API_KEY,
+      baseURL: "https://api.groq.com/openai/v1",
+    });
+  }
+  return groqClient;
+}
+
 /** Returns true for errors that indicate OpenRouter credits are exhausted */
 function isCreditsExhausted(error: any): boolean {
   return (
@@ -104,6 +121,7 @@ const createHealthEntry = (): ProviderHealthStatus => ({
 const providerHealth: Record<string, ProviderHealthStatus> = {
   openrouter: createHealthEntry(),
   kilo: createHealthEntry(),
+  groq: createHealthEntry(),
   local: createHealthEntry(),
 };
 
@@ -154,6 +172,10 @@ export function getProviderHealth(): Record<string, ProviderHealthStatus & { con
     kilo: {
       ...providerHealth.kilo,
       configured: !!process.env.KILOCODE_API_KEY,
+    },
+    groq: {
+      ...providerHealth.groq,
+      configured: !!process.env.GROQ_API_KEY,
     },
     local: {
       ...providerHealth.local,
@@ -360,6 +382,9 @@ const MODEL_COST_PER_MILLION: Record<string, { input: number; output: number }> 
   "google/gemini-2.5-flash-lite": { input: 10, output: 40 },
   "deepseek/deepseek-chat": { input: 14, output: 28 },
   "meta-llama/llama-3.3-70b-instruct": { input: 12, output: 30 },
+  "groq/llama-3.3-70b-versatile": { input: 6, output: 6 },
+  "groq/llama-3.1-8b-instant": { input: 5, output: 5 },
+  "groq/llama-4-scout-17b-16e-instruct": { input: 15, output: 15 },
 };
 
 function estimateCostCents(model: string, promptTokens: number, completionTokens: number): number {
@@ -701,13 +726,56 @@ export async function chatCompletion(
     }
   }
 
+  // ── Groq fallback: cheap fast-tier LLM as last resort before giving up ──
+  const groqFallback = getGroqClient();
+  if (groqFallback) {
+    // Only use Groq for fast/mid tier — skip for top-tier models (keep Claude for executive reasoning)
+    const isTopTier = selectedModel.includes("opus") || selectedModel.includes("o1") || selectedModel.includes("gpt-4o") && !selectedModel.includes("mini");
+    if (!isTopTier) {
+      const groqModel = "llama-3.3-70b-versatile";
+      const startTime = Date.now();
+      try {
+        logger.info({ model: groqModel }, `All primary providers failed — falling back to Groq`);
+        const response = await groqFallback.chat.completions.create({
+          model: groqModel,
+          messages: params.messages,
+          tools: params.tools,
+          tool_choice: params.tool_choice,
+          temperature: params.temperature ?? 0.7,
+          max_tokens: params.max_tokens,
+          response_format: params.response_format,
+        });
+
+        const latencyMs = Date.now() - startTime;
+        logger.info({ model: groqModel, latencyMs, provider: "groq" }, `✅ Groq fallback successful`);
+        recordSuccess("groq", latencyMs, groqModel);
+        logTokenUsage(`groq/${groqModel}`, response.usage, "web_chat");
+
+        return {
+          response,
+          metrics: {
+            modelUsed: `groq/${groqModel}`,
+            attemptNumber: totalAttempts + 1,
+            totalAttempts: totalAttempts + 1,
+            success: true,
+            tokensUsed: response.usage?.total_tokens,
+            latencyMs,
+          },
+        };
+      } catch (groqError: any) {
+        recordFailure("groq", groqModel);
+        logger.error({ error: groqError.message, model: groqModel }, `❌ Groq fallback also failed`);
+      }
+    }
+  }
+
   // All providers failed
   const errorMessage = lastError?.message || "All models failed";
   logger.error({
     totalAttempts,
     modelsAttempted: orderedCascade.map(m => m.name),
     lastError: errorMessage,
-  }, `🚨 All model fallbacks exhausted (including Kilo)`);
+  }, `🚨 All model fallbacks exhausted (including Kilo + Groq)`);
 
   throw new Error(`All AI models failed after ${totalAttempts} attempts: ${errorMessage}`);
 }

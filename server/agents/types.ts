@@ -169,7 +169,11 @@ export interface AgentChatResult {
 // MODEL TIER MAPPING
 // ============================================================================
 
-/** Default model selection based on agent role */
+/**
+ * Default model selection based on agent role.
+ * Groq alternative for fast tier: "groq/llama-3.3-70b-versatile"
+ * Set GROQ_API_KEY to enable Groq as fallback provider for fast-tier agents.
+ */
 export const MODEL_TIER_DEFAULTS: Record<string, string> = {
   top: "anthropic/claude-opus-4",
   mid: "anthropic/claude-sonnet-4",

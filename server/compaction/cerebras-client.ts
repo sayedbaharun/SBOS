@@ -16,7 +16,7 @@ export interface CompletionResult {
   content: string;
   model: string;
   tokensUsed: number;
-  source: "cerebras" | "ollama";
+  source: "cerebras" | "groq" | "ollama";
 }
 
 /**
@@ -45,6 +45,16 @@ export async function generateCompletion(
       );
     } catch (error) {
       logger.warn({ error }, "Cerebras failed, falling back to Ollama");
+    }
+  }
+
+  // Try Groq before falling back to local Ollama
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    try {
+      return await groqCompletion(groqKey, systemPrompt, userPrompt, { temperature, maxTokens, jsonMode });
+    } catch (error) {
+      logger.warn({ error }, "Groq failed, falling back to Ollama");
     }
   }
 
@@ -103,6 +113,57 @@ async function cerebrasCompletion(
     model: `cerebras/${CEREBRAS_MODEL}`,
     tokensUsed: data.usage?.total_tokens || 0,
     source: "cerebras",
+  };
+}
+
+async function groqCompletion(
+  apiKey: string,
+  systemPrompt: string,
+  userPrompt: string,
+  options: { temperature: number; maxTokens: number; jsonMode: boolean }
+): Promise<CompletionResult> {
+  const GROQ_MODEL = "llama-3.3-70b-versatile";
+  const body: Record<string, unknown> = {
+    model: GROQ_MODEL,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    temperature: options.temperature,
+    max_tokens: options.maxTokens,
+  };
+
+  if (options.jsonMode) {
+    body.response_format = { type: "json_object" };
+  }
+
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Groq API error ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content;
+
+  if (!content) {
+    throw new Error("Empty response from Groq");
+  }
+
+  return {
+    content,
+    model: `groq/${GROQ_MODEL}`,
+    tokensUsed: data.usage?.total_tokens || 0,
+    source: "groq",
   };
 }
 
