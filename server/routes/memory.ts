@@ -32,7 +32,9 @@ router.get("/status", async (req: Request, res: Response) => {
     const { getSyncEngineStatus } = await import("../sync/sync-engine");
     const { getQueueStatus } = await import("../agents/task-queue");
 
-    const embeddingsAvailable = !!process.env.OPENROUTER_API_KEY;
+    const { getEmbeddingProvider } = await import("../embeddings");
+    const embeddingProvider = getEmbeddingProvider();
+    const embeddingsAvailable = !!process.env.GOOGLE_AI_API_KEY || !!process.env.OPENROUTER_API_KEY;
 
     const [qdrant, pinecone, sync, queue] = await Promise.all([
       getQdrantStatus(),
@@ -58,7 +60,7 @@ router.get("/status", async (req: Request, res: Response) => {
 
     res.json({
       qdrant,
-      embeddings: { available: embeddingsAvailable, provider: "openrouter", model: "text-embedding-3-small" },
+      embeddings: { available: embeddingsAvailable, ...embeddingProvider },
       pinecone,
       sync,
       taskQueue: queue,
@@ -542,6 +544,62 @@ router.get("/metrics", async (req: Request, res: Response) => {
   } catch (error) {
     logger.error({ error }, "Failed to fetch retrieval metrics");
     res.status(500).json({ error: "Failed to fetch retrieval metrics" });
+  }
+});
+
+// ============================================================================
+// PROACTIVE MEMORY SURFACING
+// ============================================================================
+
+const proactiveRequestSchema = z.object({
+  messages: z.array(
+    z.object({
+      role: z.enum(["user", "assistant", "system"]),
+      content: z.string(),
+    })
+  ).min(1).max(20),
+  excludeIds: z.array(z.string()).default([]),
+});
+
+/**
+ * POST /api/memory/proactive
+ *
+ * Proactively surface non-obvious high-importance memories based on
+ * current conversation context. Unlike /search (reactive), this pushes
+ * "surprising connections" the user didn't explicitly ask for.
+ *
+ * Body: { messages: [{role, content}], excludeIds?: string[] }
+ *
+ * Returns memories sorted by "surprise score" = importance × novelty.
+ */
+router.post("/proactive", async (req: Request, res: Response) => {
+  try {
+    const parsed = proactiveRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
+    }
+
+    const { messages, excludeIds } = parsed.data;
+    const { proactivelySurface } = await import("../memory/proactive-surfacer");
+
+    const result = await proactivelySurface(messages, new Set(excludeIds));
+    res.json(result);
+  } catch (error) {
+    logger.error({ error }, "Proactive memory surface failed");
+    res.status(500).json({ error: "Proactive memory surface failed" });
+  }
+});
+
+/**
+ * GET /api/memory/provider
+ * Returns current embedding provider info.
+ */
+router.get("/provider", async (_req: Request, res: Response) => {
+  try {
+    const { getEmbeddingProvider } = await import("../embeddings");
+    res.json(getEmbeddingProvider());
+  } catch (error) {
+    res.status(500).json({ error: "Failed to get provider info" });
   }
 });
 

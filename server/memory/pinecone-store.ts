@@ -63,9 +63,9 @@ export async function upsertToPinecone(
 
   const index = getIndex().namespace(namespace);
 
-  // Generate and truncate embeddings
+  // Generate and truncate embeddings (RETRIEVAL_DOCUMENT for storage)
   const texts = records.map((r) => r.text);
-  const embeddings = await generateEmbeddings(texts);
+  const embeddings = await generateEmbeddings(texts, "RETRIEVAL_DOCUMENT");
 
   const vectors = records.map((record, i) => ({
     id: record.id,
@@ -141,8 +141,8 @@ export async function searchPinecone(
 
   const index = getIndex().namespace(namespace);
 
-  // Generate and truncate query embedding
-  const embedding = await generateEmbedding(query);
+  // Generate and truncate query embedding (RETRIEVAL_QUERY for search)
+  const embedding = await generateEmbedding(query, "RETRIEVAL_QUERY");
   const truncated = truncateEmbedding(embedding.embedding, PINECONE_EMBEDDING_DIMS);
 
   const queryOptions: Record<string, unknown> = {

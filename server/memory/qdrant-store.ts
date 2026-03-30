@@ -6,12 +6,16 @@
  * - compacted_memories: compaction summaries
  * - entity_index: people, orgs, projects, concepts
  *
- * Uses OpenRouter text-embedding-3-small (1536 dims) for embeddings.
+ * Uses Gemini Embedding 001 (1536-dim via MRL) with task-type routing.
+ * Falls back to OpenRouter text-embedding-3-small if GOOGLE_AI_API_KEY not set.
+ *
+ * Inline dedup: before storing, checks cosine similarity > 0.92 + word overlap > 50%.
+ * If both conditions met, updates existing point instead of creating a duplicate.
  */
 
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { logger } from "../logger";
-import { generateEmbedding, generateEmbeddings } from "../embeddings";
+import { generateEmbedding, generateEmbeddings, cosineSimilarity } from "../embeddings";
 import {
   QDRANT_COLLECTIONS,
   LOCAL_EMBEDDING_DIMS,
@@ -20,6 +24,14 @@ import {
   type EntityPayload,
 } from "./schemas";
 import { createHash, randomUUID } from "crypto";
+import { runQualityGate } from "./quality-gate";
+
+// ============================================================================
+// INLINE DEDUP CONFIG
+// ============================================================================
+
+const DEDUP_SIMILARITY_THRESHOLD = 0.92; // Cosine similarity above which we consider it a duplicate
+const DEDUP_WORD_OVERLAP_THRESHOLD = 0.50; // Word overlap fraction above which we confirm it's a duplicate
 
 // ============================================================================
 // CLIENT SETUP
@@ -172,23 +184,138 @@ function computeChecksum(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
+/**
+ * Word overlap score between two texts (Jaccard-style, tokenized).
+ * Used as a secondary dedup check after cosine similarity.
+ */
+function wordOverlap(a: string, b: string): number {
+  const tokenize = (t: string) =>
+    new Set(
+      t.toLowerCase()
+        .replace(/[^\w\s]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 2)
+    );
+  const setA = tokenize(a);
+  const setB = tokenize(b);
+  if (setA.size === 0 || setB.size === 0) return 0;
+  let intersection = 0;
+  Array.from(setA).forEach((w) => {
+    if (setB.has(w)) intersection++;
+  });
+  return intersection / Math.min(setA.size, setB.size);
+}
+
+/**
+ * Check if a near-duplicate of this text already exists in a collection.
+ * Embeds the text with SEMANTIC_SIMILARITY task type, searches for top-1,
+ * and checks cosine > 0.92 AND word overlap > 50%.
+ *
+ * Returns the existing point ID if a duplicate is found, null otherwise.
+ */
+async function findNearDuplicate(
+  collection: string,
+  text: string,
+  embedding: number[]
+): Promise<string | null> {
+  try {
+    const qdrant = getClient();
+    const results = await qdrant.search(collection, {
+      vector: embedding,
+      limit: 1,
+      score_threshold: DEDUP_SIMILARITY_THRESHOLD,
+      with_payload: true,
+    });
+
+    if (results.length === 0) return null;
+
+    const top = results[0];
+    const existingText =
+      (top.payload?.text as string) ||
+      (top.payload?.summary as string) ||
+      "";
+
+    const overlap = wordOverlap(text, existingText);
+    if (overlap >= DEDUP_WORD_OVERLAP_THRESHOLD) {
+      logger.debug(
+        {
+          collection,
+          existingId: top.id,
+          similarity: top.score,
+          wordOverlap: overlap,
+        },
+        "Inline dedup: near-duplicate found, will update existing"
+      );
+      return top.id as string;
+    }
+
+    return null;
+  } catch {
+    return null; // Dedup failure is non-fatal — proceed with normal upsert
+  }
+}
+
 // ============================================================================
 // RAW MEMORIES CRUD
 // ============================================================================
 
 /**
- * Store a raw memory (conversation message) in Qdrant
+ * Store a raw memory (conversation message) in Qdrant.
+ *
+ * Inline dedup: before inserting, checks if a near-duplicate exists
+ * (cosine > 0.92 AND word overlap > 50%). If found, updates the existing
+ * point's payload instead of creating a new one — prevents accumulation
+ * of duplicates between compaction cycles.
+ *
+ * A-MAC quality gate: rejects low-quality memories (noise, one-word replies,
+ * vague non-specific content) before they accumulate. Fail-open on LLM error.
  */
 export async function upsertRawMemory(
   payload: Omit<RawMemoryPayload, "checksum" | "version" | "compacted" | "archived" | "last_accessed_at"> & {
     id?: string;
+    skipQualityGate?: boolean; // Set true for rescued/compacted memories that bypass gate
   }
 ): Promise<string> {
   const qdrant = getClient();
-  const id = payload.id || randomUUID();
   const checksum = computeChecksum(payload.text);
 
-  const embedding = await generateEmbedding(payload.text);
+  // A-MAC quality gate: reject noise before storage
+  if (!payload.skipQualityGate) {
+    const gateResult = await runQualityGate(payload.text);
+    if (!gateResult.accepted) {
+      logger.debug(
+        { text: payload.text.slice(0, 80), score: gateResult.score, reason: gateResult.reason },
+        "A-MAC gate: memory rejected"
+      );
+      // Return a sentinel ID — caller can check if id === REJECTED_ID
+      return "quality-gate-rejected";
+    }
+  }
+
+  // Embed with RETRIEVAL_DOCUMENT task type for storage
+  const embedding = await generateEmbedding(payload.text, "RETRIEVAL_DOCUMENT");
+
+  // Inline dedup: check for near-duplicate before inserting
+  const existingId = await findNearDuplicate(
+    QDRANT_COLLECTIONS.RAW_MEMORIES,
+    payload.text,
+    embedding.embedding
+  );
+
+  if (existingId) {
+    // Update existing point's payload and timestamp rather than creating duplicate
+    await qdrant.setPayload(QDRANT_COLLECTIONS.RAW_MEMORIES, {
+      payload: {
+        last_accessed_at: Date.now(),
+        // Bump importance if new version has higher importance
+        ...(payload.importance > 0.5 ? { importance: payload.importance } : {}),
+      },
+      points: [existingId],
+    });
+    return existingId;
+  }
+
+  const id = payload.id || randomUUID();
 
   const fullPayload: RawMemoryPayload = {
     ...payload,
@@ -225,7 +352,7 @@ export async function upsertRawMemories(
   const qdrant = getClient();
 
   const texts = memories.map((m) => m.text);
-  const embeddings = await generateEmbeddings(texts);
+  const embeddings = await generateEmbeddings(texts, "RETRIEVAL_DOCUMENT");
 
   const ids: string[] = [];
   const points = memories.map((mem, i) => {
@@ -325,7 +452,7 @@ export async function upsertCompactedMemory(
   const qdrant = getClient();
   const pointId = id || randomUUID();
 
-  const embedding = await generateEmbedding(payload.summary);
+  const embedding = await generateEmbedding(payload.summary, "RETRIEVAL_DOCUMENT");
 
   await qdrant.upsert(QDRANT_COLLECTIONS.COMPACTED_MEMORIES, {
     wait: true,
@@ -393,7 +520,7 @@ export async function upsertEntity(
   const pointId = id || randomUUID();
 
   const embeddingText = `${payload.name}: ${payload.description}`;
-  const embedding = await generateEmbedding(embeddingText);
+  const embedding = await generateEmbedding(embeddingText, "RETRIEVAL_DOCUMENT");
 
   await qdrant.upsert(QDRANT_COLLECTIONS.ENTITY_INDEX, {
     wait: true,
@@ -508,7 +635,7 @@ export async function searchCollection(
   const qdrant = getClient();
   const { limit = 10, min_score = 0.25, filter } = options;
 
-  const embedding = await generateEmbedding(query);
+  const embedding = await generateEmbedding(query, "RETRIEVAL_QUERY");
 
   const results = await qdrant.search(collection, {
     vector: embedding.embedding,

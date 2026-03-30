@@ -166,8 +166,25 @@ export const QDRANT_COLLECTIONS = {
   ENTITY_INDEX: "entity_index",
 } as const;
 
-export const LOCAL_EMBEDDING_DIMS = 1536; // OpenRouter text-embedding-3-small
+export const LOCAL_EMBEDDING_DIMS = 1536; // Gemini 3072 → MRL truncated to 1536 (backward compatible)
 export const PINECONE_EMBEDDING_DIMS = 512; // Truncation from 1536 to save storage
+
+// ============================================================================
+// EMBEDDING TASK TYPES (Gemini Embedding 001)
+// ============================================================================
+
+export type EmbeddingTaskType =
+  | "RETRIEVAL_DOCUMENT"     // Storing memories for later retrieval
+  | "RETRIEVAL_QUERY"        // Searching/querying stored memories
+  | "SEMANTIC_SIMILARITY"    // Dedup similarity checks
+  | "FACT_VERIFICATION"      // Hot commit fact pattern matching
+  | "CODE_RETRIEVAL_QUERY"   // Code-related memory search
+  | "CLASSIFICATION"         // Domain/category classification
+  | "CLUSTERING"             // Memory clustering
+  | "QUESTION_ANSWERING";    // Q&A retrieval
+
+// Sentinel returned by upsertRawMemory when A-MAC gate rejects a memory
+export const QUALITY_GATE_REJECTED = "quality-gate-rejected";
 
 export const PINECONE_NAMESPACES = {
   COMPACTED: "compacted",

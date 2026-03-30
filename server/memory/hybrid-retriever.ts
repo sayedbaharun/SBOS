@@ -8,8 +8,15 @@
  *
  * Scoring formula (per-result):
  *   final_score = 0.70 * cosine_similarity
- *               + 0.15 * recency_decay(half_life=30d)
+ *               + 0.15 * ebbinghaus_decay(importance_scaled_half_life)
  *               + 0.15 * importance_score
+ *
+ * Ebbinghaus decay half-lives (importance-scaled):
+ *   importance >= 0.8 → 365-day half-life (critical memories)
+ *   importance 0.4–0.79 → 60-day half-life (useful context)
+ *   importance < 0.4 → 14-day half-life (ephemeral)
+ *   retrieval_count boost: each retrieval extends half-life by 10%
+ *   floor: 0.20 so high-importance memories never fully vanish
  *
  * Arms merged via RRF with weights: vector=0.55, keyword=0.25, graph=0.20
  */
@@ -32,15 +39,61 @@ import { recordRetrieval, type RetrievalEvent } from "./retrieval-metrics";
 const COSINE_WEIGHT = 0.70;
 const RECENCY_WEIGHT = 0.15;
 const IMPORTANCE_WEIGHT = 0.15;
-const RECENCY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+// Ebbinghaus half-life tiers (in ms)
+const HALF_LIFE_HIGH = 365 * 24 * 60 * 60 * 1000;  // importance >= 0.8
+const HALF_LIFE_MID  =  60 * 24 * 60 * 60 * 1000;  // importance 0.4–0.79
+const HALF_LIFE_LOW  =  14 * 24 * 60 * 60 * 1000;  // importance < 0.4
+
+// Spaced-repetition boost per retrieval (+10% to half-life, capped)
+const RETRIEVAL_BOOST_PER_COUNT = 0.10;
+const RETRIEVAL_BOOST_MAX = 2.0; // max 2x half-life extension
+
+// Minimum decay floor for high-importance memories (never fully forgotten)
+const DECAY_FLOOR_HIGH_IMPORTANCE = 0.20;
 
 /**
- * Calculate recency decay with configurable half-life
+ * Ebbinghaus-inspired decay with importance-scaled half-lives.
+ *
+ * Half-lives:
+ *   >= 0.8 importance → 365 days (critical decisions)
+ *   0.4–0.79          → 60 days  (useful context)
+ *   < 0.4             → 14 days  (ephemeral)
+ *
+ * Spaced-repetition boost: each retrieval adds 10% to the effective half-life
+ * (capped at 2x), mimicking memory strengthening through recall.
+ *
+ * Floor: high-importance memories (>= 0.8) never decay below 0.20.
  */
-function recencyDecay(timestampMs: number, halfLifeMs: number = RECENCY_HALF_LIFE_MS): number {
+function ebbinghausDecay(
+  timestampMs: number,
+  importance: number,
+  retrievalCount: number = 0
+): number {
   const age = Date.now() - timestampMs;
   if (age <= 0) return 1.0;
-  return Math.pow(0.5, age / halfLifeMs);
+
+  // Select base half-life by importance tier
+  let baseHalfLife: number;
+  if (importance >= 0.8) {
+    baseHalfLife = HALF_LIFE_HIGH;
+  } else if (importance >= 0.4) {
+    baseHalfLife = HALF_LIFE_MID;
+  } else {
+    baseHalfLife = HALF_LIFE_LOW;
+  }
+
+  // Spaced-repetition boost: each retrieval extends half-life by 10%
+  const boost = Math.min(1 + retrievalCount * RETRIEVAL_BOOST_PER_COUNT, RETRIEVAL_BOOST_MAX);
+  const effectiveHalfLife = baseHalfLife * boost;
+
+  const decay = Math.pow(0.5, age / effectiveHalfLife);
+
+  // Apply floor for high-importance memories so they never fully vanish
+  if (importance >= 0.8) {
+    return Math.max(decay, DECAY_FLOOR_HIGH_IMPORTANCE);
+  }
+  return decay;
 }
 
 /**
@@ -49,11 +102,12 @@ function recencyDecay(timestampMs: number, halfLifeMs: number = RECENCY_HALF_LIF
 function calculateFinalScore(
   cosineSimilarity: number,
   timestamp: number,
-  importance: number
+  importance: number,
+  retrievalCount: number = 0
 ): number {
   return (
     COSINE_WEIGHT * cosineSimilarity +
-    RECENCY_WEIGHT * recencyDecay(timestamp) +
+    RECENCY_WEIGHT * ebbinghausDecay(timestamp, importance, retrievalCount) +
     IMPORTANCE_WEIGHT * importance
   );
 }
@@ -169,11 +223,12 @@ export async function retrieveMemories(
         const payload = r.payload;
         const timestamp = (payload.timestamp as number) || Date.now();
         const importance = (payload.importance as number) || 0.5;
+        const retrievalCount = (payload.retrieval_count as number) || 0;
         allVectorResults.push({
           id: r.id,
           collection: r.collection,
           rawScore: r.score,
-          finalScore: calculateFinalScore(r.score, timestamp, importance),
+          finalScore: calculateFinalScore(r.score, timestamp, importance, retrievalCount),
           text: extractText(r),
           timestamp,
           domain: payload.domain as string | undefined,
@@ -416,10 +471,7 @@ async function keywordSearchMemories(
 
     if (rows.length === 0) return [];
 
-    // Score results: term coverage + recency + importance
-    const now = Date.now();
-    const HALF_LIFE = 30 * 24 * 60 * 60 * 1000;
-
+    // Score results: term coverage + Ebbinghaus decay + importance
     const scored: KeywordMemoryResult[] = rows.map((r: any) => {
       const contentLower = r.content.toLowerCase();
 
@@ -427,14 +479,14 @@ async function keywordSearchMemories(
       const matchedTerms = terms.filter((t) => contentLower.includes(t));
       const termCoverage = matchedTerms.length / terms.length;
 
-      // Recency decay
-      const ageMs = now - new Date(r.createdAt).getTime();
-      const recency = ageMs > 0 ? Math.pow(0.5, ageMs / HALF_LIFE) : 1.0;
-
       const importance = r.importance || 0.5;
+      const timestampMs = new Date(r.createdAt).getTime();
+
+      // Ebbinghaus decay with importance-scaled half-life
+      const decay = ebbinghausDecay(timestampMs, importance, 0);
 
       // Weighted score matching the standard formula weights
-      const score = 0.70 * termCoverage + 0.15 * recency + 0.15 * importance;
+      const score = 0.70 * termCoverage + 0.15 * decay + 0.15 * importance;
 
       return {
         id: r.id,
