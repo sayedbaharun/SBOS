@@ -153,7 +153,7 @@ router.get("/token-usage", async (req: Request, res: Response) => {
     const database = await getDb();
     const { tokenUsageLog } = await import("@shared/schema");
 
-    const days = parseInt(String(req.query.days) || "7", 10);
+    const days = parseInt(req.query.days as string, 10) || 7;
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
     // Daily breakdown by model
@@ -197,8 +197,8 @@ router.get("/token-usage", async (req: Request, res: Response) => {
 
     res.json({ days, since: since.toISOString(), totals, dailyByModel, byAgent });
   } catch (error) {
-    logger.error({ err: error, msg: String(error) }, "Error fetching token usage");
-    res.status(500).json({ error: "Failed to fetch token usage", detail: String(error) });
+    logger.error({ err: error }, "Error fetching token usage");
+    res.status(500).json({ error: "Failed to fetch token usage" });
   }
 });
 
@@ -221,7 +221,7 @@ router.get("/metrics", async (req: Request, res: Response) => {
     const { tokenUsageLog } = await import("@shared/schema");
     const { getScheduleStatus } = await import("../agents/agent-scheduler");
 
-    const days = parseInt(String(req.query.days) || "7", 10);
+    const days = parseInt(req.query.days as string, 10) || 7;
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
     // 1. All active agents
