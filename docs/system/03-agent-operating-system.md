@@ -1,12 +1,12 @@
 # SB-OS: Agent Operating System
 
-> **Status**: Work in Progress | **Last Updated**: 2026-03-18 | **Version**: 1.0
+> **Last Updated**: 2026-03-30 | **Version**: 1.1
 
 ---
 
 ## Overview
 
-The Agent OS is a hierarchical multi-agent system where 16+ AI agents operate autonomously, communicate through a message bus, and execute tasks on behalf of one founder. Agents have souls (identity definitions), tools, permissions, schedules, and persistent memory.
+The Agent OS is a hierarchical multi-agent system where 21 AI agents operate autonomously, communicate through a message bus, and execute tasks on behalf of one founder. Agents have souls (identity definitions), tools, permissions, schedules, and persistent memory.
 
 ---
 
@@ -414,7 +414,7 @@ Agents can submit deliverables via `submit_deliverable` tool. These go to a revi
 | `server/agents/learning-extractor.ts` | Post-conversation learning extraction |
 | `server/agents/agent-memory-manager.ts` | Per-agent memory CRUD |
 | `server/agents/message-bus.ts` | Inter-agent message bus |
-| `server/agents/templates/*.md` | Soul templates (16 files) |
+| `server/agents/templates/*.md` | Soul templates (21 files) |
 | `server/channels/channel-manager.ts` | Channel routing and management |
 | `server/channels/adapters/telegram-adapter.ts` | Telegram bot adapter |
 | `server/channels/adapters/whatsapp-adapter.ts` | WhatsApp Cloud API adapter |

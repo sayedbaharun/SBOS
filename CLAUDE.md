@@ -1,6 +1,7 @@
 # SB-OS: The Sayed Baharun Personal Operating System
 
 > **Complete Technical & Product Specification**
+> Last updated: 2026-03-30
 
 This file is the single source of truth for the SB-OS codebase. It provides guidance for development (including Claude Code), architecture details, API reference, and product specifications.
 
@@ -24,6 +25,11 @@ This file is the single source of truth for the SB-OS codebase. It provides guid
 14. [Code Patterns](#14-code-patterns)
 15. [Common Development Tasks](#15-common-development-tasks)
 16. [Roadmap](#16-roadmap)
+17. [Agent Operating System](#17-agent-operating-system)
+18. [Memory System](#18-memory-system)
+19. [Compaction Pipeline](#19-compaction-pipeline)
+
+> Claude Code development instructions (hooks, memory protocol, MCP tools): see `.claude/CLAUDE.md`
 
 ---
 
@@ -92,7 +98,11 @@ It is:
 | **Frontend** | React 18, Wouter routing, TanStack Query, shadcn/ui, Tailwind CSS |
 | **Backend** | Express.js, Node.js, TypeScript |
 | **ORM** | Drizzle ORM with drizzle-zod |
-| **Database** | PostgreSQL (Neon serverless) |
+| **Database** | PostgreSQL (Railway-managed) |
+| **Vector Store** | Qdrant (3 collections: raw_memories, compacted_memories, entity_index) |
+| **Graph Store** | FalkorDB (entity relationship graph, co-occurrence tracking) |
+| **Semantic Backup** | Pinecone (secondary vector store, nightly sync from Qdrant) |
+| **Fast LLM** | Cerebras API (used for compaction summarization — fast inference) |
 | **Build** | Vite (client), esbuild (server) |
 | **Validation** | Zod schemas (shared between client/server) |
 | **Auth** | Session-based authentication with password protection |
@@ -114,11 +124,55 @@ It is:
     /hooks        Custom React hooks
 /server         Express backend (Node.js + TypeScript)
   index.ts        Main entry point
-  routes.ts       API route definitions
+  routes.ts       API route definitions (entry, delegates to /routes/*)
   storage.ts      Database abstraction layer (100+ methods)
   integrations.ts Integration configuration
+  logger.ts       Structured logging utility
+  /agents         Multi-agent OS (see Section 17)
+    agent-chat.ts           Multi-turn chat loop with loop detection
+    agent-task.ts           Delegated task execution loop
+    agent-runtime.ts        Core execution orchestration
+    agent-registry.ts       Agent CRUD and slug lookup
+    agent-scheduler.ts      Cron-based agent job runner
+    delegation-engine.ts    Hierarchical delegation + privilege attenuation
+    message-bus.ts          Inter-agent messaging
+    scheduled-jobs.ts       All registered job handlers (30+)
+    /templates              Agent soul markdown files (seed data)
+    /tools                  Tool implementations (web_search, deploy, etc.)
+  /memory         Hybrid retrieval memory system (see Section 18)
+    hybrid-retriever.ts     Triple-arm RRF search (Qdrant + PG + FalkorDB)
+    qdrant-store.ts         Qdrant vector operations
+    pinecone-store.ts       Pinecone backup store
+    graph-store.ts          FalkorDB graph CRUD + fulltext index
+    entity-extractor.ts     NLP entity extraction from messages
+    entity-linker.ts        Link entities to memory payloads
+    query-expander.ts       Synonym/context query expansion
+    reranker.ts             Cross-encoder reranking
+    retrieval-metrics.ts    In-memory ring buffer for arm latency/hit rates
+    memory-lifecycle.ts     Decay + archival + backfill jobs
+    schemas.ts              Zod schemas for all memory payload types
+  /compaction     Session compaction pipeline (see Section 19)
+    compactor.ts            Full 7-step compaction pipeline
+    context-monitor.ts      In-memory message tracking per session
+    cerebras-client.ts      Cerebras API client for fast summarization
+    prompts.ts              Compaction + entity extraction prompt templates
+    compaction-tuner.ts     Adaptive compaction threshold tuning
+    memory-rescue.ts        Fallback recovery for failed compactions
+  /channels       Channel adapters
+    /adapters
+      telegram-adapter.ts   Telegram bot (12 commands + @agent routing)
+      whatsapp-adapter.ts   WhatsApp Cloud API adapter
+  /infra          Infrastructure utilities
+    tool-loop-detector.ts   Repetition detection + circuit breaker
+    credential-proxy.ts     12-service credential registry
+    context-budget.ts       Token budget management per agent
+  /routes         Modular route files (agents, memory, automations, etc.)
+  /integrations   External service clients (WHOOP, Google, etc.)
+  /sync           Data sync jobs
+  /voice          Voice integration
+  /ws             WebSocket handlers
 /shared         Shared Zod schemas and database types
-  schema.ts       All entity schemas (24+ tables)
+  schema.ts       All entity schemas (40+ tables)
 /migrations     Database migrations (auto-generated)
 ```
 
@@ -1146,25 +1200,33 @@ ORDER BY priority ASC, focus_slot ASC
 - Folder management
 - Document import/export
 
-### 12.2. Google Calendar (Planned)
+### 12.2. Gmail ✅
 
-- Map tasks with `focusDate + focusSlot` → GCal events
-- Sync task scheduling changes
+- Email triage via `email-triage.ts` agent job
+- `/api/intelligence/email/*` endpoints
+- Telegram `/emails` and `/reply` commands
 
-### 12.3. Gmail (Planned)
+### 12.3. Telegram Bot ✅ (`@SBNexusBot`)
 
-- Email capture to inbox
+- 12 commands — see Mobile Access section
+- `@agent-slug <msg>` routing to any agent
+- `/btw <msg>` for no-history side questions
+- Webhook at `/api/webhooks/telegram`
 
-### 12.4. Notion Integration (Planned)
+### 12.4. WhatsApp ✅
 
-- Bidirectional sync for Ventures, Projects, Tasks, Days, Docs
-- Store `externalId` (Notion page ID) on entities
+- Cloud API integration via `whatsapp-adapter.ts`
+- Webhook at `/api/webhooks/whatsapp`
+- Inbound routing by phone number
+- Arabic auto-detect
 
-### 12.5. WhatsApp/Telegram Quick Capture (Planned)
+### 12.5. WHOOP Band ✅
 
-- Webhook endpoints for message capture
-- Parse "Task:", "Idea:", "Note:" prefixes
-- Create Capture Items with `source = whatsapp/telegram`
+- OAuth2 flow (`integration_tokens` table)
+- Syncs: recovery, HRV, RHR, strain, sleep, workouts
+- Env vars: `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`, `WHOOP_REDIRECT_URI`
+- Sync button on Health Hub header
+- Endpoints: `GET /api/whoop/status`, `POST /api/whoop/sync`
 
 ### 12.6. AI Integration ✅
 
@@ -1172,8 +1234,13 @@ ORDER BY priority ASC, focus_slot ASC
 - Venture-specific AI agents
 - Context-aware responses
 - Macro estimation for nutrition
+- Model failover health monitor: `GET /api/providers/health`
 
-### 12.7. TickTick Integration ✅
+### 12.7. Google Calendar (Planned)
+
+- Map tasks with `focusDate + focusSlot` → GCal events
+
+### 12.8. TickTick Integration ✅
 
 Mobile capture via TickTick app synced to SB-OS inbox.
 
@@ -1219,6 +1286,7 @@ Optional:
 | Variable | Description |
 |----------|-------------|
 | `OPENROUTER_API_KEY` | OpenRouter API key for AI features + agent system |
+| `CEREBRAS_API_KEY` | Cerebras API for fast compaction summarization |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token (@SBNexusBot) |
 | `AUTHORIZED_TELEGRAM_CHAT_IDS` | Comma-separated authorized Telegram chat IDs |
 | `TELEGRAM_WEBHOOK_URL` | Webhook URL for production Telegram mode |
@@ -1229,6 +1297,19 @@ Optional:
 | `RAILWAY_TOKEN` | For agent deploy tool — Railway deployments |
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `QDRANT_URL` | Qdrant vector store URL |
+| `QDRANT_API_KEY` | Qdrant API key |
+| `PINECONE_API_KEY` | Pinecone secondary vector store |
+| `PINECONE_INDEX` | Pinecone index name |
+| `FALKORDB_URL` | FalkorDB graph store URL |
+| `FALKORDB_PASSWORD` | FalkorDB password |
+| `WHOOP_CLIENT_ID` | WHOOP OAuth2 client ID |
+| `WHOOP_CLIENT_SECRET` | WHOOP OAuth2 client secret |
+| `WHOOP_REDIRECT_URI` | WHOOP OAuth2 redirect URI |
+| `WHATSAPP_ACCESS_TOKEN` | WhatsApp Cloud API token |
+| `WHATSAPP_PHONE_NUMBER_ID` | WhatsApp phone number ID |
+| `WHATSAPP_VERIFY_TOKEN` | Webhook verification token |
+| `MEMORY_API_KEY` | Bearer token for `/api/memory/ingest-markdown` (Claude Code hook) |
 | `TICKTICK_ACCESS_TOKEN` | TickTick OAuth access token for mobile capture |
 | `TICKTICK_INBOX_PROJECT_ID` | (Optional) Specific TickTick project ID for inbox |
 | `TICKTICK_INBOX_NAME` | (Optional) Name of inbox project (default: "SB-OS Inbox") |
@@ -1340,19 +1421,268 @@ Components appear in `client/src/components/ui/`.
 - ✅ Custom categories (user-defined enums)
 - ✅ User preferences and settings
 
-### Phase 6: Integrations 🚧 IN PROGRESS
+### Phase 6: Integrations ✅ COMPLETE
 - ✅ Google Drive sync
-- 🚧 Google Calendar sync
-- 🚧 Gmail integration
-- 🚧 Notion bidirectional sync
-- 🚧 WhatsApp/Telegram quick capture
+- ✅ Gmail triage + reply via agents
+- ✅ Telegram bot (12 commands, @agent routing)
+- ✅ WhatsApp Cloud API (bidirectional, Arabic auto-detect)
+- ✅ WHOOP band (OAuth2, health data auto-sync)
+- 🚧 Google Calendar sync (planned)
 
-### Phase 7: Advanced Features (Future)
-- Analytics and insights dashboard
-- AI-powered task prioritization
-- Smart scheduling based on energy levels
-- Mobile app (React Native)
-- API for third-party integrations
+### Phase 7: Agent OS ✅ COMPLETE
+- ✅ Hierarchical multi-agent system (21 agents)
+- ✅ Delegation engine with privilege attenuation
+- ✅ Tool loop detection + circuit breaker
+- ✅ Scheduled jobs (30+ handlers)
+- ✅ Agent metrics dashboard (`/api/agents/metrics`)
+- ✅ Session isolation (sessionId per platform:sender)
+- ✅ Credential proxy (12-service registry)
+- ✅ Browser automation (Playwright, 6 actions)
+
+### Phase 8: Memory & Intelligence ✅ COMPLETE
+- ✅ Qdrant vector store (3 collections)
+- ✅ FalkorDB graph store + fulltext index
+- ✅ Pinecone secondary store + nightly sync
+- ✅ Hybrid triple-arm retriever (RRF fusion)
+- ✅ Session compaction pipeline (Cerebras)
+- ✅ Entity extraction + co-occurrence tracking
+- ✅ Retrieval metrics (`GET /api/memory/metrics`)
+- ✅ Memory decay + archival jobs
+- ✅ Claude Code hooks → Qdrant bridge
+
+### Phase 9: Optimization ✅ COMPLETE
+- ✅ React.lazy + Suspense on 29 pages (3.8MB → 549KB main bundle)
+- ✅ Vite manualChunks for BlockNote/Recharts
+- ✅ FalkorDB fulltext index (O(n) → O(log n) entity search)
+- ✅ Pinecone backfill auto-trigger on startup if 0 records
+- ✅ 32 critical path Vitest tests (delegation, memory, retrieval, scheduler)
+
+### Phase 10: Registries & Lifestyle ✅ COMPLETE
+- ✅ Domains registry (`domains` table, `/api/domains`)
+- ✅ AI Models registry (`ai_models_registry`, `/api/ai-models-registry`, 16 providers)
+- ✅ Mantras/rules (`mantras` table, `/api/mantras/today` filters by day)
+- ✅ MantraBanner on /today page (gym schedule + rules + mantras)
+- ✅ /today page rebalance (Left: habits/health/evening; Right: day plan/admin/meals)
+
+### Phase 11: Testing & Real Use (Active — 2026-03-30)
+- DB wiped clean (tasks, projects, phases cleared)
+- Testing all systems with real data from scratch
+
+---
+
+---
+
+## 17. Agent Operating System
+
+The hierarchical multi-agent system lives entirely in `server/agents/`. Agents are defined as markdown "soul" files with YAML frontmatter, seeded into the `agents` DB table.
+
+### 17.1. Agent Hierarchy
+
+```
+user
+ └── chief-of-staff (executive)
+      ├── cmo (manager)
+      │    ├── smm-syntheliq (specialist)
+      │    └── script-writer-syntheliq (specialist)
+      ├── cto (manager)
+      │    └── task-automation-scout (worker)
+      └── ... (21 total agents)
+```
+
+Roles: `executive` → `manager` → `specialist` → `worker`. Delegation only goes **down** the org chart.
+
+### 17.2. Agent Soul Frontmatter
+
+```yaml
+---
+name: Chief of Staff
+slug: chief-of-staff
+role: executive
+parent: user
+venture: null
+expertise: [strategic_planning, delegation, oversight]
+tools: [create_task, update_task, send_telegram, web_search]
+permissions: [read_all, write_tasks, send_messages]
+delegates_to: [cmo, cto, cfo]
+max_delegation_depth: 2
+model_tier: top          # auto | top | mid | fast | local
+temperature: 0.7
+schedule:
+  daily_briefing: "0 7 * * *"   # 7am daily (Asia/Dubai)
+memory_scope: shared    # isolated | shared | inherit_parent
+---
+```
+
+### 17.3. Delegation Engine (`delegation-engine.ts`)
+
+Implements DeepMind Feb 2026 privilege attenuation rules:
+- **canDelegateTo check**: agent can only delegate to slugs in its `canDelegateTo` list
+- **Depth enforcement**: `currentDepth < maxDelegationDepth` (known bug: `|| 2` fallback means `0` is treated as `2`)
+- **Circular detection**: delegation chain array prevents A→B→A loops
+- **Privilege attenuation**: delegated task gets `INTERSECTION(delegator.permissions, requested.permissions)` — never more than delegator has
+- **Full audit trail**: every delegation logged to `agent_tasks` table with chain
+
+### 17.4. Tool Loop Detection (`infra/tool-loop-detector.ts`)
+
+`ToolLoopDetector` class used in every `agent-chat.ts` execution:
+- Tracks tool call history per session turn
+- Detects repetitive patterns (same tool, same args repeatedly)
+- Severities: `warning` (inject guidance message) → `circuit_breaker` (force final response, no more tool calls)
+- Prevents infinite agent loops that waste tokens
+
+### 17.5. Agent API Endpoints
+
+```
+GET    /api/agents                          List all agents
+GET    /api/agents/:slug                    Get agent by slug
+POST   /api/agents/:slug/chat               Chat with agent
+GET    /api/agents/:slug/conversations      Chat history
+DELETE /api/agents/:slug/conversations      Clear history
+POST   /api/agents/admin/seed               Seed agent templates
+GET    /api/agents/metrics?days=7           Per-agent metrics (chats, cost, tokens)
+POST   /api/agents/:slug/trigger-schedule   Manually trigger a scheduled job
+DELETE /api/agents/:slug/conversations      Clear agent conversation history
+GET    /api/agents/delegation-log           Full delegation audit log
+POST   /api/agents/task-queue/process       Process pending delegated tasks
+GET    /api/providers/health                Model failover health status (60s cache)
+```
+
+### 17.6. Scheduled Jobs (30+ registered)
+
+All jobs registered via `registerJobHandler()` in `scheduled-jobs.ts`. Key jobs:
+
+| Job | Schedule | Description |
+|-----|----------|-------------|
+| `daily_briefing` | 7am daily | Morning intelligence synthesis |
+| `evening_review` | 6pm daily | Evening task review |
+| `scan_backlog` | 8am, 1pm, 6pm | Task Automation Scout tags `agent-ready` tasks |
+| `embedding_backfill` | startup | Backfills Pinecone if 0 records |
+| `memory_cleanup` | weekly | Archives stale memories |
+| `qdrant_archive_stale` | weekly | Archive raw >90d + <0.4 importance |
+| `github_actions_sha_audit` | Mon 6am | Checks unpinned GitHub Actions, Telegrams if found |
+| `pipeline_health_check` | periodic | Checks all integration pipelines |
+| `knowledge_extraction` | daily | Extracts knowledge from conversation logs |
+
+### 17.7. New DB Tables (Agents)
+
+| Table | Purpose |
+|-------|---------|
+| `agents` | Agent definitions (slug, role, permissions, model, schedule, etc.) |
+| `agent_tasks` | Delegated task queue with delegation chain + status |
+| `agent_conversations` | Per-agent chat history with `sessionId` for isolation |
+| `automations` | Cron + webhook automation rules with `timezone` column |
+| `content_queue` | Agent-generated content pending review (social_post, video_script, carousel) |
+| `integration_tokens` | OAuth2 tokens (WHOOP, Google, etc.) |
+| `domains` | Owned domains registry (offplandub.ai, etc.) |
+| `ai_models_registry` | AI models catalog (16 providers seeded) |
+| `mantras` | Daily mantras/rules filtered by day of week |
+
+---
+
+## 18. Memory System
+
+The memory pipeline turns every agent conversation into searchable, structured long-term memory.
+
+### 18.1. Architecture Overview
+
+```
+Agent conversation
+    │
+    ▼
+Context Monitor (in-memory ring buffer)
+    │
+    ▼
+Compactor (7-step pipeline) ──► Cerebras (fast summarization)
+    │                                │
+    ├── raw_memories (Qdrant)        │
+    ├── compacted_memories (Qdrant) ◄┘
+    ├── entity_index (Qdrant)
+    └── Entity graph (FalkorDB)
+         │
+         ▼
+    Pinecone (nightly sync / backup)
+```
+
+### 18.2. Qdrant Collections
+
+| Collection | Content | Decay Policy |
+|------------|---------|--------------|
+| `raw_memories` | Individual messages | Archive >90d + importance <0.4 |
+| `compacted_memories` | Session summaries | Archive >180d + importance <0.5 |
+| `entity_index` | Named entities (people, ventures, tools) | No decay |
+
+All collections use `archived: true` field + `must_not: archived:true` filter on all searches.
+
+### 18.3. Hybrid Retriever — Triple-Arm RRF
+
+Three retrieval arms fused via Reciprocal Rank Fusion:
+
+| Arm | Source | RRF Weight |
+|-----|--------|------------|
+| Vector | Qdrant semantic search | 0.55 |
+| Keyword | PostgreSQL BM25-lite | 0.25 |
+| Graph | FalkorDB traversal | 0.20 |
+
+**Per-result scoring formula:**
+```
+final_score = 0.70 × cosine_similarity
+            + 0.15 × recency_decay(half_life=30d)
+            + 0.15 × importance_score
+```
+
+**Query pipeline**: raw query → `query-expander.ts` (synonyms + context) → triple-arm search → RRF merge → `reranker.ts` (cross-encoder) → top-k results
+
+### 18.4. FalkorDB Graph
+
+- Entities: `person`, `venture`, `project`, `tool`, `concept`, `location`
+- Full-text index on `Entity.name` + `Entity.description` (replaces O(n) CONTAINS scan)
+- Co-occurrence strength increments `+0.1` per re-encounter (capped 1.0)
+- `graphContextSearch()` uses fulltext first, CONTAINS fallback if empty
+
+### 18.5. Retrieval Metrics
+
+`GET /api/memory/metrics` — answers "is each arm adding value?"
+- In-memory ring buffer in `hybrid-retriever.ts` tracks per-arm: latency, hit rate
+- Populated automatically on every retrieval
+
+### 18.6. Memory Ingest from Claude Code
+
+`POST /api/memory/ingest-markdown` — Bearer token auth (`MEMORY_API_KEY`)
+- Accepts markdown content from Claude Code's file-based memory
+- Embeds and stores in Qdrant `raw_memories`
+
+---
+
+## 19. Compaction Pipeline
+
+Session compaction converts raw conversation messages into dense, structured memory.
+
+### 19.1. 7-Step Pipeline (`compactor.ts`)
+
+1. **Extract** — `getCompactableMessages(sessionId)` from context monitor (splits into toCompact / toKeep)
+2. **Store raw** — `upsertRawMemories()` to Qdrant `raw_memories`
+3. **Summarize** — Cerebras API (fallback: Ollama) generates structured JSON summary
+4. **Parse** — validate against `compactionOutputSchema` (Zod)
+5. **Store compacted** — `upsertCompactedMemory()` to Qdrant `compacted_memories`
+6. **Update entities** — extract entities, upsert to `entity_index` + FalkorDB graph
+7. **Replace context** — `replaceAfterCompaction()` updates in-memory session context
+
+### 19.2. Compaction Output Schema
+
+```ts
+{
+  summary: string,           // Dense paragraph summary
+  key_decisions: string[],   // Decisions made
+  action_items: string[],    // Todos/next steps
+  entities: Entity[],        // Named entities with type + description
+  topics: string[],          // Main topics covered
+  importance: number,        // 0.0–1.0
+}
+```
+
+### 19.3. Adaptive Tuning (`compaction-tuner.ts`)
+
+Monitors compaction quality metrics and adjusts thresholds (message count before compaction, min importance) based on retrieval performance feedback.
 
 ---
 
@@ -1364,8 +1694,8 @@ SB-OS is deployed on **Railway** with auto-deploy from `sayedbaharun/SBOS` on pu
 
 - **Live URL**: `https://sbaura.up.railway.app`
 - **Builder**: Railpack (switched from Dockerfile 2026-03-25)
-- **Port**: 8080 (set via `ENV PORT=8080` in Dockerfile)
-- **Database**: Railway-managed PostgreSQL
+- **Port**: 8080
+- **Database**: Railway-managed PostgreSQL (NOT Neon — `.env` shows `nozomi.proxy.rlwy.net`)
 
 ```bash
 # Deploy (push triggers auto-deploy)
@@ -1380,9 +1710,9 @@ railway logs
 
 ### Agent Operating System
 
-The hierarchical multi-agent system is documented in `AGENT-SYSTEM.md`. Key points:
-- 10 agent templates seeded from `server/agents/templates/`
-- Agent API at `/api/agents` (22 endpoints)
+See **Section 17** for full documentation. Quick reference:
+- 21 agents seeded from `server/agents/templates/`
+- Agent API at `/api/agents` (see Section 17.5)
 - Agent UI pages: `/agents`, `/agents/:slug`, `/agents/delegation-log`
 - Requires `OPENROUTER_API_KEY` for LLM calls
 - Seed agents via `POST /api/agents/admin/seed`
@@ -1390,55 +1720,6 @@ The hierarchical multi-agent system is documented in `AGENT-SYSTEM.md`. Key poin
 ### Other Platforms
 - **Vercel** (with external database)
 - Any Node.js hosting platform
-
----
-
-## Claude Code Persistent Memory (MCP Tools)
-
-Claude Code has 3 MCP tools for persistent memory, reusing the existing `agent_memory` table:
-
-| Tool | Purpose |
-|------|---------|
-| `store_claude_memory` | Store a learning, preference, decision, or context. Supports `scope: "shared"` to make it visible to all agents. |
-| `search_claude_memory` | Hybrid semantic + keyword search across Claude Code and shared memories. |
-| `get_claude_session_context` | Load accumulated memory context at the start of complex work. Optionally focus by topic. |
-
-**Sentinel:** `CLAUDE_CODE_AGENT_ID = "11111111-1111-1111-1111-111111111111"` (inactive agent row, slug: `_claude-code`)
-
-### MANDATORY Memory Protocol — MUST FOLLOW
-
-These rules are **non-negotiable**. Sayed requires full conversation continuity across sessions. Dropped context is unacceptable.
-
-**Rule 1: Checkpoint Before Proceeding**
-Before starting work on ANY new user request, you MUST first save a summary of the conversation so far. This includes:
-- What was just discussed/decided
-- Any bugs found or fixed
-- User preferences or feedback expressed
-- Decisions made and their reasoning
-
-Save to BOTH:
-- File-based memory: update `~/.claude/projects/-Users-sayedbaharun/memory/sessions/YYYY-MM-DD.md`
-- MCP (if available): call `store_claude_memory` for key decisions/learnings
-
-**This ensures nothing is lost to context window compression.** The old conversation is saved before new work begins.
-
-**Rule 2: Session Start**
-At the start of every session:
-1. Call `get_claude_session_context` (MCP) if available
-2. Read `memory/sessions/` for the most recent session log
-3. Read `memory/MEMORY.md` for persistent context
-4. Read `memory/TODO.md` for pending work
-
-**Rule 3: What to Save**
-After EVERY user interaction, save:
-- Bugs reported and their fix status
-- Features requested and implementation decisions
-- User preferences ("I want X", "don't do Y", "this doesn't work")
-- Architecture decisions and trade-offs
-- Open questions and unresolved issues
-
-**Rule 4: Proactive Updates**
-During long coding stretches, update the session log after completing each major task (not just at the end).
 
 ## Mobile Access
 

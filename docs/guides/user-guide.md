@@ -95,7 +95,7 @@ The web dashboard home screen shows:
 Talk to any agent by mentioning them:
 
 ```
-@cmo Review our Instagram strategy for Hikma Digital
+@cmo Review our Instagram strategy for SyntheLIQ
 ```
 
 ```

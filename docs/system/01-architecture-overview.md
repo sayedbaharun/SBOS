@@ -1,6 +1,6 @@
 # SB-OS: Architecture Overview
 
-> **Status**: Work in Progress | **Last Updated**: 2026-03-18 | **Version**: 1.0
+> **Last Updated**: 2026-03-30 | **Version**: 1.1
 
 ---
 
@@ -68,7 +68,7 @@ It is three things in one:
          ┌─────────────────────▼─────────────────────┐
          │              DATA LAYER                     │
          │                                             │
-         │  PostgreSQL (Neon)  — 30+ tables            │
+         │  PostgreSQL (Railway) — 68+ tables          │
          │  Ventures → Projects → Tasks → Days         │
          │  Health, Nutrition, Trading, Docs, Agents   │
          └─────────────────────────────────────────────┘
@@ -82,14 +82,14 @@ It is three things in one:
 |-------|-----------|---------|
 | **Frontend** | React 18, Wouter, TanStack Query, shadcn/ui, Tailwind v3 | Single-page app |
 | **Backend** | Express.js, Node.js, TypeScript | API server |
-| **Database** | PostgreSQL (Neon Serverless) | Primary data store |
+| **Database** | PostgreSQL (Railway-managed) | Primary data store |
 | **ORM** | Drizzle ORM + drizzle-zod | Type-safe queries |
 | **Vector Store** | Qdrant Cloud (1536-dim, text-embedding-3-small) | Semantic memory search |
 | **Graph Store** | FalkorDB Cloud | Knowledge graph (entities + relationships) |
 | **Backup Store** | Pinecone | Cloud fallback for compacted memories |
 | **LLM Routing** | OpenRouter → Kilo → Local Qwen | Multi-provider failover |
 | **Channels** | Telegram (Telegraf) + WhatsApp (Cloud API) | Messaging interfaces |
-| **Deployment** | Railway (Docker, auto-deploy from GitHub) | Production hosting |
+| **Deployment** | Railway (Railpack, auto-deploy from GitHub) | Production hosting |
 | **Build** | Vite (client) + esbuild (server) | Fast builds |
 
 ---
@@ -117,7 +117,7 @@ CAPTURE ITEMS (GTD inbox)
   └── Convert to Tasks or Docs
 ```
 
-### Key Tables (30+)
+### Key Tables (68+)
 
 | Category | Tables |
 |----------|--------|
@@ -157,16 +157,16 @@ CAPTURE ITEMS (GTD inbox)
 
 | Environment | Platform | How |
 |-------------|----------|-----|
-| **Production** | Railway (Docker) | Auto-deploy on `git push origin main` |
-| **Database** | Railway PostgreSQL + Neon (migration target) | `DATABASE_URL` env var |
+| **Production** | Railway (Railpack) | Auto-deploy on `git push origin main` |
+| **Database** | Railway-managed PostgreSQL | `DATABASE_URL` env var |
 | **Dev** | Local | `npm run dev` (port 5000, Vite HMR) |
 
 Railway project ID: `6c419b1e` | Hobby plan ($5/mo)
 
 ### Deploy checklist:
 1. `git push origin main` → Railway auto-builds
-2. Docker builder (not Railpack — avoids caching issues)
-3. Port 8080 (set in Dockerfile)
+2. Railpack builder (switched from Docker 2026-03-25)
+3. Port 8080
 4. Never use `railway up` — hangs on large codebases
 
 ---
