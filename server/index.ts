@@ -435,11 +435,9 @@ app.use((req, res, next) => {
     } else try {
       const { scheduleDailyDayCreation } = await import('./automations/daily-day-creation');
       const { scheduleWeeklyPlanningReminder } = await import('./automations/weekly-planning-reminder');
-      const { scheduleDailyReflectionReminder } = await import('./automations/daily-reflection-reminder');
 
       scheduleDailyDayCreation();
       scheduleWeeklyPlanningReminder();
-      scheduleDailyReflectionReminder();
 
       // Initialize TickTick auto-sync (every 30 min, skips if no token)
       const { scheduleTickTickAutoSync } = await import('./automations/ticktick-auto-sync');
@@ -480,7 +478,7 @@ app.use((req, res, next) => {
         log('Automations setup skipped:', String(automationError));
       }
 
-      log('✓ SB-OS automations initialized (day creation, reminders, RAG embeddings, agent scheduler)');
+      log('✓ SB-OS automations initialized (day creation, weekly planning, RAG embeddings, agent scheduler)');
     } catch (error) {
       log('SB-OS automations setup skipped:', String(error));
     }
@@ -524,15 +522,6 @@ app.use((req, res, next) => {
       log('✓ Outbound message queue processor started');
     } catch (mqError) {
       log('Message queue processor setup skipped:', String(mqError));
-    }
-
-    // Initialize nudge engine — runs independently of DISABLE_CRONS
-    try {
-      const { scheduleNudgeEngine } = await import('./automations/nudge-engine');
-      scheduleNudgeEngine();
-      log('✓ Nudge engine initialized');
-    } catch (nudgeError) {
-      log('Nudge engine setup skipped:', String(nudgeError));
     }
 
     // Initialize memory systems (non-blocking)

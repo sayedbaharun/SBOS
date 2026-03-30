@@ -38,7 +38,6 @@ console.log('\n📁 Checking Automation Files...\n');
 const automationFiles = [
   'server/automations/daily-day-creation.ts',
   'server/automations/weekly-planning-reminder.ts',
-  'server/automations/daily-reflection-reminder.ts',
   'server/automations/README.md',
 ];
 
@@ -86,16 +85,9 @@ if (existsSync(indexPath)) {
   );
 
   verify(
-    'Daily Reflection Import',
-    indexContent.includes("import('./automations/daily-reflection-reminder')"),
-    'Automation is imported in server/index.ts'
-  );
-
-  verify(
     'Automation Initialization',
     indexContent.includes('scheduleDailyDayCreation()') &&
-    indexContent.includes('scheduleWeeklyPlanningReminder()') &&
-    indexContent.includes('scheduleDailyReflectionReminder()'),
+    indexContent.includes('scheduleWeeklyPlanningReminder()'),
     'All automation schedulers are called'
   );
 } else {

@@ -204,6 +204,7 @@ class TelegramAdapter implements ChannelAdapter {
         `• /clip <url> — clip article to Knowledge Hub\n` +
         `• /btw <question> — side question (no history)\n` +
         `• /idea <description> — validate a business idea\n` +
+        `• /contact Name, email, phone — quick contact capture\n` +
         `• /review — review pending deliverables\n` +
         `• /delegate @<slug> <task> — delegate to agent\n\n` +
         `Tip: Send a bare URL to get a "Clip it?" prompt.`
@@ -954,6 +955,58 @@ class TelegramAdapter implements ChannelAdapter {
         this.saveMessageHistory(chatId, `/idea ${description}`, "Pipeline started", "command").catch(() => {});
       } catch (error: any) {
         await ctx.reply("Error processing idea: " + error.message);
+        this.recordError(error.message);
+      }
+    });
+
+    // ---- /contact Command ----
+    this.bot.command("contact", async (ctx) => {
+      try {
+        const text = ctx.message.text.replace(/^\/contact\s*/, "").trim();
+        if (!text) {
+          await ctx.reply(
+            "Usage: /contact Full Name, email@example.com, +971XXXXXXXXX\n" +
+            "Name is required. Email and phone are optional."
+          );
+          return;
+        }
+
+        const parts = text.split(",").map((p: string) => p.trim());
+        const name = parts[0];
+        if (!name) {
+          await ctx.reply("Please provide at least a name.");
+          return;
+        }
+
+        let email: string | undefined;
+        let phone: string | undefined;
+        for (const part of parts.slice(1)) {
+          if (part.includes("@")) {
+            email = part;
+          } else if (/^\+?\d[\d\s\-]{6,}/.test(part)) {
+            phone = part;
+          }
+        }
+
+        const person = await storage.createPerson({
+          name,
+          email: email || null,
+          phone: phone || null,
+          needsEnrichment: true,
+        } as any);
+
+        const baseUrl = process.env.APP_URL || "https://sbaura.up.railway.app";
+        const summary = [name, email, phone].filter(Boolean).join(" | ");
+        await ctx.reply(`Contact saved: ${summary}\n\nEnrich: ${baseUrl}/people`);
+
+        this.saveMessageHistory(
+          ctx.chat.id.toString(),
+          `/contact ${text}`,
+          `Contact created: "${person.name}" (id: ${person.id})`,
+          "command"
+        ).catch(() => {});
+      } catch (error: any) {
+        await ctx.reply("Failed to save contact.");
         this.recordError(error.message);
       }
     });

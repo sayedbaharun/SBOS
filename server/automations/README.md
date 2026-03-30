@@ -31,17 +31,6 @@ scheduleDailyDayCreation();
 - Send Telegram message
 - Create a reminder task in the system
 
-### 3. Daily Reflection Reminder (`daily-reflection-reminder.ts`)
-**Purpose**: Remind users to complete their daily reflection every evening.
-
-**Schedule**: Runs daily at 21:00 (9 PM)
-
-**Future Enhancements**:
-- Send email notification
-- Send push notification
-- Send Telegram message
-- Create a reminder task
-
 ## Database-Level Automations
 
 ### 4. Task Completion Timestamp
@@ -236,10 +225,9 @@ Use the curl commands provided in each automation section above.
 ```bash
 npm run dev
 # Look for these log messages:
-# ✓ SB-OS automations initialized (day creation, reminders)
+# ✓ SB-OS automations initialized (day creation, weekly planning, RAG embeddings, agent scheduler)
 # 📅 Daily day creation automation scheduled (runs at midnight)
 # 📆 Weekly planning reminder scheduled (Sundays at 6 PM)
-# 🌙 Daily reflection reminder scheduled (every day at 9 PM)
 ```
 
 ### Common Issues
@@ -273,7 +261,6 @@ Instead of auto-marking projects as done, we suggest it to the user:
 
 ### Cron Job Timing
 - **Daily Day Creation (00:00)**: Pre-creates day record before user wakes up
-- **Daily Reflection (21:00)**: End of day, after work/activities
 - **Weekly Planning (Sunday 18:00)**: Weekend evening, time to plan ahead
 
 ## Future Enhancements

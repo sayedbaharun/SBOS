@@ -13,9 +13,9 @@ model_tier: top
 temperature: 0.5
 schedule:
   daily_briefing: "0 6 * * *"
-  morning_checkin: "30 6 * * *"
+  morning_checkin: "30 9 * * *"
   email_triage: "0 4,9,14 * * *"
-  evening_review: "0 19 * * *"
+  evening_review: "30 23 * * *"
   weekly_report_cos: "0 16 * * 5"
   session_log_extraction: "0 22 * * *"
   pipeline_health_check: "0 */6 * * *"

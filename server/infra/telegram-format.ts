@@ -5,7 +5,7 @@
  * All output is HTML parse mode. Jarvis-like tone: confident, brief, decisive.
  *
  * Used by: scheduled-jobs, intelligence-synthesizer, email-triage,
- * meeting-prep, nudge-engine, proactive-triggers, sub-agent, agent-scheduler.
+ * meeting-prep, proactive-triggers, sub-agent, agent-scheduler.
  */
 
 const SEPARATOR = "━━━━━━━━━━━━━━━━━";

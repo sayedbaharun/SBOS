@@ -817,22 +817,7 @@ async function runSystemHealthCheck(): Promise<string[]> {
   }
 
   try {
-    // 4. Nudge engine — check last run (should have run within 45 min)
-    const { lastNudgeRunAt } = await import("../automations/nudge-engine");
-    if (lastNudgeRunAt) {
-      const msSinceRun = Date.now() - lastNudgeRunAt.getTime();
-      if (msSinceRun > 45 * 60 * 1000) {
-        const minAgo = Math.round(msSinceRun / 60000);
-        issues.push(`Nudge engine last ran ${minAgo}min ago (expected every 30min)`);
-      }
-    }
-    // Don't flag if never run — could be fresh restart
-  } catch {
-    // Non-critical
-  }
-
-  try {
-    // 5. Telegram connection
+    // 4. Telegram connection
     const { telegramAdapter } = await import("../channels/adapters/telegram-adapter");
     if (!telegramAdapter.isConnected()) {
       issues.push("Telegram bot disconnected!");

@@ -72,7 +72,7 @@
 - **README rewritten** — 4 Mermaid diagrams, accurate stats (432 TS files, 72 tables, 403 endpoints, 18 agents)
 - **Docs restructured** — flat `docs/*.md` → `docs/system/`, `docs/reference/`, `docs/guides/`, `docs/ventures/`, `docs/archive/`
 - **Shared memory bridge** — `memory/` in SBOS root, `.claude/CLAUDE.md` reads it on session start
-- All changes committed (`7f295c3`) and deployed to Railway
+- **Knowledge Hub file processing upgraded** (`1a5548d`) — Gemini 2.5 Flash replaces GPT-4o for image OCR (94% cheaper) + scanned PDF vision path added. `server/file-extraction.ts`.
 
 ### Memory system health (verified 2026-03-30)
 - Qdrant: ✅ 176 raw_memories, 0 compacted, 39 entity_index
@@ -88,6 +88,8 @@
 - [ ] Pinecone backfill — sync triggered, confirm record count > 0 on next status check
 - [ ] Populate DB with real ventures/projects/tasks (DB wiped 2026-03-30 — testing with real data)
 - [ ] ArabMoneyOfficial and MyDub.ai project files in memory/projects/ are sparse — fill in when ready
+- [ ] Verify Knowledge Hub file upload on Railway: check `metadata.processingModel = "gemini-2.5-flash"` after uploading image/PDF
 - [x] OpenRouter account: sb@revolvgroup.com
 - [x] CLAUDE.md numbers fixed: 72 tables, 35 pages, 403 endpoints, 18 agents
 - [x] Groq API key added to Railway
+- [x] Gemini 2.5 Flash for file extraction (commit `1a5548d`)
