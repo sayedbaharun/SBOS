@@ -11,7 +11,7 @@ import OpenAI from "openai";
 import { createRequire } from "module";
 import { logger } from "./logger";
 
-// Initialize OpenRouter with OpenAI-compatible API
+// Initialize OpenRouter with OpenAI-compatible API (fallback)
 const openai = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY,
   baseURL: "https://openrouter.ai/api/v1",
@@ -20,6 +20,52 @@ const openai = new OpenAI({
     "X-Title": "SB-OS",
   },
 });
+
+// ============================================================================
+// GEMINI 2.5 FLASH — Primary vision + text analysis model
+// ~10× cheaper than GPT-4o for vision ($0.15 vs $2.50 per 1M input tokens)
+// Also handles scanned PDFs (image-based) that pdf-parse cannot read
+// Falls back to OpenRouter GPT-4o/GPT-4o-mini if GOOGLE_AI_API_KEY not set
+// ============================================================================
+
+const GEMINI_FLASH_MODEL = "gemini-2.5-flash";
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+// Max inline data size for Gemini API (~15MB raw → ~20MB base64)
+const GEMINI_MAX_INLINE_BYTES = 15 * 1024 * 1024;
+
+interface GeminiPart {
+  text?: string;
+  inlineData?: { mimeType: string; data: string };
+}
+
+async function callGeminiVision(parts: GeminiPart[], jsonMode = false): Promise<string> {
+  const apiKey = process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) throw new Error("GOOGLE_AI_API_KEY not set");
+
+  const url = `${GEMINI_API_BASE}/${GEMINI_FLASH_MODEL}:generateContent?key=${apiKey}`;
+  const body: Record<string, unknown> = {
+    contents: [{ parts }],
+  };
+  if (jsonMode) {
+    body.generationConfig = { responseMimeType: "application/json" };
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Gemini API error ${response.status}: ${err.slice(0, 200)}`);
+  }
+
+  const data = await response.json() as any;
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("No text in Gemini response");
+  return text;
+}
 
 // Lazy-load pdf-parse to avoid ESM/CJS issues with esbuild
 let pdfParseModule: any = null;
@@ -79,6 +125,50 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<FileExtraction
     const data = await pdfParse(buffer);
     const extractedText = data.text.trim();
 
+    // Scanned/image-based PDF — pdf-parse returns empty or near-empty text.
+    // Use Gemini 2.5 Flash vision to read the PDF directly (understands layout, tables, charts).
+    if (extractedText.length < 50 && process.env.GOOGLE_AI_API_KEY && buffer.length <= GEMINI_MAX_INLINE_BYTES) {
+      try {
+        logger.info({ bufferSize: buffer.length, pages: data.numpages }, "Scanned PDF detected, trying Gemini vision");
+        const base64 = buffer.toString("base64");
+        const parts: GeminiPart[] = [
+          {
+            text: `Extract all text from this PDF document. Respond in JSON format:
+{
+  "extractedText": "all visible text...",
+  "summary": "2-3 sentence summary",
+  "tags": ["tag1", "tag2"],
+  "noteType": "task|idea|meeting_notes|reference|general",
+  "hasActionItems": false,
+  "keyTopics": ["topic1"],
+  "entities": ["entity1"],
+  "confidence": "high|medium|low"
+}`,
+          },
+          { inlineData: { mimeType: "application/pdf", data: base64 } },
+        ];
+        const rawText = await callGeminiVision(parts, true);
+        const result = JSON.parse(rawText);
+        return {
+          extractedText: result.extractedText || "",
+          summary: result.summary,
+          tags: Array.isArray(result.tags) ? result.tags : [],
+          metadata: {
+            confidence: result.confidence || "medium",
+            pageCount: data.numpages,
+            noteType: result.noteType || "general",
+            hasActionItems: result.hasActionItems || false,
+            keyTopics: result.keyTopics || [],
+            entities: result.entities || [],
+            processingModel: "gemini-2.5-flash (pdf-vision)",
+            processingTime: Date.now() - startTime,
+          },
+        };
+      } catch (error) {
+        logger.warn({ error }, "Gemini PDF vision failed, returning minimal extraction");
+      }
+    }
+
     // If we have significant text, generate AI summary
     let summary: string | undefined;
     let tags: string[] = [];
@@ -112,34 +202,7 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<FileExtraction
   }
 }
 
-/**
- * Extract text from an image using GPT-4o Vision
- */
-export async function extractTextFromImage(
-  imageData: string | Buffer,
-  mimeType: string
-): Promise<FileExtractionResult> {
-  const startTime = Date.now();
-
-  try {
-    // Convert buffer to base64 data URL if needed
-    let imageUrl: string;
-    if (Buffer.isBuffer(imageData)) {
-      const base64 = imageData.toString("base64");
-      imageUrl = `data:${mimeType};base64,${base64}`;
-    } else if (imageData.startsWith("data:") || imageData.startsWith("http")) {
-      imageUrl = imageData;
-    } else {
-      // Assume it's base64 without prefix
-      imageUrl = `data:${mimeType};base64,${imageData}`;
-    }
-
-    const response = await openai.chat.completions.create({
-      model: "openai/gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: `You are an expert document analyzer. Extract all text from images and provide intelligent metadata.
+const IMAGE_ANALYSIS_PROMPT = `You are an expert document analyzer. Extract all text from images and provide intelligent metadata.
 
 Your task:
 1. Extract ALL visible text from the image accurately
@@ -155,23 +218,77 @@ Respond in JSON format with this structure:
   "summary": "brief summary...",
   "tags": ["tag1", "tag2"],
   "noteType": "task|idea|meeting_notes|reference|general",
-  "hasActionItems": boolean,
+  "hasActionItems": false,
   "keyTopics": ["topic1", "topic2"],
   "entities": ["entity1", "entity2"],
   "confidence": "high|medium|low"
-}`
+}`;
+
+/**
+ * Extract text from an image using Gemini 2.5 Flash (primary) or GPT-4o (fallback)
+ */
+export async function extractTextFromImage(
+  imageData: string | Buffer,
+  mimeType: string
+): Promise<FileExtractionResult> {
+  const startTime = Date.now();
+
+  // Resolve base64 string regardless of input format
+  let base64: string;
+  let imageUrl: string;
+  if (Buffer.isBuffer(imageData)) {
+    base64 = imageData.toString("base64");
+    imageUrl = `data:${mimeType};base64,${base64}`;
+  } else if (imageData.startsWith("data:")) {
+    base64 = imageData.split(",")[1] ?? "";
+    imageUrl = imageData;
+  } else if (imageData.startsWith("http")) {
+    base64 = ""; // URL — can't use as inline data; falls through to GPT-4o
+    imageUrl = imageData;
+  } else {
+    base64 = imageData;
+    imageUrl = `data:${mimeType};base64,${imageData}`;
+  }
+
+  // Primary: Gemini 2.5 Flash (inline base64 — works for all non-URL inputs)
+  if (process.env.GOOGLE_AI_API_KEY && base64) {
+    try {
+      const parts: GeminiPart[] = [
+        { text: IMAGE_ANALYSIS_PROMPT + "\n\nExtract all text and analyze this document image." },
+        { inlineData: { mimeType, data: base64 } },
+      ];
+      const rawText = await callGeminiVision(parts, true);
+      const result = JSON.parse(rawText);
+      return {
+        extractedText: result.extractedText || "",
+        summary: result.summary,
+        tags: Array.isArray(result.tags) ? result.tags : [],
+        metadata: {
+          confidence: result.confidence || "medium",
+          noteType: result.noteType || "general",
+          hasActionItems: result.hasActionItems || false,
+          keyTopics: result.keyTopics || [],
+          entities: result.entities || [],
+          processingModel: "gemini-2.5-flash",
+          processingTime: Date.now() - startTime,
         },
+      };
+    } catch (error) {
+      logger.warn({ error }, "Gemini image OCR failed, falling back to GPT-4o");
+    }
+  }
+
+  // Fallback: GPT-4o via OpenRouter
+  try {
+    const response = await openai.chat.completions.create({
+      model: "openai/gpt-4o",
+      messages: [
+        { role: "system", content: IMAGE_ANALYSIS_PROMPT },
         {
           role: "user",
           content: [
-            {
-              type: "text",
-              text: "Extract all text and analyze this document image.",
-            },
-            {
-              type: "image_url",
-              image_url: { url: imageUrl },
-            },
+            { type: "text", text: "Extract all text and analyze this document image." },
+            { type: "image_url", image_url: { url: imageUrl } },
           ],
         },
       ],
@@ -180,12 +297,9 @@ Respond in JSON format with this structure:
     });
 
     const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error("No response from GPT-4o Vision");
-    }
+    if (!content) throw new Error("No response from GPT-4o Vision");
 
     const result = JSON.parse(content);
-
     return {
       extractedText: result.extractedText || "",
       summary: result.summary,
@@ -207,18 +321,55 @@ Respond in JSON format with this structure:
 }
 
 /**
- * Analyze text content with AI to generate summary, tags, and metadata
+ * Analyze text content with AI to generate summary, tags, and metadata.
+ * Primary: Gemini 2.5 Flash. Fallback: GPT-4o-mini via OpenRouter.
  */
 async function analyzeTextWithAI(text: string): Promise<{
   summary: string;
   tags: string[];
   metadata: Partial<FileExtractionResult["metadata"]>;
 }> {
-  // Truncate very long text to stay within token limits
   const truncatedText = text.length > 15000 ? text.substring(0, 15000) + "\n\n[... text truncated ...]" : text;
 
+  const prompt = `You are an expert document analyzer. Analyze the provided text and extract key information.
+
+Respond in JSON format with this structure:
+{
+  "summary": "2-3 sentence summary of the document",
+  "tags": ["tag1", "tag2", "tag3"],
+  "noteType": "task|idea|meeting_notes|reference|general",
+  "hasActionItems": false,
+  "keyTopics": ["topic1", "topic2"],
+  "entities": ["entity1", "entity2"]
+}
+
+Document to analyze:
+${truncatedText}`;
+
+  // Primary: Gemini 2.5 Flash
+  if (process.env.GOOGLE_AI_API_KEY) {
+    try {
+      const rawText = await callGeminiVision([{ text: prompt }], true);
+      const result = JSON.parse(rawText);
+      return {
+        summary: result.summary || "",
+        tags: Array.isArray(result.tags) ? result.tags : [],
+        metadata: {
+          noteType: result.noteType || "general",
+          hasActionItems: result.hasActionItems || false,
+          keyTopics: result.keyTopics || [],
+          entities: result.entities || [],
+          processingModel: "gemini-2.5-flash",
+        },
+      };
+    } catch (error) {
+      logger.warn({ error }, "Gemini text analysis failed, falling back to GPT-4o-mini");
+    }
+  }
+
+  // Fallback: GPT-4o-mini via OpenRouter
   const response = await openai.chat.completions.create({
-    model: "openai/gpt-4o-mini", // Use faster model for text analysis
+    model: "openai/gpt-4o-mini",
     messages: [
       {
         role: "system",
@@ -232,24 +383,18 @@ Respond in JSON format with this structure:
   "hasActionItems": boolean,
   "keyTopics": ["topic1", "topic2"],
   "entities": ["entity1", "entity2"] (people, companies, products mentioned)
-}`
+}`,
       },
-      {
-        role: "user",
-        content: `Analyze this document:\n\n${truncatedText}`,
-      },
+      { role: "user", content: `Analyze this document:\n\n${truncatedText}` },
     ],
     response_format: { type: "json_object" },
     max_tokens: 1000,
   });
 
   const content = response.choices[0]?.message?.content;
-  if (!content) {
-    throw new Error("No response from AI analysis");
-  }
+  if (!content) throw new Error("No response from AI analysis");
 
   const result = JSON.parse(content);
-
   return {
     summary: result.summary || "",
     tags: Array.isArray(result.tags) ? result.tags : [],
@@ -369,6 +514,31 @@ Respond in JSON format with this structure:
   "noteType": "task|idea|meeting_notes|reference|general"
 }`;
 
+  // Primary: Gemini 2.5 Flash
+  if (process.env.GOOGLE_AI_API_KEY) {
+    try {
+      const geminiPrompt = `${systemPrompt}\n\nDocument to analyze:\n\n${truncatedText}`;
+      const rawText = await callGeminiVision([{ text: geminiPrompt }], true);
+      const result = JSON.parse(rawText);
+      return {
+        summary: result.summary || "",
+        tags: Array.isArray(result.tags) ? result.tags : [],
+        analysis: result.analysis,
+        metadata: {
+          noteType: result.noteType || "general",
+          hasActionItems: result.hasActionItems || false,
+          keyTopics: result.keyTopics || [],
+          entities: result.entities || [],
+          processingModel: "gemini-2.5-flash",
+          processingTime: Date.now() - startTime,
+        },
+      };
+    } catch (error) {
+      logger.warn({ error }, "Gemini reanalysis failed, falling back to OpenRouter");
+    }
+  }
+
+  // Fallback: GPT-4o / GPT-4o-mini via OpenRouter
   const response = await openai.chat.completions.create({
     model: options.detailed ? "openai/gpt-4o" : "openai/gpt-4o-mini",
     messages: [
