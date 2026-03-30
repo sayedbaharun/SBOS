@@ -16,6 +16,12 @@ export const logger = pino({
       return { level: label };
     },
   },
+  // Accept both { err } (pino standard) and { error } (common mistake) keys
+  // so Error objects always serialize with stack traces instead of appearing as {}
+  serializers: {
+    err: pino.stdSerializers.err,
+    error: pino.stdSerializers.err,
+  },
   timestamp: pino.stdTimeFunctions.isoTime,
 });
 

@@ -105,6 +105,13 @@ async function refreshAccessToken(refreshToken: string): Promise<{
 }
 
 /**
+ * Mutex for token refresh — prevents race condition when Promise.all
+ * fires multiple API calls simultaneously and each tries to consume
+ * the single-use refresh token independently.
+ */
+let tokenRefreshPromise: Promise<string> | null = null;
+
+/**
  * Get a valid access token, refreshing if needed
  */
 async function getValidAccessToken(): Promise<string> {
@@ -123,17 +130,28 @@ async function getValidAccessToken(): Promise<string> {
     throw new Error("WHOOP refresh token missing. Re-authorize.");
   }
 
+  // Deduplicate concurrent refresh calls — only one refresh at a time
+  if (tokenRefreshPromise) {
+    return tokenRefreshPromise;
+  }
+
   logger.info("Refreshing WHOOP access token");
-  const refreshed = await refreshAccessToken(token.refreshToken);
+  tokenRefreshPromise = (async () => {
+    try {
+      const refreshed = await refreshAccessToken(token.refreshToken!);
+      await storage.upsertIntegrationToken("whoop", {
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+        scopes: WHOOP_SCOPES,
+      });
+      return refreshed.accessToken;
+    } finally {
+      tokenRefreshPromise = null;
+    }
+  })();
 
-  await storage.upsertIntegrationToken("whoop", {
-    accessToken: refreshed.accessToken,
-    refreshToken: refreshed.refreshToken,
-    expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
-    scopes: WHOOP_SCOPES,
-  });
-
-  return refreshed.accessToken;
+  return tokenRefreshPromise;
 }
 
 /**

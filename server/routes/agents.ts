@@ -795,7 +795,7 @@ router.post("/admin/setup-hikma", async (req: Request, res: Response) => {
 router.get("/admin/dead-letters", async (req: Request, res: Response) => {
   try {
     const { storage } = await import("../storage");
-    const limit = parseInt(String(req.query.limit) || "50", 10);
+    const limit = parseInt(req.query.limit as string, 10) || 50;
     const deadLetters = await storage.getDeadLetterJobs(limit);
     res.json(deadLetters);
   } catch (error) {

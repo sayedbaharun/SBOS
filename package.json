@@ -16,7 +16,8 @@
     "db:emergency-fix": "tsx scripts/emergency-fix.ts",
     "reset-password": "tsx scripts/reset-password.ts",
     "setup:2026-arc": "tsx scripts/setup-2026-arc.ts",
-    "mcp": "tsx server/mcp-server.ts"
+    "mcp": "tsx server/mcp-server.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@blocknote/core": "^0.46.2",

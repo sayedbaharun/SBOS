@@ -12,6 +12,7 @@ import connectPgSimple from "connect-pg-simple";
 import pkg from "pg";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { logger as appLogger } from "./logger";
 import { storage } from "./storage";
 import { validateEnvironmentOrExit } from "./env-validator";
 
@@ -385,13 +386,14 @@ app.use((req, res, next) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
-    // Log error but don't re-throw (prevents server crash)
-    log(`Error ${status}: ${message}`);
-    if (status === 500) {
-      console.error('Server error:', err);
-    }
+    // Use structured logger so stack traces appear in Railway logs
+    appLogger.error({ err, status }, `Unhandled ${status}: ${message}`);
 
-    res.status(status).json({ message });
+    const body: Record<string, any> = { message };
+    if (process.env.NODE_ENV !== "production") {
+      body.detail = String(err);
+    }
+    res.status(status).json(body);
   });
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
