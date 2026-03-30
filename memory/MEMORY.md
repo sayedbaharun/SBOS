@@ -66,16 +66,28 @@
 
 ## Current Focus (Phase 11 — 2026-03-30)
 
-- DB wiped clean — testing all systems with real data from scratch
-- Shared memory bridge between Claude Code ↔ Cowork: **COMPLETE**
-  - `memory/` folder in SBOS root is now the bridge
-  - `.claude/CLAUDE.md` updated: reads `memory/MEMORY.md` first, saves to `memory/sessions/` for Cowork pickup
-- CLAUDE.md and docs fully updated and reorganized
-- Next: populate DB with real ventures/projects/tasks and begin actual system testing
+### What shipped today
+- **Groq as 4th LLM provider** — `server/groq-client.ts` + model-manager + cerebras cascade (Cerebras → Groq → Ollama)
+- **Memory system upgraded**: Gemini Embedding 001, A-MAC quality gate, Ebbinghaus decay, inline dedup, proactive surfacing (`POST /api/memory/proactive`)
+- **README rewritten** — 4 Mermaid diagrams, accurate stats (432 TS files, 72 tables, 403 endpoints, 18 agents)
+- **Docs restructured** — flat `docs/*.md` → `docs/system/`, `docs/reference/`, `docs/guides/`, `docs/ventures/`, `docs/archive/`
+- **Shared memory bridge** — `memory/` in SBOS root, `.claude/CLAUDE.md` reads it on session start
+- All changes committed (`7f295c3`) and deployed to Railway
+
+### Memory system health (verified 2026-03-30)
+- Qdrant: ✅ 176 raw_memories, 0 compacted, 39 entity_index
+- Gemini Embedding 001: ✅ 1536-dim, 8 task types
+- Quality gate: ✅ "ok" → rejected, real content → stored
+- Pinecone: ✅ configured, sync running (was 0 records, backfill triggered)
+- Proactive surfacer: ✅ `POST /api/memory/proactive` returning results
+- Ingest-markdown bridge: ✅ `POST /api/memory/ingest-markdown` accepting content
+- LLM providers: OpenRouter ✅ · Kilo ✅ · Groq ✅ (configured) · Local ❌ (not set up)
 
 ## Open Threads
 
-- [ ] Verify venture list in MEMORY.md against actual DB (DB was wiped 2026-03-30 — ventures may have changed)
-- [ ] CLAUDE.md numbers slightly off (26 pages listed vs 35 actual, 24 tables detailed vs 71 actual) — sync when convenient
+- [ ] Pinecone backfill — sync triggered, confirm record count > 0 on next status check
+- [ ] Populate DB with real ventures/projects/tasks (DB wiped 2026-03-30 — testing with real data)
 - [ ] ArabMoneyOfficial and MyDub.ai project files in memory/projects/ are sparse — fill in when ready
-- [x] OpenRouter account resolved — key updated to sk-or-v1-f74...1e56, account is sb@revolvgroup.com
+- [x] OpenRouter account: sb@revolvgroup.com
+- [x] CLAUDE.md numbers fixed: 72 tables, 35 pages, 403 endpoints, 18 agents
+- [x] Groq API key added to Railway
