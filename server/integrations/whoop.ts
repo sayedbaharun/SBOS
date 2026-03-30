@@ -82,8 +82,8 @@ async function refreshAccessToken(refreshToken: string): Promise<{
 }> {
   const response = await fetch(WHOOP_TOKEN_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
       client_id: getClientId(),
