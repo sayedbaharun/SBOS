@@ -28,88 +28,121 @@ const WEIGHT_CACHE_TTL_MS = 60 * 60 * 1000;
 const HEALTH_FOLDER_ID = "1Oh8r-HygmAi8BrLSNsXUDvklsCyLLAW3";
 
 /**
+ * Shared helper — fetches + parses weight CSV from Drive.
+ * Results cached in memory for 1 hour.
+ */
+export async function fetchWeightData(): Promise<WeightEntry[]> {
+  if (weightCache && Date.now() - weightCache.fetchedAt < WEIGHT_CACHE_TTL_MS) {
+    return weightCache.data;
+  }
+
+  const drive = await getDriveClient();
+
+  const fileSearch = await drive.files.list({
+    q: `'${HEALTH_FOLDER_ID}' in parents and name contains 'weight' and trashed=false`,
+    fields: "files(id, name, mimeType, modifiedTime)",
+    orderBy: "modifiedTime desc",
+    spaces: "drive",
+    pageSize: 10,
+  });
+
+  const weightFile = fileSearch.data.files?.[0];
+  if (!weightFile?.id) throw new Error("No weight CSV found in SB-OS/Knowledge Base/Health");
+
+  logger.info({ fileId: weightFile.id, fileName: weightFile.name, modified: weightFile.modifiedTime }, "Loading weight CSV");
+
+  let csvText: string;
+  if (weightFile.mimeType === "application/vnd.google-apps.spreadsheet") {
+    const response = await drive.files.export(
+      { fileId: weightFile.id, mimeType: "text/csv" },
+      { responseType: "arraybuffer" }
+    );
+    csvText = Buffer.from(response.data as ArrayBuffer).toString("utf-8");
+  } else {
+    const response = await drive.files.get(
+      { fileId: weightFile.id, alt: "media" },
+      { responseType: "arraybuffer" }
+    );
+    csvText = Buffer.from(response.data as ArrayBuffer).toString("utf-8");
+  }
+
+  const rows = parseSimpleCSV(csvText);
+  const parsed: WeightEntry[] = [];
+
+  for (const row of rows) {
+    const timeVal = row["time"] ?? "";
+    const dateVal = timeVal.slice(0, 10);
+    if (!dateVal || dateVal.length < 10) continue;
+
+    const weightKg = parseFloat(row["weight (kg)"] ?? "");
+    if (isNaN(weightKg) || weightKg === 0) continue;
+
+    const bodyFatPct = parseFloat(row["body fat %"] ?? "");
+    const leanBodyMassKg = parseFloat(row["lean body mass (kg)"] ?? "");
+
+    parsed.push({
+      date: dateVal,
+      weightKg,
+      bodyFatPct: isNaN(bodyFatPct) || bodyFatPct === 0 ? null : bodyFatPct,
+      leanBodyMassKg: isNaN(leanBodyMassKg) || leanBodyMassKg === 0 ? null : leanBodyMassKg,
+    });
+  }
+
+  const byDate = new Map<string, WeightEntry>();
+  for (const entry of parsed) {
+    if (!byDate.has(entry.date)) byDate.set(entry.date, entry);
+  }
+
+  const result = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+  weightCache = { data: result, fetchedAt: Date.now() };
+  return result;
+}
+
+/**
  * GET /api/health/weight-trend
- * Finds the most recently modified weight CSV in the Drive Health folder,
- * downloads and parses it, returns kg + body fat % + lean body mass.
- * Picks newest file automatically — safe to upload a fresh CSV each week.
  */
 router.get("/weight-trend", async (_req: Request, res: Response) => {
   try {
-    if (weightCache && Date.now() - weightCache.fetchedAt < WEIGHT_CACHE_TTL_MS) {
-      return res.json(weightCache.data);
-    }
-
-    const drive = await getDriveClient();
-
-    // List all CSVs/Sheets with "weight" in the name, sorted newest first
-    const fileSearch = await drive.files.list({
-      q: `'${HEALTH_FOLDER_ID}' in parents and name contains 'weight' and trashed=false`,
-      fields: "files(id, name, mimeType, modifiedTime)",
-      orderBy: "modifiedTime desc",
-      spaces: "drive",
-      pageSize: 10,
-    });
-
-    const weightFile = fileSearch.data.files?.[0];
-    if (!weightFile?.id) {
-      return res.status(404).json({ error: "No weight CSV found in SB-OS/Knowledge Base/Health" });
-    }
-
-    logger.info({ fileId: weightFile.id, fileName: weightFile.name, modified: weightFile.modifiedTime }, "Loading weight CSV");
-
-    // Download content
-    let csvText: string;
-    if (weightFile.mimeType === "application/vnd.google-apps.spreadsheet") {
-      const response = await drive.files.export(
-        { fileId: weightFile.id, mimeType: "text/csv" },
-        { responseType: "arraybuffer" }
-      );
-      csvText = Buffer.from(response.data as ArrayBuffer).toString("utf-8");
-    } else {
-      const response = await drive.files.get(
-        { fileId: weightFile.id, alt: "media" },
-        { responseType: "arraybuffer" }
-      );
-      csvText = Buffer.from(response.data as ArrayBuffer).toString("utf-8");
-    }
-
-    // Parse — headers: "time", "weight (kg)", "body fat %", "lean body mass (kg)"
-    const rows = parseSimpleCSV(csvText);
-    const parsed: WeightEntry[] = [];
-
-    for (const row of rows) {
-      // Date from "Time" column (format: "YYYY-MM-DD HH:MM:SS") — take date part only
-      const timeVal = row["time"] ?? "";
-      const dateVal = timeVal.slice(0, 10); // "YYYY-MM-DD"
-      if (!dateVal || dateVal.length < 10) continue;
-
-      const weightKg = parseFloat(row["weight (kg)"] ?? "");
-      if (isNaN(weightKg) || weightKg === 0) continue; // skip zero/bad rows
-
-      const bodyFatPct = parseFloat(row["body fat %"] ?? "");
-      const leanBodyMassKg = parseFloat(row["lean body mass (kg)"] ?? "");
-
-      parsed.push({
-        date: dateVal,
-        weightKg,
-        bodyFatPct: isNaN(bodyFatPct) || bodyFatPct === 0 ? null : bodyFatPct,
-        leanBodyMassKg: isNaN(leanBodyMassKg) || leanBodyMassKg === 0 ? null : leanBodyMassKg,
-      });
-    }
-
-    // Deduplicate by date — keep the first reading of each day (earliest timestamp)
-    const byDate = new Map<string, WeightEntry>();
-    for (const entry of parsed) {
-      if (!byDate.has(entry.date)) byDate.set(entry.date, entry);
-    }
-
-    const result = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
-
-    weightCache = { data: result, fetchedAt: Date.now() };
+    const result = await fetchWeightData();
     res.json(result);
   } catch (error: any) {
     logger.error({ error }, "Error fetching weight trend from Drive");
     res.status(500).json({ error: "Failed to fetch weight trend", details: error.message });
+  }
+});
+
+/**
+ * POST /api/health/sync-weight
+ * Reads latest weight + body fat from Drive CSV and writes into today's healthEntry.
+ */
+router.post("/sync-weight", async (req: Request, res: Response) => {
+  try {
+    const entries = await fetchWeightData();
+    if (!entries.length) {
+      return res.status(404).json({ error: "No weight data found in Drive CSV" });
+    }
+
+    // Use the most recent entry
+    const latest = entries[entries.length - 1];
+
+    const existing = await storage.getHealthEntryByDate(latest.date);
+    const weightFields: Record<string, any> = {
+      weightKg: latest.weightKg,
+    };
+    if (latest.bodyFatPct != null) weightFields.bodyFatPercent = latest.bodyFatPct;
+
+    if (existing) {
+      await storage.updateHealthEntry(existing.id, weightFields);
+    } else {
+      const day = await storage.getDayOrCreate(latest.date);
+      await storage.createHealthEntry({ dayId: day.id, date: latest.date, ...weightFields } as any);
+    }
+
+    logger.info({ date: latest.date, weightKg: latest.weightKg, bodyFatPct: latest.bodyFatPct }, "Weight synced from Drive CSV");
+    res.json({ synced: true, date: latest.date, weightKg: latest.weightKg, bodyFatPct: latest.bodyFatPct });
+  } catch (error: any) {
+    logger.error({ error }, "Error syncing weight from Drive");
+    res.status(500).json({ error: "Failed to sync weight", details: error.message });
   }
 });
 

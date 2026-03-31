@@ -9,7 +9,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -146,6 +145,12 @@ interface HealthEntry {
   workoutType: string | null;
   workoutDurationMin: number | null;
   notes: string | null;
+  // WHOOP auto-synced fields
+  recoveryScore: number | null;
+  hrv: number | null;
+  restingHeartRate: number | null;
+  strainScore: number | null;
+  whoopSyncedAt: string | null;
 }
 
 interface NutritionEntry {
@@ -260,19 +265,12 @@ export default function DailyPage() {
     primaryVentureFocus: "",
   });
 
-  // Health
+  // Health — only fields that require manual input
   const [health, setHealth] = useState({
-    sleepHours: "" as string | number,
-    sleepQuality: "",
     energyLevel: "" as string | number,
     mood: "",
-    weightKg: "" as string | number,
-    bodyFatPercent: "" as string | number,
     stressLevel: "",
     steps: "" as string | number,
-    workoutDone: false,
-    workoutType: "",
-    workoutDurationMin: "" as string | number,
   });
 
   // Evening
@@ -440,7 +438,7 @@ export default function DailyPage() {
       { text: "", completed: false },
     ]);
     setPlanning({ oneThingToShip: "", primaryVentureFocus: "" });
-    setHealth({ sleepHours: "", sleepQuality: "", energyLevel: "", mood: "", weightKg: "", bodyFatPercent: "", stressLevel: "", steps: "", workoutDone: false, workoutType: "", workoutDurationMin: "" });
+    setHealth({ energyLevel: "", mood: "", stressLevel: "", steps: "" });
     setEvening({ reflectionPm: "", fastingHours: "", deepWorkHours: "" });
     setProteinMet(false);
     setCaloriesOver2100(false);
@@ -514,20 +512,22 @@ export default function DailyPage() {
     if (entry) {
       setHealthEntryId(entry.id);
       setHealth({
-        sleepHours: entry.sleepHours ?? "",
-        sleepQuality: entry.sleepQuality ?? "",
         energyLevel: entry.energyLevel ?? "",
         mood: entry.mood ?? "",
-        weightKg: entry.weightKg ?? "",
-        bodyFatPercent: entry.bodyFatPercent ?? "",
         stressLevel: entry.stressLevel ?? "",
         steps: entry.steps ?? "",
-        workoutDone: entry.workoutDone || false,
-        workoutType: entry.workoutType ?? "",
-        workoutDurationMin: entry.workoutDurationMin ?? "",
       });
     }
   }, [healthEntries]);
+
+  // Auto-sync weight from Drive CSV on mount (fire-and-forget)
+  useEffect(() => {
+    if (isViewingToday) {
+      apiRequest("POST", "/api/health/sync-weight").then(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/health"] });
+      }).catch(() => {/* silent — Drive may not be connected */});
+    }
+  }, [isViewingToday]);
 
   // ---- HANDLERS ----
 
@@ -674,28 +674,17 @@ export default function DailyPage() {
         await apiRequest("POST", "/api/days", dayPayload);
       }
 
-      // Save health data
-      const sleepH = typeof health.sleepHours === "string" ? parseFloat(health.sleepHours) : health.sleepHours;
+      // Save health data (manual fields only — WHOOP/Drive fields are auto-synced)
       const energyL = typeof health.energyLevel === "string" ? parseInt(String(health.energyLevel)) : health.energyLevel;
-      const weightK = typeof health.weightKg === "string" ? parseFloat(health.weightKg) : health.weightKg;
-      const bodyFatP = typeof health.bodyFatPercent === "string" ? parseFloat(health.bodyFatPercent) : health.bodyFatPercent;
       const stepsN = typeof health.steps === "string" ? parseInt(String(health.steps)) : health.steps;
-      const workoutDurN = typeof health.workoutDurationMin === "string" ? parseInt(String(health.workoutDurationMin)) : health.workoutDurationMin;
 
       const healthPayload: Record<string, any> = { date: selectedDate };
-      if (sleepH) healthPayload.sleepHours = sleepH;
-      if (health.sleepQuality) healthPayload.sleepQuality = health.sleepQuality;
       if (energyL) healthPayload.energyLevel = energyL;
       if (health.mood) healthPayload.mood = health.mood;
-      if (weightK) healthPayload.weightKg = weightK;
-      if (bodyFatP) healthPayload.bodyFatPercent = bodyFatP;
       if (health.stressLevel) healthPayload.stressLevel = health.stressLevel;
       if (stepsN) healthPayload.steps = stepsN;
-      healthPayload.workoutDone = health.workoutDone;
-      if (health.workoutType) healthPayload.workoutType = health.workoutType;
-      if (workoutDurN) healthPayload.workoutDurationMin = workoutDurN;
 
-      const hasHealthData = sleepH || health.sleepQuality || energyL || health.mood || weightK || bodyFatP || health.stressLevel || stepsN || health.workoutDone;
+      const hasHealthData = energyL || health.mood || health.stressLevel || stepsN;
       if (hasHealthData) {
         if (healthEntryId) {
           await apiRequest("PATCH", `/api/health/${healthEntryId}`, healthPayload);
@@ -732,7 +721,7 @@ export default function DailyPage() {
 
   // Section completion tracking
   const habitsComplete = enabledHabits.length > 0 && isAllRitualsComplete();
-  const healthComplete = !!(health.sleepHours && health.sleepQuality && health.energyLevel);
+  const healthComplete = !!(health.energyLevel && health.mood);
   const planComplete = !!(top3Outcomes.some((o) => o.text.trim()) && planning.oneThingToShip);
   const mealsLogged = mealCount > 0;
   const eveningComplete = !!evening.reflectionPm;
@@ -936,37 +925,79 @@ export default function DailyPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {/* Sleep Hours */}
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Sleep (hrs)</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={16}
-                    step={0.5}
-                    placeholder="7.5"
-                    value={health.sleepHours}
-                    onChange={(e) => setHealth({ ...health, sleepHours: e.target.value })}
-                    onBlur={debouncedSave}
-                    className="h-9"
-                  />
-                </div>
+              {/* Auto-synced data from WHOOP + Drive */}
+              {(() => {
+                const entry = Array.isArray(healthEntries) ? healthEntries[0] : null;
+                const hasWhoopData = entry?.whoopSyncedAt;
+                return (
+                  <div className="rounded-lg bg-muted/40 border border-border/50 p-3 space-y-2">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Auto-synced</p>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-x-4 gap-y-2">
+                      {/* Sleep */}
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">Sleep</p>
+                        <p className="text-sm font-semibold">
+                          {entry?.sleepHours != null ? `${entry.sleepHours}h` : <span className="text-muted-foreground text-xs">—</span>}
+                          {entry?.sleepQuality && <span className="text-xs text-muted-foreground ml-1 capitalize">{entry.sleepQuality}</span>}
+                        </p>
+                      </div>
+                      {/* Recovery */}
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">Recovery</p>
+                        <p className="text-sm font-semibold">
+                          {entry?.recoveryScore != null ? `${entry.recoveryScore}%` : <span className="text-muted-foreground text-xs">—</span>}
+                        </p>
+                      </div>
+                      {/* HRV */}
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">HRV</p>
+                        <p className="text-sm font-semibold">
+                          {entry?.hrv != null ? `${Math.round(entry.hrv)}ms` : <span className="text-muted-foreground text-xs">—</span>}
+                        </p>
+                      </div>
+                      {/* RHR */}
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">RHR</p>
+                        <p className="text-sm font-semibold">
+                          {entry?.restingHeartRate != null ? `${entry.restingHeartRate}bpm` : <span className="text-muted-foreground text-xs">—</span>}
+                        </p>
+                      </div>
+                      {/* Strain */}
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">Strain</p>
+                        <p className="text-sm font-semibold">
+                          {entry?.strainScore != null ? entry.strainScore.toFixed(1) : <span className="text-muted-foreground text-xs">—</span>}
+                        </p>
+                      </div>
+                      {/* Workout */}
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">Workout</p>
+                        <p className="text-sm font-semibold">
+                          {entry?.workoutDone
+                            ? <span className="text-green-500 capitalize">{entry.workoutType || "Done"}{entry.workoutDurationMin ? ` · ${entry.workoutDurationMin}m` : ""}</span>
+                            : <span className="text-muted-foreground text-xs">—</span>}
+                        </p>
+                      </div>
+                      {/* Weight */}
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">Weight</p>
+                        <p className="text-sm font-semibold">
+                          {entry?.weightKg != null ? `${entry.weightKg}kg` : <span className="text-muted-foreground text-xs">—</span>}
+                          {entry?.bodyFatPercent != null && <span className="text-xs text-muted-foreground ml-1">{entry.bodyFatPercent}%bf</span>}
+                        </p>
+                      </div>
+                    </div>
+                    {!hasWhoopData && (
+                      <p className="text-[10px] text-muted-foreground/60 italic">Awaiting WHOOP sync</p>
+                    )}
+                  </div>
+                );
+              })()}
 
-                {/* Sleep Quality */}
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Quality</Label>
-                  <Select value={health.sleepQuality} onValueChange={(v) => { setHealth({ ...health, sleepQuality: v }); debouncedSave(); }}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder="..." /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="poor">Poor</SelectItem>
-                      <SelectItem value="fair">Fair</SelectItem>
-                      <SelectItem value="good">Good</SelectItem>
-                      <SelectItem value="excellent">Excellent</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <Separator />
 
+              {/* Manual inputs */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {/* Energy Level */}
                 <div className="space-y-1">
                   <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Energy</Label>
@@ -999,21 +1030,6 @@ export default function DailyPage() {
                   </Select>
                 </div>
 
-                {/* Weight */}
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Weight (kg)</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    step={0.1}
-                    placeholder="82"
-                    value={health.weightKg}
-                    onChange={(e) => setHealth({ ...health, weightKg: e.target.value })}
-                    onBlur={debouncedSave}
-                    className="h-9"
-                  />
-                </div>
-
                 {/* Stress Level */}
                 <div className="space-y-1">
                   <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Stress</Label>
@@ -1040,51 +1056,6 @@ export default function DailyPage() {
                     className="h-9"
                   />
                 </div>
-              </div>
-
-              {/* Workout Toggle */}
-              <Separator />
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Dumbbell className={`h-4 w-4 ${health.workoutDone ? "text-green-500" : "text-muted-foreground"}`} />
-                    <Label className="text-sm font-medium">Workout</Label>
-                  </div>
-                  <Switch
-                    checked={health.workoutDone}
-                    onCheckedChange={(v) => { setHealth({ ...health, workoutDone: v }); }}
-                  />
-                </div>
-                {health.workoutDone && (
-                  <div className="grid grid-cols-2 gap-3 pl-6">
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Type</Label>
-                      <Select value={health.workoutType} onValueChange={(v) => setHealth({ ...health, workoutType: v })}>
-                        <SelectTrigger className="h-9"><SelectValue placeholder="Type..." /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="strength">Strength</SelectItem>
-                          <SelectItem value="cardio">Cardio</SelectItem>
-                          <SelectItem value="yoga">Yoga</SelectItem>
-                          <SelectItem value="sports">Sports</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Duration</Label>
-                      <div className="flex items-center gap-1.5">
-                        <Input
-                          type="number"
-                          min={0}
-                          placeholder="45"
-                          value={health.workoutDurationMin}
-                          onChange={(e) => setHealth({ ...health, workoutDurationMin: e.target.value })}
-                          className="h-9"
-                        />
-                        <span className="text-xs text-muted-foreground">min</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             </CardContent>
           </Card>

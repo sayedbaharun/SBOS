@@ -406,6 +406,27 @@ export async function syncWhoopData(startDate?: string, endDate?: string): Promi
     }
   }
 
+  // Also sync latest weight + body fat from Drive CSV
+  try {
+    const { fetchWeightData } = await import("../routes/health");
+    const weightEntries = await fetchWeightData();
+    if (weightEntries.length) {
+      const latest = weightEntries[weightEntries.length - 1];
+      const existing = await storage.getHealthEntryByDate(latest.date);
+      const weightFields: Record<string, any> = { weightKg: latest.weightKg };
+      if (latest.bodyFatPct != null) weightFields.bodyFatPercent = latest.bodyFatPct;
+      if (existing) {
+        await storage.updateHealthEntry(existing.id, weightFields);
+      } else {
+        const day = await storage.getDayOrCreate(latest.date);
+        await storage.createHealthEntry({ dayId: day.id, date: latest.date, ...weightFields } as any);
+      }
+      logger.info({ date: latest.date, weightKg: latest.weightKg }, "Weight synced from Drive during WHOOP sync");
+    }
+  } catch (err: any) {
+    logger.warn({ err: err.message }, "Drive weight sync skipped during WHOOP sync");
+  }
+
   logger.info({ synced, errors: errors.length }, "WHOOP sync complete");
   return { synced, errors };
 }
