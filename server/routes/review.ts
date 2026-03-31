@@ -200,4 +200,27 @@ router.post("/:id/request-changes", async (req: Request, res: Response) => {
   }
 });
 
+// DELETE /api/review — Delete all deliverables from review queue
+router.delete("/", async (req: Request, res: Response) => {
+  try {
+    const database = await getDb();
+    const { status } = req.query;
+
+    const conditions = [sql`${agentTasks.deliverableType} IS NOT NULL`];
+
+    if (status && status !== "all") {
+      conditions.push(eq(agentTasks.status, status as any));
+    }
+
+    const result = await database
+      .delete(agentTasks)
+      .where(and(...conditions));
+
+    res.json({ success: true, deleted: result.rowCount ?? 0 });
+  } catch (error) {
+    logger.error({ error }, "Error deleting review queue");
+    res.status(500).json({ error: "Failed to delete review queue" });
+  }
+});
+
 export default router;
