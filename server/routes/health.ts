@@ -17,7 +17,10 @@ const router = Router();
 let weightCache: { data: { date: string; weightKg: number }[]; fetchedAt: number } | null = null;
 const WEIGHT_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-// GET /api/health/weight-trend — reads weight CSV from Google Drive /health folder
+// Known folder ID: SB-OS / Knowledge Base / Health (from Drive URL)
+const HEALTH_FOLDER_ID = "1Oh8r-HygmAi8BrLSNsXUDvklsCyLLAW3";
+
+// GET /api/health/weight-trend — reads weight CSV from Google Drive SB-OS/Knowledge Base/Health
 router.get("/weight-trend", async (_req: Request, res: Response) => {
   try {
     // Serve from cache if fresh
@@ -27,22 +30,9 @@ router.get("/weight-trend", async (_req: Request, res: Response) => {
 
     const drive = await getDriveClient();
 
-    // 1. Find the /health folder in Drive
-    const folderSearch = await drive.files.list({
-      q: `name='health' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-      fields: "files(id, name)",
-      spaces: "drive",
-      pageSize: 5,
-    });
-
-    const healthFolder = folderSearch.data.files?.[0];
-    if (!healthFolder?.id) {
-      return res.status(404).json({ error: "Google Drive /health folder not found" });
-    }
-
-    // 2. Find the weight file inside that folder (CSV or Google Sheet)
+    // Find the weight file directly inside the known folder ID
     const fileSearch = await drive.files.list({
-      q: `'${healthFolder.id}' in parents and name contains 'weight' and trashed=false`,
+      q: `'${HEALTH_FOLDER_ID}' in parents and name contains 'weight' and trashed=false`,
       fields: "files(id, name, mimeType)",
       spaces: "drive",
       pageSize: 5,
@@ -50,7 +40,7 @@ router.get("/weight-trend", async (_req: Request, res: Response) => {
 
     const weightFile = fileSearch.data.files?.[0];
     if (!weightFile?.id) {
-      return res.status(404).json({ error: "Weight file not found in /health folder" });
+      return res.status(404).json({ error: "Weight CSV not found in SB-OS/Knowledge Base/Health Drive folder" });
     }
 
     // 3. Download file content (Sheets auto-export as CSV, raw .csv downloaded directly)
