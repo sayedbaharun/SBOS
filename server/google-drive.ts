@@ -114,6 +114,114 @@ export async function getOrCreateKnowledgeBaseFolder(): Promise<string> {
   });
 }
 
+// Maps doc type → Drive sub-folder name
+export const DOC_TYPE_TO_FOLDER: Record<string, string> = {
+  spec: 'Specs',
+  tech_doc: 'Specs',
+  sop: 'SOPs',
+  process: 'SOPs',
+  playbook: 'Playbooks',
+  strategy: 'Playbooks',
+  research: 'Research',
+  meeting_notes: 'Research',
+  reference: 'Reference',
+  template: 'Templates',
+  page: 'Reference',
+};
+
+// Cache for _Global folder ID
+let globalFolderId: string | null = null;
+
+/**
+ * Find or create the _Global folder inside Knowledge Base (for venture-agnostic docs)
+ */
+export async function getOrCreateGlobalFolder(): Promise<string> {
+  if (globalFolderId) return globalFolderId;
+
+  const parentId = await getOrCreateKnowledgeBaseFolder();
+
+  return retryGoogleAPI(async () => {
+    const drive = await getDriveClient();
+
+    const searchResponse = await drive.files.list({
+      q: `name='_Global' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`,
+      fields: 'files(id, name)',
+      spaces: 'drive',
+    });
+
+    if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+      globalFolderId = searchResponse.data.files[0].id!;
+      return globalFolderId;
+    }
+
+    const createResponse = await drive.files.create({
+      requestBody: {
+        name: '_Global',
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentId],
+        description: 'Venture-agnostic docs: agent templates, SOPs, reference',
+      },
+      fields: 'id',
+    });
+
+    globalFolderId = createResponse.data.id!;
+    logger.info({ folderId: globalFolderId }, 'Created _Global folder');
+    return globalFolderId;
+  });
+}
+
+/**
+ * Find or create a type sub-folder inside a parent folder (e.g. Specs, SOPs, Uploads)
+ */
+export async function getOrCreateSubFolder(parentFolderId: string, subFolderName: string): Promise<string> {
+  return retryGoogleAPI(async () => {
+    const drive = await getDriveClient();
+
+    const searchResponse = await drive.files.list({
+      q: `name='${subFolderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`,
+      fields: 'files(id, name)',
+      spaces: 'drive',
+    });
+
+    if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+      return searchResponse.data.files[0].id!;
+    }
+
+    const createResponse = await drive.files.create({
+      requestBody: {
+        name: subFolderName,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentFolderId],
+      },
+      fields: 'id',
+    });
+
+    logger.info({ subFolderName, parentFolderId, folderId: createResponse.data.id }, 'Created sub-folder');
+    return createResponse.data.id!;
+  });
+}
+
+/**
+ * Resolve the target Drive folder for a doc: {Venture}/Uploads/ or _Global/Uploads/
+ */
+export async function getOrCreateUploadsFolder(ventureName?: string): Promise<string> {
+  const parentFolderId = ventureName
+    ? await createVentureFolder(ventureName)
+    : await getOrCreateGlobalFolder();
+  return getOrCreateSubFolder(parentFolderId, 'Uploads');
+}
+
+/**
+ * Resolve the target Drive folder for a doc by type: {Venture}/{TypeFolder}/ or _Global/{TypeFolder}/
+ */
+export async function getOrCreateDocTypeFolder(ventureName: string | null, docType: string): Promise<string> {
+  const folderName = DOC_TYPE_TO_FOLDER[docType] || 'Reference';
+  const parentFolderId = ventureName
+    ? await createVentureFolder(ventureName)
+    : await getOrCreateGlobalFolder();
+  return getOrCreateSubFolder(parentFolderId, folderName);
+}
+
 /**
  * Create a venture folder inside Knowledge Base
  */

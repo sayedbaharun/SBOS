@@ -343,19 +343,12 @@ async function uploadToDriveAsync(
   try {
     const {
       uploadFile,
-      createVentureFolder,
-      getOrCreateKnowledgeBaseFolder,
+      getOrCreateUploadsFolder,
     } = await import("../google-drive");
 
-    // Get or create venture folder under Knowledge Base
+    // Place file in {Venture}/Uploads/ or _Global/Uploads/
     const venture = await storage.getVenture(ventureId);
-    let parentFolderId: string;
-
-    if (venture) {
-      parentFolderId = await createVentureFolder(venture.name);
-    } else {
-      parentFolderId = await getOrCreateKnowledgeBaseFolder();
-    }
+    const parentFolderId = await getOrCreateUploadsFolder(venture?.name);
 
     // Upload to Google Drive
     const driveFile = await uploadFile(
