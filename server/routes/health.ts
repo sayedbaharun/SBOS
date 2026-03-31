@@ -8,8 +8,94 @@ import { logger } from "../logger";
 import { insertHealthEntrySchema } from "@shared/schema";
 import { z } from "zod";
 import { isValidUUID } from "./constants";
+import { getDriveClient } from "../google-drive";
+import { parseSimpleCSV } from "../utils/csv-parser";
 
 const router = Router();
+
+// In-memory cache for weight trend (CSV updates weekly, no need to hit Drive every request)
+let weightCache: { data: { date: string; weightKg: number }[]; fetchedAt: number } | null = null;
+const WEIGHT_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+// GET /api/health/weight-trend — reads weight CSV from Google Drive /health folder
+router.get("/weight-trend", async (_req: Request, res: Response) => {
+  try {
+    // Serve from cache if fresh
+    if (weightCache && Date.now() - weightCache.fetchedAt < WEIGHT_CACHE_TTL_MS) {
+      return res.json(weightCache.data);
+    }
+
+    const drive = await getDriveClient();
+
+    // 1. Find the /health folder in Drive
+    const folderSearch = await drive.files.list({
+      q: `name='health' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: "files(id, name)",
+      spaces: "drive",
+      pageSize: 5,
+    });
+
+    const healthFolder = folderSearch.data.files?.[0];
+    if (!healthFolder?.id) {
+      return res.status(404).json({ error: "Google Drive /health folder not found" });
+    }
+
+    // 2. Find the weight file inside that folder (CSV or Google Sheet)
+    const fileSearch = await drive.files.list({
+      q: `'${healthFolder.id}' in parents and name contains 'weight' and trashed=false`,
+      fields: "files(id, name, mimeType)",
+      spaces: "drive",
+      pageSize: 5,
+    });
+
+    const weightFile = fileSearch.data.files?.[0];
+    if (!weightFile?.id) {
+      return res.status(404).json({ error: "Weight file not found in /health folder" });
+    }
+
+    // 3. Download file content (Sheets auto-export as CSV, raw .csv downloaded directly)
+    let csvText: string;
+    if (weightFile.mimeType === "application/vnd.google-apps.spreadsheet") {
+      const response = await drive.files.export(
+        { fileId: weightFile.id, mimeType: "text/csv" },
+        { responseType: "arraybuffer" }
+      );
+      csvText = Buffer.from(response.data as ArrayBuffer).toString("utf-8");
+    } else {
+      const response = await drive.files.get(
+        { fileId: weightFile.id, alt: "media" },
+        { responseType: "arraybuffer" }
+      );
+      csvText = Buffer.from(response.data as ArrayBuffer).toString("utf-8");
+    }
+
+    // 4. Parse CSV — flexible column detection (date, weight_kg, weightkg, weight, etc.)
+    const rows = parseSimpleCSV(csvText);
+    const parsed: { date: string; weightKg: number }[] = [];
+
+    for (const row of rows) {
+      const dateVal = row["date"] || row["Date"] || "";
+      const weightVal =
+        row["weight_kg"] || row["weightkg"] || row["weight"] || row["Weight"] || row["Weight (kg)"] || "";
+
+      if (!dateVal || !weightVal) continue;
+      const kg = parseFloat(weightVal);
+      if (isNaN(kg)) continue;
+
+      parsed.push({ date: dateVal, weightKg: kg });
+    }
+
+    // Sort ascending by date
+    parsed.sort((a, b) => a.date.localeCompare(b.date));
+
+    // Cache and return
+    weightCache = { data: parsed, fetchedAt: Date.now() };
+    res.json(parsed);
+  } catch (error: any) {
+    logger.error({ error }, "Error fetching weight trend from Drive");
+    res.status(500).json({ error: "Failed to fetch weight trend", details: error.message });
+  }
+});
 
 // Get health entries (with date range)
 router.get("/", async (req: Request, res: Response) => {
