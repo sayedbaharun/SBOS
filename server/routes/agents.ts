@@ -692,6 +692,8 @@ router.post("/admin/seed", async (req: Request, res: Response) => {
       "templates"
     );
     const result = await seedFromTemplates(templateDir);
+    // Clear in-memory cache so next requests re-read the updated DB records
+    invalidateCache();
     res.json({
       success: true,
       ...result,
