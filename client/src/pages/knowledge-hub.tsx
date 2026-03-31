@@ -6,20 +6,16 @@ import { DocsLibrary } from "@/components/knowledge-hub/docs-library";
 import { DocEditorModal } from "@/components/knowledge-hub/doc-editor-modal";
 import { DocCreationWizard } from "@/components/docs/doc-creation-wizard";
 import { DriveFilesBrowser } from "@/components/knowledge-hub/drive-files-browser";
-import { QualityDashboard } from "@/components/knowledge-hub/quality-dashboard";
-import { ReviewQueue } from "@/components/knowledge-hub/review-queue";
-import { AiPerformance } from "@/components/knowledge-hub/ai-performance";
 import { KnowledgeFilesBrowser } from "@/components/knowledge-hub/knowledge-files-browser";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BookOpen, Cloud, Sparkles, FileUp, Loader2, Trash2, CheckSquare, X } from "lucide-react";
+import { BookOpen, Cloud, FileUp, Loader2, Trash2, CheckSquare, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -337,10 +333,6 @@ export default function KnowledgeHub() {
             <FileUp className="h-4 w-4" />
             Files
           </TabsTrigger>
-          <TabsTrigger value="quality" className="gap-2">
-            <Sparkles className="h-4 w-4" />
-            Quality Metrics
-          </TabsTrigger>
           <TabsTrigger value="drive" className="gap-2">
             <Cloud className="h-4 w-4" />
             Google Drive
@@ -378,34 +370,6 @@ export default function KnowledgeHub() {
 
         <TabsContent value="files">
           <KnowledgeFilesBrowser ventures={ventures} />
-        </TabsContent>
-
-        <TabsContent value="quality">
-          <div className="space-y-6">
-            {/* Quality Metrics Overview */}
-            <QualityDashboard />
-
-            {/* Review Queue and AI Performance */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Review Queue</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ReviewQueue limit={10} />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>AI Performance</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <AiPerformance />
-                </CardContent>
-              </Card>
-            </div>
-          </div>
         </TabsContent>
 
         <TabsContent value="drive">
