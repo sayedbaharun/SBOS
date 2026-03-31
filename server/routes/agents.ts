@@ -941,4 +941,28 @@ router.post("/council", async (req: Request, res: Response) => {
   }
 });
 
+// DELETE /api/agents/conversations/all — Clear ALL agent conversations
+router.delete("/conversations/all", async (req: Request, res: Response) => {
+  try {
+    const database = await getDb();
+    const result = await database.delete(agentConversations);
+    res.json({ success: true, deleted: result.rowCount ?? 0 });
+  } catch (error) {
+    logger.error({ error }, "Error clearing all conversations");
+    res.status(500).json({ error: "Failed to clear all conversations" });
+  }
+});
+
+// DELETE /api/agents/memory/all — Clear ALL agent memories
+router.delete("/memory/all", async (req: Request, res: Response) => {
+  try {
+    const database = await getDb();
+    const result = await database.delete(agentMemory);
+    res.json({ success: true, deleted: result.rowCount ?? 0 });
+  } catch (error) {
+    logger.error({ error }, "Error clearing all memories");
+    res.status(500).json({ error: "Failed to clear all memories" });
+  }
+});
+
 export default router;
