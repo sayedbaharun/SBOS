@@ -104,7 +104,18 @@ export function buildSystemPrompt(agent: Agent, delegationContext?: DelegationCo
 
   prompt += buildCapabilityBoundary(agent);
 
-  prompt += `\n\nCurrent date/time: ${new Date().toISOString()}`;
+  const now = new Date();
+  const dubaiDateTime = now.toLocaleString('en-GB', {
+    timeZone: 'Asia/Dubai',
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  prompt += `\n\nCurrent date/time: ${dubaiDateTime} (Asia/Dubai, UTC+4)`;
 
   // Proactive recall instruction
   prompt += `\n\nWhen you see items in "Relevant Past Context", naturally reference them if pertinent. Example: "Based on our earlier discussion about X..." Only reference them when genuinely relevant — do not force connections.`;
