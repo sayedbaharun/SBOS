@@ -260,27 +260,34 @@ export async function exportToReview(
     }
   }
 
-  // Create Google Doc in To Review
-  try {
-    const { createDoc } = await import("./google-drive");
-    let content = formatAsDoc(result);
+  // Only create a Drive doc for substantial long-form deliverables.
+  // Recommendations, action_items, and social_posts are ephemeral — they live
+  // in the Review Queue and don't warrant a persistent Drive file.
+  const DRIVE_EXPORT_TYPES = ["document", "video_script", "carousel", "code"];
+  const shouldExportToDrive = DRIVE_EXPORT_TYPES.includes(result.type) || isIdeaValidation;
 
-    // Append preview URL if we have one
-    if (vercelUrl) {
-      content += `\n\n---\n\n**Preview:** ${vercelUrl}`;
+  if (shouldExportToDrive) {
+    try {
+      const { createDoc } = await import("./google-drive");
+      let content = formatAsDoc(result);
+
+      // Append preview URL if we have one
+      if (vercelUrl) {
+        content += `\n\n---\n\n**Preview:** ${vercelUrl}`;
+      }
+
+      const doc = await createDoc(
+        `[${result.type}] ${result.title}`,
+        content,
+        folderId,
+        `Agent deliverable — ${task.deliverableType}`
+      );
+
+      driveFileId = doc.id!;
+      driveUrl = doc.webViewLink || undefined;
+    } catch (err) {
+      logger.warn({ err, taskId }, "Drive doc creation failed");
     }
-
-    const doc = await createDoc(
-      `[${result.type}] ${result.title}`,
-      content,
-      folderId,
-      `Agent deliverable — ${task.deliverableType}`
-    );
-
-    driveFileId = doc.id!;
-    driveUrl = doc.webViewLink || undefined;
-  } catch (err) {
-    logger.warn({ err, taskId }, "Drive doc creation failed");
   }
 
   // Update agentTask with Drive/Vercel metadata
