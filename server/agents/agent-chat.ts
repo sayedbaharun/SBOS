@@ -234,7 +234,22 @@ export async function executeAgentChat(
       const rawContent = choice.message.content || "I'm ready to help. What would you like me to work on?";
 
       // Quality gate: score the response and escalate if needed
-      const quality = scoreResponse(rawContent, { agentSlug: agent.slug });
+      const toolCallsMade = actions.map((a) => a.actionType);
+      const quality = scoreResponse(rawContent, { agentSlug: agent.slug, toolCallsMade });
+
+      if (quality.issues.includes("action_claim_without_tool") && turn < maxTurns - 1) {
+        // Re-prompt the same model — escalation won't help when the capability simply doesn't exist
+        logger.warn(
+          { agentSlug: agent.slug, score: quality.score, toolCallsMade },
+          "Action claim without tool call detected — re-prompting"
+        );
+        conversationMessages.push({ role: "assistant" as const, content: rawContent });
+        conversationMessages.push({
+          role: "user" as const,
+          content: "[SYSTEM] Your response claims you performed an action, but no tool was called to carry it out. You cannot perform actions without using your tools. If the requested action is outside your capabilities, say so honestly and explain what you can do instead. Please revise your response.",
+        });
+        continue;
+      }
 
       if (quality.shouldEscalate && turn < maxTurns - 1) {
         const escalationModel = getEscalationModel(modelUsed);

@@ -31,13 +31,30 @@ export interface QualityScore {
 
 const ESCALATION_THRESHOLD = 0.5;
 
+// Tools that perform read-only operations — claiming "done" after only these is suspicious
+const READ_ONLY_TOOLS = new Set([
+  "list_tasks", "list_projects", "get_venture_summary", "search_knowledge_base",
+  "get_day", "get_life_context", "explore_knowledge_graph", "search_memory",
+  "calendar_read", "syntheliq_status", "web_search", "deep_research",
+  "generate_report", "market_analyze",
+]);
+
+// Patterns that indicate the agent is claiming to have completed a mutative action
+const ACTION_CLAIM_PATTERNS = [
+  /(I['']ve|I have) (updated|created|modified|changed|set|configured|granted|revoked|added|removed|deleted|deployed|sent|scheduled|enabled|disabled|given)/i,
+  /\b(Done|Completed|Finished)[!.\s]/i,
+  /(successfully|already) (updated|created|modified|changed|set|configured|granted|enabled|disabled)/i,
+  /has been (updated|created|modified|changed|set|configured|granted|enabled|disabled|added|removed)/i,
+  /I('ve| have) (now |just )?(set up|set|given|granted|taken care of|handled|completed|finished|done that)/i,
+];
+
 /**
  * Score a model response for quality issues.
  * Pure deterministic — no LLM calls.
  */
 export function scoreResponse(
   content: string,
-  context?: { expectsJson?: boolean; agentSlug?: string }
+  context?: { expectsJson?: boolean; agentSlug?: string; toolCallsMade?: string[] }
 ): QualityScore {
   let score = 1.0;
   const issues: string[] = [];
@@ -141,6 +158,24 @@ export function scoreResponse(
       score -= 0.5;
       issues.push("credential_leakage");
       break;
+    }
+  }
+
+  // 7. Action claim without a mutative tool call
+  // Fires when: agent prose claims it did something, but no write-type tool was called.
+  if (context?.toolCallsMade !== undefined) {
+    const toolsCalled = context.toolCallsMade;
+    const hasOnlyReadOnly = toolsCalled.length === 0 ||
+      toolsCalled.every((t) => READ_ONLY_TOOLS.has(t));
+
+    if (hasOnlyReadOnly) {
+      for (const pattern of ACTION_CLAIM_PATTERNS) {
+        if (pattern.test(content)) {
+          score -= 0.4;
+          issues.push("action_claim_without_tool");
+          break;
+        }
+      }
     }
   }
 
