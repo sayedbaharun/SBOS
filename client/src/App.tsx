@@ -52,6 +52,7 @@ const ResearchInbox = lazy(() => import("@/pages/research-inbox"));
 const ReviewQueue = lazy(() => import("@/pages/review-queue"));
 const LiveTasks = lazy(() => import("@/pages/live-tasks"));
 const SettingsExternalAgents = lazy(() => import("@/pages/settings-external-agents"));
+const SettingsCommandsPage = lazy(() => import("@/pages/settings-commands"));
 
 function Router() {
   // Initialize daily reminders service on app load
@@ -102,6 +103,7 @@ function Router() {
             <Route path="/review" component={ReviewQueue} />
             <Route path="/live-tasks" component={LiveTasks} />
             <Route path="/settings/external-agents" component={SettingsExternalAgents} />
+            <Route path="/settings/commands" component={SettingsCommandsPage} />
             <Route path="/agents" component={AgentsPage} />
             <Route path="/agents/delegation-log" component={DelegationLogPage} />
             <Route path="/agents/:slug" component={AgentDetailPage} />
