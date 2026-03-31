@@ -205,6 +205,7 @@ class TelegramAdapter implements ChannelAdapter {
         `• /btw <question> — side question (no history)\n` +
         `• /idea <description> — validate a business idea\n` +
         `• /contact Name, email, phone — quick contact capture\n` +
+        `• /ventures — weekly digest of all active ventures\n` +
         `• /review — review pending deliverables\n` +
         `• /delegate @<slug> <task> — delegate to agent\n\n` +
         `Tip: Send a bare URL to get a "Clip it?" prompt.`
@@ -1007,6 +1008,19 @@ class TelegramAdapter implements ChannelAdapter {
         ).catch(() => {});
       } catch (error: any) {
         await ctx.reply("Failed to save contact.");
+        this.recordError(error.message);
+      }
+    });
+
+    // ---- /ventures Command ----
+    this.bot.command("ventures", async (ctx) => {
+      try {
+        await ctx.reply("Building venture digest...");
+        const { buildAndSendVentureDigest } = await import("../../agents/scheduled-jobs");
+        const digest = await buildAndSendVentureDigest();
+        await this.sendLongMessage(ctx.chat.id.toString(), `<b>📊 Venture Digest</b>\n\n${digest}`, "html");
+      } catch (error: any) {
+        await ctx.reply("Failed to build venture digest.");
         this.recordError(error.message);
       }
     });

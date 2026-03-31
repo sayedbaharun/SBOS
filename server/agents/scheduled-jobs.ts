@@ -2041,3 +2041,108 @@ registerJobHandler("github_actions_sha_audit", async (_agentId: string, _agentSl
     logger.warn({ error: err.message }, "github_actions_sha_audit: Could not send Telegram alert");
   }
 });
+
+// ============================================================================
+// VENTURE DIGEST — Weekly per-venture status pushed to Telegram
+// ============================================================================
+
+/**
+ * Builds and sends a concise venture digest to Telegram.
+ * Skips archived and trading ventures.
+ * Called by the scheduled job AND by the /ventures Telegram command.
+ */
+export async function buildAndSendVentureDigest(): Promise<string> {
+  const { storage } = await import("../storage");
+  const database = await getDb();
+  const today = new Date();
+  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  // All non-archived ventures, skip trading
+  const allVentures = await storage.getVentures();
+  const active = allVentures.filter(
+    (v: any) => v.status !== "archived" && v.domain !== "trading"
+  );
+
+  if (active.length === 0) {
+    return "No active non-trading ventures found.";
+  }
+
+  const lines: string[] = [];
+
+  for (const venture of active) {
+    const vid = String(venture.id);
+
+    // Tasks for this venture
+    const allTasks = await storage.getTasks({ ventureId: vid });
+    const pending = allTasks.filter((t: any) => !["done", "completed", "cancelled"].includes(t.status));
+    const overdue = pending.filter((t: any) => t.dueDate && new Date(t.dueDate) < today);
+    const completedThisWeek = allTasks.filter(
+      (t: any) => (t.status === "done" || t.status === "completed") && t.completedAt && new Date(t.completedAt) >= weekAgo
+    );
+    const blocked = pending.filter((t: any) => t.status === "blocked");
+
+    // Top blocker: overdue P0/P1 first, then just overdue
+    const topBlocker =
+      overdue.find((t: any) => t.priority === "P0" || t.priority === "P1") ||
+      overdue[0] ||
+      blocked[0];
+
+    // Projects
+    const projects = await storage.getProjects({ ventureId: vid });
+    const activeProjects = projects.filter((p: any) => p.status === "in_progress");
+    const blockedProjects = projects.filter((p: any) => p.status === "blocked");
+
+    // Captures (unclarified inbox)
+    const captures = await storage.getCaptures({ ventureId: vid, clarified: false });
+
+    // Build venture section
+    const statusEmoji = venture.status === "building" ? "🔨" : venture.status === "planning" ? "📋" : venture.status === "ongoing" ? "🚀" : "⏸";
+    lines.push(`${statusEmoji} <b>${escapeHtml(venture.name)}</b>`);
+
+    if (activeProjects.length > 0 || blockedProjects.length > 0) {
+      const projLine = [
+        activeProjects.length > 0 ? `${activeProjects.length} active` : null,
+        blockedProjects.length > 0 ? `${blockedProjects.length} blocked` : null,
+      ].filter(Boolean).join(", ");
+      lines.push(`  Projects: ${projLine}`);
+    } else {
+      lines.push(`  Projects: none active`);
+    }
+
+    lines.push(`  Tasks: ${pending.length} pending · ${completedThisWeek.length} done this week${overdue.length > 0 ? ` · ⚠️ ${overdue.length} overdue` : ""}`);
+
+    if (captures.length > 0) {
+      lines.push(`  Inbox: ${captures.length} unclarified`);
+    }
+
+    if (topBlocker) {
+      lines.push(`  🔴 Top blocker: ${escapeHtml(topBlocker.title)} [${topBlocker.priority || "?"}]`);
+    }
+
+    lines.push(""); // spacing between ventures
+  }
+
+  return lines.join("\n").trim();
+}
+
+registerJobHandler("venture_digest", async (_agentId: string, _agentSlug: string) => {
+  try {
+    const digest = await buildAndSendVentureDigest();
+
+    const { sendProactiveMessage } = await import("../channels/channel-manager");
+    const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+
+    const message = formatMessage({
+      header: msgHeader("📊", "Weekly Venture Digest"),
+      body: digest,
+    });
+
+    for (const chatId of getAuthorizedChatIds()) {
+      await sendProactiveMessage("telegram", chatId, message);
+    }
+
+    logger.info("venture_digest: sent weekly venture digest to Telegram");
+  } catch (err: any) {
+    logger.error({ error: err.message }, "venture_digest: failed");
+  }
+});

@@ -24,6 +24,7 @@ schedule:
   syntheliq_reconcile: "15 */6 * * *"
   memory_consolidation: "0 23 * * *"
   github_actions_sha_audit: "0 6 * * 1"
+  venture_digest: "0 20 * * 0"
 memory_scope: isolated
 ---
 
