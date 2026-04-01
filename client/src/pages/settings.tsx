@@ -3,11 +3,14 @@ import { User, Sun, Shield } from "lucide-react";
 import ProfileSettings from "@/components/settings/profile-settings";
 import MorningRitualConfig from "@/components/settings/morning-ritual-config";
 import SecuritySettings from "@/components/settings/security-settings";
+import SettingsNav from "@/components/settings/settings-nav";
 
 export default function SettingsPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto p-4 md:p-6 space-y-6 max-w-5xl">
+        <SettingsNav />
+
         {/* Header */}
         <div className="flex items-center gap-3">
           <div className="p-3 bg-muted rounded-full">

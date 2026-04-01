@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import SettingsNav from "@/components/settings/settings-nav";
 
 interface ExternalAgent {
   id: string;
@@ -151,6 +152,7 @@ export default function SettingsExternalAgents() {
 
   return (
     <div className="container mx-auto px-4 py-6 max-w-3xl">
+      <SettingsNav />
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
