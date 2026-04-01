@@ -91,14 +91,13 @@ export default function NavSection({
   );
 
   return (
-    <div className="mb-4">
+    <div className="mt-6">
       {!isCollapsed && (
         <button
           onClick={toggleExpanded}
           className={cn(
-            "w-full flex items-center justify-between px-3 py-2 text-xs font-bold uppercase tracking-wider rounded-md transition-colors",
-            "hover:bg-sidebar-accent",
-            hasActiveItem ? "text-sidebar-foreground" : "text-muted-foreground"
+            "w-full flex items-center justify-between px-2 py-1 text-[11px] font-medium uppercase tracking-widest rounded-md transition-colors",
+            hasActiveItem ? "text-muted-foreground" : "text-muted-foreground/60"
           )}
           aria-expanded={isExpanded}
           aria-controls={`nav-section-${label}`}

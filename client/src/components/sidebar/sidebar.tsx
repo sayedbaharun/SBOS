@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import {
@@ -16,17 +17,8 @@ import {
   TrendingUp,
   Users,
   CheckSquare,
-  Sparkles,
-  Calendar,
-  Plug,
-  Layers,
-  DollarSign,
-  Inbox,
-  Bot,
   ShoppingCart,
   ClipboardCheck,
-  Activity,
-  Terminal,
 } from "lucide-react";
 import NavSection, { NavItemConfig } from "./nav-section";
 import VenturesNavSection from "./ventures-nav-section";
@@ -85,136 +77,30 @@ import { useSidebarCollapsed } from "@/hooks/use-sidebar-collapsed";
  * ];
  * ```
  */
+const pinnedItems: NavItemConfig[] = [
+  { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+  { href: "/today", icon: Sun, label: "Today" },
+  { href: "/capture", icon: Zap, label: "Capture" },
+  { href: "/tasks", icon: CheckSquare, label: "Tasks" },
+];
+
 const navigationSections: Array<{ label: string; items: NavItemConfig[]; defaultExpanded?: boolean }> = [
-  {
-    label: "Daily",
-    items: [
-      {
-        href: "/dashboard",
-        icon: LayoutDashboard,
-        label: "Dashboard",
-      },
-      {
-        href: "/today",
-        icon: Sun,
-        label: "Today",
-      },
-      {
-        href: "/capture",
-        icon: Zap,
-        label: "Capture",
-      },
-      {
-        href: "/calendar",
-        icon: Calendar,
-        label: "Calendar",
-      },
-    ],
-  },
   {
     label: "Work",
     items: [
-      {
-        href: "/tasks",
-        icon: CheckSquare,
-        label: "Tasks",
-      },
-      {
-        href: "/knowledge",
-        icon: BookOpen,
-        label: "Knowledge",
-      },
-      {
-        href: "/trading",
-        icon: TrendingUp,
-        label: "Trading",
-      },
-      {
-        href: "/agents",
-        icon: Users,
-        label: "Agents",
-      },
-      {
-        href: "/review",
-        icon: ClipboardCheck,
-        label: "Review",
-      },
-      {
-        href: "/live-tasks",
-        icon: Activity,
-        label: "Live Tasks",
-      },
-      {
-        href: "/research-inbox",
-        icon: Inbox,
-        label: "Research Inbox",
-      },
+      { href: "/knowledge", icon: BookOpen, label: "Knowledge" },
+      { href: "/trading", icon: TrendingUp, label: "Trading" },
+      { href: "/agents", icon: Users, label: "Agents" },
+      { href: "/review", icon: ClipboardCheck, label: "Review" },
     ],
   },
   {
     label: "Life",
     items: [
-      {
-        href: "/health-hub",
-        icon: Heart,
-        label: "Health",
-      },
-      {
-        href: "/shopping",
-        icon: ShoppingCart,
-        label: "Shopping",
-      },
-      {
-        href: "/books",
-        icon: BookOpen,
-        label: "Books",
-      },
-      {
-        href: "/finance",
-        icon: DollarSign,
-        label: "Finance",
-      },
-      {
-        href: "/people",
-        icon: User,
-        label: "People",
-      },
-    ],
-  },
-  {
-    label: "Settings",
-    defaultExpanded: false,
-    items: [
-      {
-        href: "/settings",
-        icon: User,
-        label: "Profile",
-      },
-      {
-        href: "/settings/ai",
-        icon: Sparkles,
-        label: "AI Settings",
-      },
-      {
-        href: "/settings/integrations",
-        icon: Plug,
-        label: "Integrations",
-      },
-      {
-        href: "/settings/categories",
-        icon: Layers,
-        label: "Categories",
-      },
-      {
-        href: "/settings/external-agents",
-        icon: Bot,
-        label: "External Agents",
-      },
-      {
-        href: "/settings/commands",
-        icon: Terminal,
-        label: "Commands",
-      },
+      { href: "/health-hub", icon: Heart, label: "Health" },
+      { href: "/shopping", icon: ShoppingCart, label: "Shopping" },
+      { href: "/books", icon: BookOpen, label: "Books" },
+      { href: "/people", icon: User, label: "People" },
     ],
   },
 ];
@@ -263,6 +149,7 @@ export interface SidebarProps {
  * ```
  */
 export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
+  const [location] = useLocation();
   // Collapsed state (desktop only) - shared across components
   const [isCollapsed, setIsCollapsed] = useSidebarCollapsed();
 
@@ -369,19 +256,32 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           </Button>
         </div>
 
-        {/* Navigation sections */}
+        {/* Navigation */}
         <div className="flex-1 overflow-y-auto px-3 py-4">
-          {sectionsWithBadges.map((section, index) => (
+          {/* Pinned items — no section header */}
+          <nav className="space-y-1" aria-label="Main">
+            {pinnedItems.map((item) => (
+              <NavItem
+                key={item.href}
+                {...item}
+                isActive={location === item.href || location.startsWith(item.href + "/")}
+                isCollapsed={isCollapsed}
+                onClick={onClose}
+              />
+            ))}
+          </nav>
+
+          {sectionsWithBadges.map((section) => (
             <div key={section.label}>
               <NavSection
                 label={section.label}
                 items={section.items}
                 isCollapsed={isCollapsed}
-                onItemClick={onClose} // Close mobile menu on nav
+                onItemClick={onClose}
                 defaultExpanded={section.defaultExpanded}
               />
-              {/* Insert VenturesNavSection after Daily section */}
-              {section.label === "Daily" && (
+              {/* Insert VenturesNavSection after Work section */}
+              {section.label === "Work" && (
                 <VenturesNavSection
                   isCollapsed={isCollapsed}
                   onItemClick={onClose}
@@ -391,25 +291,38 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           ))}
         </div>
 
-        {/* Desktop collapse toggle */}
-        <div className="hidden md:block border-t border-sidebar-border p-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-center"
-            onClick={toggleCollapse}
-            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-expanded={!isCollapsed}
-          >
-            {isCollapsed ? (
+        {/* Desktop footer: settings gear + collapse toggle */}
+        <div className="hidden md:flex border-t border-sidebar-border p-2 items-center gap-1">
+          <NavItem
+            href="/settings"
+            icon={Settings}
+            label="Settings"
+            isActive={location.startsWith("/settings")}
+            isCollapsed={isCollapsed}
+            onClick={onClose}
+          />
+          {!isCollapsed && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto"
+              onClick={toggleCollapse}
+              aria-label="Collapse sidebar"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+          )}
+          {isCollapsed && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-full"
+              onClick={toggleCollapse}
+              aria-label="Expand sidebar"
+            >
               <ChevronRight className="h-4 w-4" />
-            ) : (
-              <div className="flex items-center gap-2 w-full">
-                <ChevronLeft className="h-4 w-4" />
-                <span className="text-xs text-muted-foreground">Collapse</span>
-              </div>
-            )}
-          </Button>
+            </Button>
+          )}
         </div>
       </aside>
     </>

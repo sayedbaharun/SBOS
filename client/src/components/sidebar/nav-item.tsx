@@ -62,12 +62,9 @@ export default function NavItem({
       <a
         onClick={onClick}
         className={cn(
-          "group relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150",
+          "group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-all duration-150",
           "hover:bg-sidebar-accent active:scale-95",
-          isActive && [
-            "bg-primary/10 text-primary font-semibold",
-            "before:absolute before:left-0 before:top-1 before:bottom-1 before:w-1 before:bg-primary before:rounded-r",
-          ],
+          isActive && "bg-primary/10 text-primary font-semibold",
           !isActive && "text-sidebar-foreground hover:text-sidebar-foreground",
           isCollapsed && "justify-center px-2"
         )}
@@ -76,7 +73,7 @@ export default function NavItem({
       >
         <Icon
           className={cn(
-            "h-5 w-5 flex-shrink-0 transition-colors",
+            "h-[18px] w-[18px] flex-shrink-0 transition-colors",
             isActive ? "text-primary" : "text-muted-foreground group-hover:text-sidebar-foreground"
           )}
         />
