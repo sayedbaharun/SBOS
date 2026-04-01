@@ -37,6 +37,7 @@ import {
   Settings,
   Plus,
   Trash2,
+  RefreshCw,
   Apple,
   Flame,
   Beef,
@@ -281,6 +282,7 @@ export default function DailyPage() {
   });
 
   const [healthEntryId, setHealthEntryId] = useState<number | null>(null);
+  const [whoopSyncing, setWhoopSyncing] = useState(false);
 
   // Nutrition toggles
   const [proteinMet, setProteinMet] = useState(false);
@@ -313,6 +315,24 @@ export default function DailyPage() {
       return await res.json();
     },
   });
+
+  const handleWhoopSync = async () => {
+    setWhoopSyncing(true);
+    try {
+      const res = await fetch("/api/whoop/sync", { method: "POST", credentials: "include" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Sync failed");
+      toast({
+        title: "WHOOP synced",
+        description: `${data.synced} day${data.synced !== 1 ? "s" : ""} updated`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/health"] });
+    } catch (err: any) {
+      toast({ title: "WHOOP sync failed", description: err.message || "Could not sync", variant: "destructive" });
+    } finally {
+      setWhoopSyncing(false);
+    }
+  };
 
   const { data: ventures = [] } = useQuery<Venture[]>({ queryKey: ["/api/ventures"] });
   const activeVentures = Array.isArray(ventures) ? ventures.filter((v) => v.status !== "archived") : [];
@@ -916,12 +936,17 @@ export default function DailyPage() {
                   <Heart className="h-4 w-4 text-rose-500" />
                   Health Metrics
                 </CardTitle>
-                {healthComplete && (
-                  <Badge variant="outline" className="bg-green-500/10 text-green-400 border-green-500/20 text-[10px]">
-                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                    Logged
-                  </Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  {healthComplete && (
+                    <Badge variant="outline" className="bg-green-500/10 text-green-400 border-green-500/20 text-[10px]">
+                      <CheckCircle2 className="h-3 w-3 mr-1" />
+                      Logged
+                    </Badge>
+                  )}
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleWhoopSync} disabled={whoopSyncing} title="Sync WHOOP">
+                    <RefreshCw className={`h-3.5 w-3.5 text-muted-foreground ${whoopSyncing ? "animate-spin" : ""}`} />
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
