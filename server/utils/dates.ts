@@ -14,3 +14,11 @@
 export function getUserDate(timezone = "Asia/Dubai"): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: timezone });
 }
+
+/**
+ * Convert a UTC ISO timestamp to a local date string (YYYY-MM-DD).
+ * Used to correctly bucket WHOOP data by the user's local calendar day.
+ */
+export function utcToLocalDate(isoTimestamp: string, timezone = "Asia/Dubai"): string {
+  return new Date(isoTimestamp).toLocaleDateString("en-CA", { timeZone: timezone });
+}

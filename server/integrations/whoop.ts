@@ -4,6 +4,7 @@
  */
 import { storage } from "../storage";
 import { logger } from "../logger";
+import { utcToLocalDate } from "../utils/dates";
 
 const WHOOP_AUTH_URL = "https://api.prod.whoop.com/oauth/oauth2/auth";
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
@@ -256,7 +257,7 @@ export async function syncWhoopData(startDate?: string, endDate?: string): Promi
   // Default: sync last 2 days (covers overnight sleep)
   const now = new Date();
   const twoDaysAgo = new Date(now);
-  twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+  twoDaysAgo.setDate(twoDaysAgo.getDate() - 3);
 
   const start = startDate || twoDaysAgo.toISOString();
   const end = endDate || now.toISOString();
@@ -295,8 +296,8 @@ export async function syncWhoopData(startDate?: string, endDate?: string): Promi
   // Process cycles (strain)
   for (const cycle of cyclesData.records || []) {
     if (cycle.score_state !== "SCORED" || !cycle.score) continue;
-    const dateStr = cycle.end?.slice(0, 10) || cycle.start?.slice(0, 10);
-    if (!dateStr) continue;
+    if (!cycle.start) continue;
+    const dateStr = utcToLocalDate(cycle.start);
     const summary = getOrCreate(dateStr);
     summary.strainScore = cycle.score.strain;
   }
@@ -306,8 +307,8 @@ export async function syncWhoopData(startDate?: string, endDate?: string): Promi
     if (rec.score_state !== "SCORED" || !rec.score) continue;
     // Recovery is tied to a cycle — use the cycle's date
     // The created_at gives us the date
-    const dateStr = rec.created_at?.slice(0, 10);
-    if (!dateStr) continue;
+    if (!rec.created_at) continue;
+    const dateStr = utcToLocalDate(rec.created_at);
     const summary = getOrCreate(dateStr);
     summary.recoveryScore = rec.score.recovery_score;
     summary.hrv = rec.score.hrv_rmssd_milli;
@@ -317,9 +318,9 @@ export async function syncWhoopData(startDate?: string, endDate?: string): Promi
   // Process sleep (use the main sleep, not naps)
   for (const sleep of sleepData.records || []) {
     if (sleep.nap || sleep.score_state !== "SCORED" || !sleep.score) continue;
-    // Sleep end time = the date you woke up
-    const dateStr = sleep.end?.slice(0, 10);
-    if (!dateStr) continue;
+    // Sleep end time = the date you woke up (local timezone)
+    if (!sleep.end) continue;
+    const dateStr = utcToLocalDate(sleep.end);
     const summary = getOrCreate(dateStr);
 
     const stages = sleep.score.stage_summary;
@@ -340,8 +341,8 @@ export async function syncWhoopData(startDate?: string, endDate?: string): Promi
   const workoutsByDate = new Map<string, Array<{ type: string; durationMin: number }>>();
   for (const workout of workoutData.records || []) {
     if (workout.score_state !== "SCORED") continue;
-    const dateStr = workout.start?.slice(0, 10);
-    if (!dateStr) continue;
+    if (!workout.start) continue;
+    const dateStr = utcToLocalDate(workout.start);
 
     const startMs = new Date(workout.start).getTime();
     const endMs = new Date(workout.end).getTime();
