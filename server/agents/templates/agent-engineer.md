@@ -11,9 +11,6 @@ delegates_to: []
 max_delegation_depth: 0
 model_tier: mid
 temperature: 0.5
-schedule:
-  agent_performance: "0 11 * * 5"
-  model_cost_review: "0 8 * * 1"
 memory_scope: isolated
 ---
 

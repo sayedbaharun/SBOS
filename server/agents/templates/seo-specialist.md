@@ -11,8 +11,6 @@ delegates_to: []
 max_delegation_depth: 0
 model_tier: fast
 temperature: 0.5
-schedule:
-  seo_audit: "0 8 * * 2"
 memory_scope: isolated
 ---
 

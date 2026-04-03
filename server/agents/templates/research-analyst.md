@@ -11,9 +11,6 @@ delegates_to: []
 max_delegation_depth: 0
 model_tier: fast
 temperature: 0.4
-schedule:
-  market_pulse: "0 9 * * 2,5"
-  upstream_feature_scan: "0 5 * * *"
 memory_scope: isolated
 ---
 

@@ -11,15 +11,6 @@ delegates_to: []
 max_delegation_depth: 0
 model_tier: fast
 temperature: 0.3
-schedule:
-  morning_schedule:
-    cron: "0 9 * * *"
-    timezone: Asia/Dubai
-    task: "Review today's calendar, confirm schedule with Sayed, flag conflicts or unprotected deep work blocks"
-  weekly_planning:
-    cron: "0 20 * * 0"
-    timezone: Asia/Dubai
-    task: "Propose optimal week layout: venture time allocation, deep work blocks, meeting clusters, buffer zones"
 memory_scope: isolated
 ---
 

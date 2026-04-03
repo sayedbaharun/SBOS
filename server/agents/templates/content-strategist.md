@@ -11,8 +11,6 @@ delegates_to: []
 max_delegation_depth: 0
 model_tier: fast
 temperature: 0.8
-schedule:
-  content_calendar: "0 6 * * 1"
 memory_scope: isolated
 ---
 

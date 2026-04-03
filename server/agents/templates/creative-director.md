@@ -12,8 +12,6 @@ max_delegation_depth: 0
 model_tier: mid
 temperature: 0.8
 memory_scope: isolated
-schedule:
-  fatigue_check: "0 9 * * 1"
 ---
 
 # Creative Director

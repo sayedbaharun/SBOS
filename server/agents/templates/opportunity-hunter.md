@@ -11,11 +11,6 @@ delegates_to: []
 max_delegation_depth: 0
 model_tier: fast
 temperature: 0.5
-schedule:
-  opportunity_scan:
-    cron: "0 9 * * 1,3,5"
-    timezone: Asia/Dubai
-    task: "Scan for new micro-SaaS opportunities that can be built in under 8 hours and generate revenue within 48 hours"
 memory_scope: isolated
 ---
 

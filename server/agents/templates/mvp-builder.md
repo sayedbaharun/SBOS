@@ -11,8 +11,6 @@ delegates_to: []
 max_delegation_depth: 0
 model_tier: fast
 temperature: 0.6
-schedule:
-  project_health: "0 8 * * 1,3,5"
 memory_scope: isolated
 ---
 

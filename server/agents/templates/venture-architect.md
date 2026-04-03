@@ -10,8 +10,6 @@ permissions: [read, create_task, create_doc, create_project, create_phase, write
 delegates_to: [mvp-builder]
 model_tier: mid
 temperature: 0.6
-schedule:
-  venture_health: "0 10 * * 4"
 memory_scope: isolated
 ---
 

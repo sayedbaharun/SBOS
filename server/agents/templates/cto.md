@@ -11,9 +11,6 @@ delegates_to: [mvp-builder, research-analyst, venture-architect, agent-engineer,
 max_delegation_depth: 2
 model_tier: mid
 temperature: 0.5
-schedule:
-  tech_review: "0 10 * * 3"
-  architecture_health: "0 10 * * 1"
 memory_scope: isolated
 ---
 
