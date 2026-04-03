@@ -71,7 +71,7 @@ async function llmRerank(
       "X-Title": "SB-OS Reranker",
     },
     body: JSON.stringify({
-      model: "openai/gpt-4o-mini",
+      model: "meta-llama/llama-4-scout:free",
       messages: [
         {
           role: "system",

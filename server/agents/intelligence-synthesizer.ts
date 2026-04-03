@@ -231,7 +231,7 @@ async function synthesize(inputs: {
   const prompt = buildSynthesisPrompt(inputs);
 
   const completion = await openai.chat.completions.create({
-    model: "openai/gpt-4o-mini",
+    model: "meta-llama/llama-4-scout:free",
     messages: [
       {
         role: "system",

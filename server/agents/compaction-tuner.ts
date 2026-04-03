@@ -138,7 +138,7 @@ async function tuneCompactionConfig(
 
   const currentConfig = existing[0] || {
     thresholdPct: 0.75,
-    layer2Model: "openai/gpt-4o-mini",
+    layer2Model: "meta-llama/llama-4-scout:free",
     maxObservationTokens: 2000,
     enableLayer3: false,
   };

@@ -178,7 +178,7 @@ RISKS: [bullet list of 1-3 risks or concerns]`;
  */
 async function runFractalMode(request: CouncilRequest): Promise<CouncilMemberResponse[]> {
   const contextBlock = request.context ? `\n\nContext:\n${request.context}` : "";
-  const model = "openai/gpt-4o-mini"; // Use cheap model for sub-agents
+  const model = "meta-llama/llama-4-scout:free"; // Use cheap model for sub-agents
 
   const promises = FRACTAL_PERSPECTIVES.map(async (perspective) => {
     const startMs = Date.now();

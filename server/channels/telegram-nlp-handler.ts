@@ -171,7 +171,7 @@ async function extractStructured(text: string): Promise<{ intents: any[] }> {
   });
 
   const completion = await openai.chat.completions.create({
-    model: "openai/gpt-4o-mini",
+    model: "meta-llama/llama-4-scout:free",
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: text },

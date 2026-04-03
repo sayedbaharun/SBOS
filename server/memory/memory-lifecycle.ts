@@ -188,7 +188,7 @@ export async function enrichImportance(): Promise<{ scored: number }> {
           "X-Title": "SB-OS Memory Enrichment",
         },
         body: JSON.stringify({
-          model: "openai/gpt-4o-mini",
+          model: "meta-llama/llama-4-scout:free",
           messages: [
             {
               role: "system",

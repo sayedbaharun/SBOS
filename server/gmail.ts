@@ -9,10 +9,14 @@ const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.labels',
 ];
 
-function createOAuth2Client() {
+type GmailAccount = "default" | "syntheliq";
+
+function createOAuth2Client(account: GmailAccount = "default") {
   const clientId = process.env.GMAIL_CLIENT_ID;
   const clientSecret = process.env.GMAIL_CLIENT_SECRET;
-  const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
+  const refreshToken = account === "syntheliq"
+    ? process.env.SYNTHELIQ_GMAIL_REFRESH_TOKEN
+    : process.env.GMAIL_REFRESH_TOKEN;
 
   if (!clientId || !clientSecret) {
     return null;
@@ -26,16 +30,16 @@ function createOAuth2Client() {
     });
   }
 
-  return oauth2Client;
+  return { oauth2Client, refreshToken };
 }
 
 export function getAuthUrl(): string | null {
-  const oauth2Client = createOAuth2Client();
-  if (!oauth2Client) {
+  const result = createOAuth2Client();
+  if (!result) {
     return null;
   }
 
-  return oauth2Client.generateAuthUrl({
+  return result.oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: GMAIL_SCOPES,
     prompt: 'consent',
@@ -43,31 +47,30 @@ export function getAuthUrl(): string | null {
 }
 
 export async function getTokensFromCode(code: string) {
-  const oauth2Client = createOAuth2Client();
-  if (!oauth2Client) {
+  const result = createOAuth2Client();
+  if (!result) {
     throw new Error('OAuth2 client not configured');
   }
 
-  const { tokens } = await oauth2Client.getToken(code);
+  const { tokens } = await result.oauth2Client.getToken(code);
   return tokens;
 }
 
-export async function getUncachableGmailClient() {
-  const oauth2Client = createOAuth2Client();
-  const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
+export async function getUncachableGmailClient(account: GmailAccount = "default") {
+  const result = createOAuth2Client(account);
 
-  if (!oauth2Client || !refreshToken) {
-    throw new Error('Gmail not connected. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and GMAIL_REFRESH_TOKEN environment variables.');
+  if (!result || !result.refreshToken) {
+    const envVar = account === "syntheliq" ? "SYNTHELIQ_GMAIL_REFRESH_TOKEN" : "GMAIL_REFRESH_TOKEN";
+    throw new Error(`Gmail not connected for account "${account}". Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and ${envVar} environment variables.`);
   }
 
   try {
-    // Refresh the access token
-    const { credentials } = await oauth2Client.refreshAccessToken();
-    oauth2Client.setCredentials(credentials);
-    return google.gmail({ version: 'v1', auth: oauth2Client });
+    const { credentials } = await result.oauth2Client.refreshAccessToken();
+    result.oauth2Client.setCredentials(credentials);
+    return google.gmail({ version: 'v1', auth: result.oauth2Client });
   } catch (error: any) {
-    logger.error({ error: error?.message || error }, 'Failed to refresh Gmail access token');
-    throw new Error('Failed to authenticate with Gmail');
+    logger.error({ error: error?.message || error, account }, 'Failed to refresh Gmail access token');
+    throw new Error(`Failed to authenticate with Gmail (account: ${account})`);
   }
 }
 
@@ -88,8 +91,9 @@ export async function listMessages(options: {
   maxResults?: number;
   query?: string;
   labelIds?: string[];
+  account?: GmailAccount;
 }): Promise<EmailMessage[]> {
-  const gmail = await getUncachableGmailClient();
+  const gmail = await getUncachableGmailClient(options.account);
 
   const response = await gmail.users.messages.list({
     userId: 'me',
@@ -210,8 +214,8 @@ export async function getUnreadCount(): Promise<number> {
   return response.data.messagesUnread || 0;
 }
 
-export async function markAsRead(messageIds: string[]): Promise<void> {
-  const gmail = await getUncachableGmailClient();
+export async function markAsRead(messageIds: string[], account: GmailAccount = "default"): Promise<void> {
+  const gmail = await getUncachableGmailClient(account);
 
   await gmail.users.messages.batchModify({
     userId: 'me',

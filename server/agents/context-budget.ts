@@ -32,7 +32,7 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   "anthropic/claude-3-haiku": 200_000,
   // OpenAI
   "openai/gpt-4o": 128_000,
-  "openai/gpt-4o-mini": 128_000,
+  "meta-llama/llama-4-scout:free": 128_000,
   "openai/gpt-4-turbo": 128_000,
   // Google
   "google/gemini-pro-1.5": 1_000_000,
@@ -292,7 +292,7 @@ export class ContextBudget {
       tokensAfter,
       tokensSaved: tokensBefore - tokensAfter,
       latencyMs: Date.now() - startTime,
-      compactionModel: "openai/gpt-4o-mini",
+      compactionModel: "meta-llama/llama-4-scout:free",
       observation,
     };
 

@@ -94,7 +94,7 @@ async function extractContextSignals(
         "X-Title": "SB-OS Proactive Memory",
       },
       body: JSON.stringify({
-        model: "openai/gpt-4o-mini",
+        model: "meta-llama/llama-4-scout:free",
         messages: [
           {
             role: "system",

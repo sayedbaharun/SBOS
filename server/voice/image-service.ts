@@ -71,7 +71,7 @@ Return ONLY valid JSON, no markdown.`;
         "X-Title": "SB-OS Vision",
       },
       body: JSON.stringify({
-        model: "openai/gpt-4o-mini",
+        model: "meta-llama/llama-4-scout:free",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userContent },

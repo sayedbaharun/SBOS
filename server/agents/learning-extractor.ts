@@ -43,7 +43,7 @@ async function ensureSharedMemoryAgent(): Promise<void> {
 }
 
 // Use a cheap fast model for extraction
-const EXTRACTION_MODEL = "openai/gpt-4o-mini";
+const EXTRACTION_MODEL = "meta-llama/llama-4-scout:free";
 
 // Lazy DB
 let db: any = null;

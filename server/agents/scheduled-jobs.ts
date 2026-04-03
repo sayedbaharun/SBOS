@@ -1034,6 +1034,21 @@ export async function runPipelineHealthCheck(): Promise<PipelineHealthResult> {
 }
 
 /**
+ * Newsletter Digest — Summarise AI newsletters from SyntheLIQ inbox, send Telegram digest.
+ * Runs daily at 8am Dubai.
+ * Requires SYNTHELIQ_GMAIL_REFRESH_TOKEN env var.
+ */
+registerJobHandler("newsletter_digest", async (_agentId: string, agentSlug: string) => {
+  const { runNewsletterDigest } = await import("./newsletter-digest");
+  const result = await runNewsletterDigest();
+
+  logger.info(
+    { agentSlug, processed: result.processed, skipped: result.skipped },
+    "Newsletter digest completed"
+  );
+});
+
+/**
  * Email Triage — Classify unread emails and send Telegram digest.
  * Runs 3x/day: 8am, 1pm, 6pm Dubai.
  */
@@ -2144,5 +2159,112 @@ registerJobHandler("venture_digest", async (_agentId: string, _agentSlug: string
     logger.info("venture_digest: sent weekly venture digest to Telegram");
   } catch (err: any) {
     logger.error({ error: err.message }, "venture_digest: failed");
+  }
+});
+
+// ============================================================================
+// FREE MODEL SCOUT — Every 5 days, check if better free models exist
+// ============================================================================
+
+/**
+ * Checks OpenRouter's free model list every 5 days.
+ * Compares against the current FREE_MINI_MODEL (meta-llama/llama-4-scout:free).
+ * Only sends a Telegram message to Chief of Staff if a better option is found.
+ * Silent if nothing actionable — no spam.
+ */
+registerJobHandler("free_model_scout", async (_agentId: string, _agentSlug: string) => {
+  const CURRENT_FREE_MODEL = "meta-llama/llama-4-scout:free";
+
+  // Known benchmark scores (MMLU / Arena Elo proxy) for comparison
+  // Updated manually when this job finds something better
+  const KNOWN_BENCHMARKS: Record<string, number> = {
+    "meta-llama/llama-4-scout:free": 78,
+    "meta-llama/llama-4-maverick:free": 82,
+    "qwen/qwen3-235b:free": 85,
+    "deepseek/deepseek-v3:free": 84,
+    "google/gemma-4-27b:free": 80,
+    "mistralai/mistral-nemo:free": 68,
+  };
+
+  const currentScore = KNOWN_BENCHMARKS[CURRENT_FREE_MODEL] ?? 0;
+
+  try {
+    const resp = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: process.env.OPENROUTER_API_KEY
+        ? { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}` }
+        : {},
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!resp.ok) {
+      logger.warn("free_model_scout: Could not fetch OpenRouter model list");
+      return;
+    }
+
+    const data = await resp.json();
+    const freeModels: Array<{ id: string; name: string; context_length: number }> = (data.data || [])
+      .filter((m: any) => {
+        const promptPrice = parseFloat(m.pricing?.prompt || "1");
+        return promptPrice === 0;
+      })
+      .map((m: any) => ({ id: m.id, name: m.name || m.id, context_length: m.context_length || 0 }));
+
+    if (freeModels.length === 0) {
+      logger.info("free_model_scout: No free models found on OpenRouter");
+      return;
+    }
+
+    // Find free models with known benchmark scores better than current
+    const betterModels = freeModels
+      .filter((m) => m.id !== CURRENT_FREE_MODEL && (KNOWN_BENCHMARKS[m.id] ?? 0) > currentScore)
+      .sort((a, b) => (KNOWN_BENCHMARKS[b.id] ?? 0) - (KNOWN_BENCHMARKS[a.id] ?? 0));
+
+    // Also flag any new free models we haven't seen before
+    const newModels = freeModels.filter(
+      (m) => !KNOWN_BENCHMARKS[m.id] && !m.id.includes("preview") && !m.id.includes("extended")
+    ).slice(0, 5);
+
+    if (betterModels.length === 0 && newModels.length === 0) {
+      logger.info(`free_model_scout: Current model (${CURRENT_FREE_MODEL}) is still optimal — no action needed`);
+      return;
+    }
+
+    // Build message — only sent when there's something actionable
+    const lines: string[] = [];
+
+    if (betterModels.length > 0) {
+      lines.push("Better free models found on OpenRouter:");
+      lines.push("");
+      for (const m of betterModels.slice(0, 3)) {
+        const score = KNOWN_BENCHMARKS[m.id];
+        lines.push(`• <b>${m.id}</b> (score: ${score} vs current ${currentScore})`);
+        lines.push(`  Context: ${(m.context_length / 1000).toFixed(0)}K tokens`);
+      }
+      lines.push("");
+      lines.push(`Current: <code>${CURRENT_FREE_MODEL}</code>`);
+      lines.push("To swap: update FREE_MINI_MODEL in server/model-manager.ts");
+    }
+
+    if (newModels.length > 0) {
+      if (lines.length > 0) lines.push("");
+      lines.push("New free models (not yet benchmarked):");
+      for (const m of newModels) {
+        lines.push(`• ${m.id}`);
+      }
+    }
+
+    const { sendProactiveMessage } = await import("../channels/channel-manager");
+    const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+
+    for (const chatId of getAuthorizedChatIds()) {
+      await sendProactiveMessage("telegram", chatId, formatMessage({
+        header: msgHeader("🤖", "Free Model Scout — Action Recommended"),
+        sections: [{ content: lines.join("\n") }],
+      }));
+    }
+
+    logger.info({ betterCount: betterModels.length, newCount: newModels.length }, "free_model_scout: Sent upgrade recommendation to Telegram");
+  } catch (err: any) {
+    logger.warn({ error: err.message }, "free_model_scout: Failed");
   }
 });

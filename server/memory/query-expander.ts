@@ -56,7 +56,7 @@ async function llmExpand(query: string): Promise<ExpandedQueries> {
       "X-Title": "SB-OS Query Expansion",
     },
     body: JSON.stringify({
-      model: "openai/gpt-4o-mini",
+      model: "meta-llama/llama-4-scout:free",
       messages: [
         {
           role: "system",

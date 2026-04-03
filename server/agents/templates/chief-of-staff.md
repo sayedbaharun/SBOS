@@ -25,6 +25,7 @@ schedule:
   memory_consolidation: "0 23 * * *"
   github_actions_sha_audit: "0 6 * * 1"
   venture_digest: "0 20 * * 0"
+  free_model_scout: "0 9 */5 * *"
 memory_scope: isolated
 ---
 

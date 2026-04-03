@@ -12,7 +12,7 @@ import { logger } from "../logger";
 import * as modelManager from "../model-manager";
 import { entityRelations } from "@shared/schema";
 
-const EXTRACTION_MODEL = "openai/gpt-4o-mini";
+const EXTRACTION_MODEL = "meta-llama/llama-4-scout:free";
 
 // Lazy DB
 let db: any = null;

@@ -169,7 +169,7 @@ async function tryObserveWithOpenRouter(
       response_format: { type: "json_object" },
     },
     "simple",
-    "openai/gpt-4o-mini",
+    "meta-llama/llama-4-scout:free",
   );
 
   const content = response.choices[0]?.message?.content;

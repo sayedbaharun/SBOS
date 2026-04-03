@@ -2,14 +2,16 @@
 # Script to push database schema changes to Railway PostgreSQL
 # Usage: ./scripts/db-push.sh
 
-# Railway PostgreSQL connection string
-DATABASE_URL="postgresql://postgres:SqysbRiTfTrmbUStgiPDktFqAPOgjyZT@nozomi.proxy.rlwy.net:48746/railway"
+# Uses DATABASE_URL from environment (set in .env or Railway)
+if [ -z "$DATABASE_URL" ]; then
+  echo "❌ DATABASE_URL is not set. Export it or add to .env first."
+  exit 1
+fi
 
 echo "🚀 Pushing database schema to Railway..."
 echo ""
 
-# Run drizzle-kit push with the DATABASE_URL
-DATABASE_URL="$DATABASE_URL" npx drizzle-kit push
+npx drizzle-kit push
 
 echo ""
 echo "✅ Database schema push complete!"

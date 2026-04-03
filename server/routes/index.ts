@@ -56,6 +56,7 @@ import domainsRoutes from "./domains";
 import aiModelsRoutes from "./ai-models";
 import mantrasRoutes from "./mantras";
 import whoopRoutes from "./whoop";
+import debriefRoutes from "./debrief";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
@@ -276,6 +277,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/ticktick', ticktickRoutes);
   app.use('/api/syntheliq', syntheliqRoutes);
   app.use('/api/whoop', whoopRoutes);
+  app.use('/api/debrief', debriefRoutes);
 
   // ============================================================================
   // JARVIS INTELLIGENCE (Cross-Domain Intelligence Engine)

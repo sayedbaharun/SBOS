@@ -16,7 +16,7 @@ import { sessionLogs, agentMemory, agents } from "@shared/schema";
 import { generateEmbedding, serializeEmbedding } from "../embeddings";
 
 const CLAUDE_CODE_AGENT_ID = "11111111-1111-1111-1111-111111111111";
-const EXTRACTION_MODEL = "openai/gpt-4o-mini";
+const EXTRACTION_MODEL = "meta-llama/llama-4-scout:free";
 const BATCH_SIZE = 20;
 
 // Lazy DB

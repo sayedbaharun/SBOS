@@ -122,6 +122,9 @@ function getContextPrefix(chatId: string): string {
 // Pending amend feedback: maps chatId → taskId awaiting feedback text
 const pendingAmendFeedback = new Map<string, string>();
 
+// Pending debrief confirmations: maps key → parsed debrief awaiting confirm/cancel
+const pendingDebriefs = new Map<string, import("../debrief-handler").ParsedDebrief>();
+
 class TelegramAdapter implements ChannelAdapter {
   platform = "telegram" as const;
   capabilities = {
@@ -205,6 +208,7 @@ class TelegramAdapter implements ChannelAdapter {
         `• /btw <question> — side question (no history)\n` +
         `• /idea <description> — validate a business idea\n` +
         `• /contact Name, email, phone — quick contact capture\n` +
+        `• /debrief <what you did today> — log end-of-day work as completed tasks\n` +
         `• /ventures — weekly digest of all active ventures\n` +
         `• /review — review pending deliverables\n` +
         `• /delegate @<slug> <task> — delegate to agent\n\n` +
@@ -1012,6 +1016,71 @@ class TelegramAdapter implements ChannelAdapter {
       }
     });
 
+    // ---- /debrief Command ----
+    this.bot.command("debrief", async (ctx) => {
+      try {
+        const text = ctx.message.text.replace(/^\/debrief\s*/, "").trim();
+        if (!text) {
+          await ctx.reply(
+            "Usage: /debrief <what you did today>\n\n" +
+            "Example: /debrief shipped MyDub landing page, 3 Aivant sales calls, reviewed trading journal, gym 1hr"
+          );
+          return;
+        }
+
+        const chatId = ctx.chat.id.toString();
+        await ctx.reply("Parsing your day...");
+
+        const { parseDebrief } = await import("../debrief-handler");
+        const parsed = await parseDebrief(text);
+
+        if (!parsed.items.length) {
+          await ctx.reply("Couldn't extract any tasks from that. Try being a bit more specific.");
+          return;
+        }
+
+        // Build preview message
+        const lines = parsed.items.map((item, i) =>
+          `${i + 1}. <b>${item.title}</b>\n   ${item.ventureName} · ${item.type} · ${item.priority}`
+        );
+        const preview =
+          `<b>End-of-Day Debrief</b>\n\n` +
+          lines.join("\n\n") +
+          `\n\n<i>${parsed.sessionSummary}</i>\n\n` +
+          `Create ${parsed.items.length} completed task${parsed.items.length !== 1 ? "s" : ""}?`;
+
+        // Store under a key: chatId + timestamp
+        const key = `${chatId}_${Date.now()}`;
+        pendingDebriefs.set(key, parsed);
+        // Auto-expire after 10 minutes
+        setTimeout(() => pendingDebriefs.delete(key), 10 * 60 * 1000);
+
+        await ctx.reply(preview, {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "Confirm", callback_data: `debrief:confirm:${key}` },
+              { text: "Cancel", callback_data: `debrief:cancel:${key}` },
+            ]],
+          },
+        } as any);
+
+        this.saveMessageHistory(
+          chatId,
+          `/debrief ${text}`,
+          `Debrief parsed: ${parsed.items.length} items across ${new Set(parsed.items.map(i => i.ventureName)).size} ventures`,
+          "command"
+        ).catch(() => {});
+      } catch (error: any) {
+        if (error.message?.includes("JSON")) {
+          await ctx.reply("Couldn't parse that debrief. Try rewording — e.g. 'worked on X for Aivant, gym session, 2 calls'");
+        } else {
+          await ctx.reply("Failed to parse debrief.");
+        }
+        this.recordError(error.message);
+      }
+    });
+
     // ---- /ventures Command ----
     this.bot.command("ventures", async (ctx) => {
       try {
@@ -1303,6 +1372,49 @@ class TelegramAdapter implements ChannelAdapter {
           await ctx.answerCbQuery("Dismissed");
           await ctx.editMessageReplyMarkup(undefined);
           return;
+        }
+
+        // Debrief confirm/cancel
+        if (data.startsWith("debrief:")) {
+          const parts = data.split(":");
+          const action = parts[1]; // confirm or cancel
+          const key = parts.slice(2).join(":"); // the full key (chatId_timestamp)
+
+          if (action === "cancel") {
+            pendingDebriefs.delete(key);
+            await ctx.answerCbQuery("Cancelled");
+            await ctx.editMessageReplyMarkup(undefined);
+            return;
+          }
+
+          if (action === "confirm") {
+            const parsed = pendingDebriefs.get(key);
+            if (!parsed) {
+              await ctx.answerCbQuery("Expired — please run /debrief again");
+              return;
+            }
+            pendingDebriefs.delete(key);
+            await ctx.answerCbQuery("Creating tasks...");
+
+            try {
+              const { executeDebrief } = await import("../debrief-handler");
+              const result = await executeDebrief(parsed, "telegram");
+
+              const breakdown = Object.entries(result.ventureBreakdown)
+                .map(([name, count]) => `• ${name}: ${count}`)
+                .join("\n");
+
+              const originalText = (ctx.callbackQuery as any).message?.text || "";
+              await ctx.editMessageText(
+                originalText + `\n\n✅ <b>Done — ${result.created} task${result.created !== 1 ? "s" : ""} logged</b>\n${breakdown}`,
+                { parse_mode: "HTML" }
+              );
+            } catch (err: any) {
+              await ctx.reply("Failed to create tasks. Please try again.");
+              this.recordError(err.message);
+            }
+            return;
+          }
         }
 
         // Review actions: approve/amend/reject deliverables

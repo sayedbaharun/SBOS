@@ -157,7 +157,7 @@ async function generateMeetingBrief(event: any, attendees: any[]): Promise<strin
   });
 
   const completion = await openai.chat.completions.create({
-    model: "openai/gpt-4o-mini",
+    model: "meta-llama/llama-4-scout:free",
     messages: [
       {
         role: "system",

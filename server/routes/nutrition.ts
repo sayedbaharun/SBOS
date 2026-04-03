@@ -124,7 +124,7 @@ router.post("/estimate-macros", async (req: Request, res: Response) => {
     });
 
     const completion = await openai.chat.completions.create({
-      model: "openai/gpt-4o-mini",
+      model: "meta-llama/llama-4-scout:free",
       messages: [
         {
           role: "system",
