@@ -15,6 +15,7 @@ schedule:
   knowledge_extraction: "0 22 * * *"
   knowledge_audit: "0 10 * * 3"
   wiki_generation: "0 2 * * *"
+  entity_dedup: "0 3 * * *"
 memory_scope: shared
 ---
 

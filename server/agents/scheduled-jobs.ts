@@ -1630,6 +1630,89 @@ registerJobHandler("wiki_generation", async (_agentId: string, _agentSlug: strin
 });
 
 // ============================================================================
+// ENTITY DEDUP — Librarian merges near-duplicate entity names
+// ============================================================================
+
+/**
+ * Find and merge duplicate entities in entity_relations.
+ * Groups by normalized name (lowercased, spaces collapsed), keeps the
+ * most-mentioned variant as canonical, re-attributes all mention counts.
+ * Runs nightly at 3am via the Librarian schedule.
+ */
+registerJobHandler("entity_dedup", async (_agentId: string, _agentSlug: string) => {
+  try {
+    const database = await getDb();
+    const { entityRelations } = await import("@shared/schema");
+    const { sql, eq } = await import("drizzle-orm");
+
+    // Fetch all entity names with total mention count
+    const rows = await database
+      .select({
+        source: entityRelations.sourceName,
+        target: entityRelations.targetName,
+        count: sql<number>`sum(${entityRelations.mentionCount})`,
+      })
+      .from(entityRelations)
+      .groupBy(entityRelations.sourceName, entityRelations.targetName);
+
+    // Collect all unique entity names
+    const allNames = new Set<string>();
+    for (const r of rows) {
+      allNames.add(r.source);
+      allNames.add(r.target);
+    }
+
+    // Normalize: strip punctuation, lowercase, collapse spaces
+    const normalize = (s: string) =>
+      s.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+
+    // Group by normalized form
+    const groups = new Map<string, string[]>();
+    for (const name of Array.from(allNames)) {
+      const key = normalize(name);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(name);
+    }
+
+    // Find groups with more than one variant
+    const duplicateGroups = Array.from(groups.entries()).filter(([, names]) => names.length > 1);
+
+    if (duplicateGroups.length === 0) {
+      logger.info("Entity dedup: no duplicates found");
+      return;
+    }
+
+    // For each group, pick canonical = alphabetically first (stable sort)
+    // In a future iteration this could use LLM to pick the "official" form
+    let mergedCount = 0;
+    for (const [, variants] of duplicateGroups) {
+      const canonical = [...variants].sort()[0];
+      const aliases = variants.filter(v => v !== canonical);
+
+      for (const alias of aliases) {
+        // Re-attribute rows where alias is the source
+        await database
+          .update(entityRelations)
+          .set({ sourceName: canonical })
+          .where(eq(entityRelations.sourceName, alias));
+
+        // Re-attribute rows where alias is the target
+        await database
+          .update(entityRelations)
+          .set({ targetName: canonical })
+          .where(eq(entityRelations.targetName, alias));
+
+        mergedCount++;
+      }
+    }
+
+    logger.info({ mergedCount, groupsProcessed: duplicateGroups.length }, "Entity dedup complete");
+  } catch (err) {
+    logger.error({ err }, "Entity dedup failed");
+  }
+});
+
+// ============================================================================
 // CREDIT BALANCE MONITOR
 // ============================================================================
 

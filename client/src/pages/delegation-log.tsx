@@ -42,7 +42,7 @@ interface DelegationEntry {
   delegationChain: string[];
   status: string;
   priority: string;
-  result: string | null;
+  result: Record<string, any> | string | null;
   error: string | null;
   createdAt: string;
   completedAt: string | null;
@@ -247,6 +247,18 @@ function DelegationRow({ entry }: { entry: DelegationEntry }) {
             </div>
           )}
 
+          {/* Live plan artifact (shown for in-progress tasks) */}
+          {entry.status === "in_progress" && typeof entry.result === "object" && entry.result?.plan && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-500 mb-1">
+                Live Plan
+              </p>
+              <pre className="text-[11px] text-foreground/80 leading-relaxed rounded-md bg-blue-500/5 border border-blue-500/10 p-2.5 whitespace-pre-wrap font-mono">
+                {String(entry.result.plan)}
+              </pre>
+            </div>
+          )}
+
           {/* Result or Error */}
           {entry.result && (
             <div>
@@ -254,7 +266,9 @@ function DelegationRow({ entry }: { entry: DelegationEntry }) {
                 Result
               </p>
               <p className="text-[12px] text-foreground/80 leading-relaxed rounded-md bg-emerald-500/5 border border-emerald-500/10 p-2.5">
-                {entry.result}
+                {typeof entry.result === "string"
+                  ? entry.result
+                  : (entry.result as any).title || (entry.result as any).summary || JSON.stringify(entry.result).slice(0, 200)}
               </p>
             </div>
           )}

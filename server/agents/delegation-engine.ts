@@ -47,7 +47,7 @@ async function validateDelegation(
   }
 
   // Check depth
-  const maxDepth = fromAgent.maxDelegationDepth || 2;
+  const maxDepth = fromAgent.maxDelegationDepth ?? 2;
   if (currentDepth >= maxDepth) {
     return {
       valid: false,

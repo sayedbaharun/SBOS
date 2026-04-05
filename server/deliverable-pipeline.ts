@@ -204,6 +204,71 @@ function formatAsDoc(result: Record<string, any>): string {
   }
 }
 
+// ── Verification gate ─────────────────────────────────────────────────────────
+
+const VERIFY_MODEL = "google/gemini-flash-1.5-8b";
+
+/**
+ * Flash Lite single-pass quality check.
+ * Returns { status: 'verified' | 'flagged', notes: string }
+ */
+async function verifyDeliverable(
+  result: Record<string, any>
+): Promise<{ status: "verified" | "flagged"; notes: string }> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return { status: "verified", notes: "Verification skipped — no API key" };
+
+  const title = result.title || "Untitled";
+  const type = result.type || "unknown";
+  const body =
+    result.body || result.copy || result.script || result.summary || JSON.stringify(result).slice(0, 1000);
+
+  const systemPrompt = `You are a quality gate for AI-generated deliverables. Check the deliverable and respond ONLY with valid JSON: {"status":"verified"|"flagged","notes":"<one sentence>"}
+Flag if: claims are unsourced for documents, URLs are dead/made-up, action items lack owners, or the content is clearly incomplete.
+Verify if: content is coherent, actionable, and appears complete.`;
+
+  const userMessage = `Type: ${type}\nTitle: ${title}\n\nContent:\n${body.slice(0, 2000)}`;
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": process.env.SITE_URL || "http://localhost:5000",
+        "X-Title": "SB-OS Verification Gate",
+      },
+      body: JSON.stringify({
+        model: VERIFY_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        max_tokens: 100,
+        temperature: 0.1,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!response.ok) return { status: "verified", notes: "Verification skipped — API error" };
+    const data: any = await response.json();
+    const raw = data.choices?.[0]?.message?.content ?? "";
+
+    // Extract JSON from response
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (parsed.status === "verified" || parsed.status === "flagged") {
+        return { status: parsed.status, notes: parsed.notes || "" };
+      }
+    }
+    return { status: "verified", notes: "Verification inconclusive" };
+  } catch (err) {
+    logger.debug({ err }, "Verification gate failed");
+    return { status: "verified", notes: "Verification skipped — timeout" };
+  }
+}
+
 /**
  * Export a deliverable to Google Drive (and optionally Vercel for web pages).
  * Called after the agentTask insert in submit_deliverable.
@@ -211,10 +276,6 @@ function formatAsDoc(result: Record<string, any>): string {
 export async function exportToReview(
   taskId: string
 ): Promise<{ driveUrl?: string; vercelUrl?: string }> {
-  if (!isDriveConfigured()) {
-    return {};
-  }
-
   const database = await getDb();
   const [task] = await database
     .select()
@@ -223,7 +284,34 @@ export async function exportToReview(
 
   if (!task || !task.result) return {};
 
+  // ── Verification gate (always runs, regardless of Drive config) ──────────
   const result = task.result as Record<string, any>;
+  if (!result.verificationStatus) {
+    try {
+      const { status, notes } = await verifyDeliverable(result);
+      await database
+        .update(agentTasks)
+        .set({
+          result: {
+            ...result,
+            verificationStatus: status,
+            verificationNotes: notes,
+          },
+        })
+        .where(eq(agentTasks.id, taskId));
+      // Mutate local ref so Drive export uses updated result
+      result.verificationStatus = status;
+      result.verificationNotes = notes;
+      logger.info({ taskId, status, notes }, "Deliverable verification complete");
+    } catch (err) {
+      logger.warn({ err, taskId }, "Verification gate error — continuing");
+    }
+  }
+
+  if (!isDriveConfigured()) {
+    return {};
+  }
+
   const isIdeaValidation = task.deliverableType === "idea_validation" || result.type === "idea_validation";
   const folderId = isIdeaValidation ? await getIdeasFolderId() : await getToReviewFolderId();
 

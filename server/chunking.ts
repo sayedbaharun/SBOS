@@ -19,21 +19,77 @@ export interface Chunk {
 }
 
 // Chunking configuration
-const CHUNK_SIZE = 1000; // Target characters per chunk
-const CHUNK_OVERLAP = 200; // Overlap between chunks for context
-const MIN_CHUNK_SIZE = 100; // Minimum chunk size
-const MAX_CHUNK_SIZE = 2000; // Maximum chunk size
+const CHUNK_SIZE = 2500; // Target tokens (~10 000 chars) per chunk — Atomic pattern
+const CHUNK_OVERLAP = 200; // Overlap characters for context continuity
+const MIN_CHUNK_SIZE = 100; // Minimum chunk size (chars)
+const MAX_CHUNK_SIZE = 10000; // Maximum chunk size (chars) — never exceed
 
 /**
- * Chunk a document into smaller pieces for embedding
- * Uses semantic boundaries (paragraphs, headers) when possible
+ * Split text into semantic blocks respecting markdown structure.
+ * Blocks are: code fences (kept whole), headers, and paragraphs.
+ * Code blocks are NEVER split even if large.
+ */
+function splitIntoBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  const lines = text.split('\n');
+  let currentBlock: string[] = [];
+  let inCodeFence = false;
+
+  for (const line of lines) {
+    const isCodeFenceLine = /^```/.test(line);
+
+    if (isCodeFenceLine && !inCodeFence) {
+      // Flush current block before starting code fence
+      if (currentBlock.length > 0) {
+        blocks.push(currentBlock.join('\n'));
+        currentBlock = [];
+      }
+      inCodeFence = true;
+      currentBlock.push(line);
+      continue;
+    }
+
+    if (isCodeFenceLine && inCodeFence) {
+      // End of code fence — flush as single block
+      currentBlock.push(line);
+      blocks.push(currentBlock.join('\n'));
+      currentBlock = [];
+      inCodeFence = false;
+      continue;
+    }
+
+    if (inCodeFence) {
+      currentBlock.push(line);
+      continue;
+    }
+
+    // Outside code fence: split on blank lines (paragraph boundaries)
+    if (line.trim() === '') {
+      if (currentBlock.length > 0) {
+        blocks.push(currentBlock.join('\n'));
+        currentBlock = [];
+      }
+    } else {
+      currentBlock.push(line);
+    }
+  }
+
+  if (currentBlock.length > 0) {
+    blocks.push(currentBlock.join('\n'));
+  }
+
+  return blocks.filter(b => b.trim().length > 0);
+}
+
+/**
+ * Chunk a document into smaller pieces for embedding.
+ * Respects markdown boundaries: headers, paragraphs, and code fences.
+ * Code blocks are never split mid-fence (Atomic pattern).
  */
 export function chunkDocument(doc: Doc): Chunk[] {
-  // Get text content from doc
   const text = doc.body || (doc.content ? extractTextFromBlocks(doc.content) : '');
 
   if (!text || text.length < MIN_CHUNK_SIZE) {
-    // Return single chunk for short documents
     return [{
       content: text || '',
       startOffset: 0,
@@ -42,32 +98,30 @@ export function chunkDocument(doc: Doc): Chunk[] {
     }];
   }
 
+  const blocks = splitIntoBlocks(text);
   const chunks: Chunk[] = [];
-
-  // Split by double newlines (paragraphs)
-  const paragraphs = text.split(/\n\n+/);
   let currentChunk = '';
   let currentStart = 0;
   let currentHeadings: string[] = [];
   let currentSection = '';
   let offset = 0;
 
-  for (const para of paragraphs) {
-    // Track markdown headers
-    const headerMatch = para.match(/^(#{1,6})\s+(.+)$/m);
+  for (const block of blocks) {
+    const headerMatch = block.match(/^(#{1,6})\s+(.+)$/m);
     if (headerMatch) {
       currentSection = headerMatch[2];
       currentHeadings = [headerMatch[2]];
     }
 
-    // Check if this is a code block
-    const isCodeBlock = para.startsWith('```') || para.match(/^\s{4,}/m);
+    const isCodeBlock = block.startsWith('```');
+    const blockChars = block.length + 2; // +2 for \n\n separator
+    const potentialLength = currentChunk.length + blockChars;
 
-    // Check if adding this paragraph exceeds chunk size
-    const potentialLength = currentChunk.length + para.length + 2; // +2 for \n\n
+    // Never break a code block — always keep it atomic
+    const mustKeepTogether = isCodeBlock;
 
-    if (potentialLength > CHUNK_SIZE && currentChunk.length > MIN_CHUNK_SIZE) {
-      // Save current chunk
+    if (potentialLength > MAX_CHUNK_SIZE && !mustKeepTogether && currentChunk.length > MIN_CHUNK_SIZE) {
+      // Force flush before this block
       chunks.push({
         content: currentChunk.trim(),
         startOffset: currentStart,
@@ -77,41 +131,32 @@ export function chunkDocument(doc: Doc): Chunk[] {
           headings: currentHeadings.length > 0 ? [...currentHeadings] : undefined,
         },
       });
-
-      // Start new chunk with overlap
-      if (CHUNK_OVERLAP > 0 && currentChunk.length > CHUNK_OVERLAP) {
-        const overlapText = currentChunk.slice(-CHUNK_OVERLAP);
-        currentChunk = overlapText + '\n\n' + para;
-        currentStart = offset - CHUNK_OVERLAP;
-      } else {
-        currentChunk = para;
-        currentStart = offset;
-      }
-    } else {
-      // Add paragraph to current chunk
-      currentChunk += (currentChunk ? '\n\n' : '') + para;
-    }
-
-    offset += para.length + 2; // +2 for \n\n separator
-
-    // If chunk is getting too large, force a split
-    if (currentChunk.length > MAX_CHUNK_SIZE) {
-      chunks.push({
-        content: currentChunk.trim(),
-        startOffset: currentStart,
-        endOffset: offset,
-        metadata: {
-          section: currentSection || undefined,
-          headings: currentHeadings.length > 0 ? [...currentHeadings] : undefined,
-          isCodeBlock: isCodeBlock || undefined,
-        },
-      });
-      currentChunk = '';
+      currentChunk = block;
       currentStart = offset;
+    } else if (potentialLength > CHUNK_SIZE && !mustKeepTogether && currentChunk.length > MIN_CHUNK_SIZE) {
+      // Soft target exceeded — flush and start new with overlap
+      chunks.push({
+        content: currentChunk.trim(),
+        startOffset: currentStart,
+        endOffset: offset,
+        metadata: {
+          section: currentSection || undefined,
+          headings: currentHeadings.length > 0 ? [...currentHeadings] : undefined,
+        },
+      });
+      // Carry overlap from end of flushed chunk
+      const overlapText = currentChunk.length > CHUNK_OVERLAP
+        ? currentChunk.slice(-CHUNK_OVERLAP)
+        : currentChunk;
+      currentChunk = overlapText + '\n\n' + block;
+      currentStart = Math.max(0, offset - CHUNK_OVERLAP);
+    } else {
+      currentChunk += (currentChunk ? '\n\n' : '') + block;
     }
+
+    offset += blockChars;
   }
 
-  // Add final chunk
   if (currentChunk.trim()) {
     chunks.push({
       content: currentChunk.trim(),

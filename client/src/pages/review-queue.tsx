@@ -19,6 +19,8 @@ import {
   MessageSquare,
   Film,
   Layers,
+  ShieldCheck,
+  ShieldAlert,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -336,6 +338,21 @@ function DeliverableCard({
               <Badge className={`text-xs ${statusColors[d.status] || ""}`}>
                 {statusLabels[d.status] || d.status}
               </Badge>
+              {d.result?.verificationStatus === "verified" && (
+                <span className="flex items-center gap-0.5 text-xs text-green-600 dark:text-green-400">
+                  <ShieldCheck className="h-3 w-3" />
+                  Verified
+                </span>
+              )}
+              {d.result?.verificationStatus === "flagged" && (
+                <span
+                  className="flex items-center gap-0.5 text-xs text-amber-600 dark:text-amber-400 cursor-help"
+                  title={d.result?.verificationNotes || "Flagged by verification gate"}
+                >
+                  <ShieldAlert className="h-3 w-3" />
+                  Needs review
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Bot className="h-3 w-3" />

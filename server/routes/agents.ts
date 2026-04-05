@@ -598,6 +598,37 @@ router.get("/delegation/log", async (req: Request, res: Response) => {
   }
 });
 
+// Update plan artifact on a task (called by long-running agents to surface live progress)
+router.patch("/tasks/:taskId/plan", async (req: Request, res: Response) => {
+  try {
+    const database = await getDb();
+    const taskId = String(req.params.taskId);
+    const { plan } = req.body as { plan: string };
+
+    if (!plan || typeof plan !== "string") {
+      return res.status(400).json({ error: "plan (string) is required" });
+    }
+
+    const [existing] = await database
+      .select({ result: agentTasks.result })
+      .from(agentTasks)
+      .where(eq(agentTasks.id, taskId));
+
+    if (!existing) return res.status(404).json({ error: "Task not found" });
+
+    const updatedResult = { ...(existing.result as Record<string, unknown> ?? {}), plan };
+    await database
+      .update(agentTasks)
+      .set({ result: updatedResult })
+      .where(eq(agentTasks.id, taskId));
+
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error({ error }, "Error updating task plan");
+    res.status(500).json({ error: "Failed to update plan" });
+  }
+});
+
 // Get tasks for a specific agent
 router.get("/:slug/tasks", async (req: Request, res: Response) => {
   try {
