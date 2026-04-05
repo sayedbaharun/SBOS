@@ -19,6 +19,8 @@ import {
   CheckSquare,
   ShoppingCart,
   ClipboardCheck,
+  Brain,
+  Network,
 } from "lucide-react";
 import NavSection, { NavItemConfig } from "./nav-section";
 import VenturesNavSection from "./ventures-nav-section";
@@ -89,6 +91,8 @@ const navigationSections: Array<{ label: string; items: NavItemConfig[]; default
     label: "Work",
     items: [
       { href: "/knowledge", icon: BookOpen, label: "Knowledge" },
+      { href: "/memory", icon: Brain, label: "Memory" },
+      { href: "/graph", icon: Network, label: "Graph" },
       { href: "/trading", icon: TrendingUp, label: "Trading" },
       { href: "/agents", icon: Users, label: "Agents" },
       { href: "/review", icon: ClipboardCheck, label: "Review" },

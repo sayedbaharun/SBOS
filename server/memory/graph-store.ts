@@ -344,6 +344,172 @@ export async function graphContextSearch(
 }
 
 // ============================================================================
+// FULL GRAPH EXPORT (for visualization)
+// ============================================================================
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type: string;
+  description?: string;
+  mentionCount: number;
+  firstSeen?: number;
+  lastSeen?: number;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  relationship: string;
+  strength: number;
+}
+
+export interface FullGraph {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+/**
+ * Export the full entity graph for visualization.
+ * Returns all Entity nodes and RELATES_TO edges.
+ */
+export async function getFullGraph(limit: number = 200): Promise<FullGraph> {
+  try {
+    const available = await isGraphAvailable();
+    if (!available) return { nodes: [], edges: [] };
+
+    const graph = await getGraph();
+
+    // Fetch top entities by mention count
+    const nodesResult = await graph.query(
+      `MATCH (e:Entity)
+       RETURN e.id, e.name, e.type, e.description, e.mention_count, e.first_seen, e.last_seen
+       ORDER BY e.mention_count DESC
+       LIMIT $limit`,
+      { params: { limit } }
+    );
+
+    const nodes: GraphNode[] = [];
+    const nodeIds = new Set<string>();
+
+    if (nodesResult.data) {
+      for (const row of nodesResult.data) {
+        const id = row[0] || row[1] || ""; // Use name as fallback ID
+        const name = row[1] || "";
+        if (!name) continue;
+        const nodeId = id || name;
+        nodes.push({
+          id: nodeId,
+          label: name,
+          type: row[2] || "concept",
+          description: row[3] || "",
+          mentionCount: row[4] || 1,
+          firstSeen: row[5],
+          lastSeen: row[6],
+        });
+        nodeIds.add(nodeId);
+      }
+    }
+
+    // Fetch edges between these entities
+    const edgesResult = await graph.query(
+      `MATCH (e1:Entity)-[r:RELATES_TO]->(e2:Entity)
+       WHERE e1.mention_count > 0 AND e2.mention_count > 0
+       RETURN e1.id, e1.name, e2.id, e2.name, r.relationship, r.strength
+       ORDER BY r.strength DESC
+       LIMIT $limit`,
+      { params: { limit: limit * 2 } }
+    );
+
+    const edges: GraphEdge[] = [];
+    if (edgesResult.data) {
+      for (const row of edgesResult.data) {
+        const sourceId = row[0] || row[1];
+        const targetId = row[2] || row[3];
+        if (!sourceId || !targetId) continue;
+        edges.push({
+          source: sourceId,
+          target: targetId,
+          relationship: row[4] || "related_to",
+          strength: row[5] || 0.5,
+        });
+      }
+    }
+
+    return { nodes, edges };
+  } catch (error) {
+    logger.debug({ error }, "getFullGraph failed");
+    return { nodes: [], edges: [] };
+  }
+}
+
+/**
+ * Get a single entity and its immediate neighborhood (1-hop).
+ */
+export async function getEntityNeighborhood(
+  entityName: string
+): Promise<FullGraph> {
+  try {
+    const available = await isGraphAvailable();
+    if (!available) return { nodes: [], edges: [] };
+
+    const graph = await getGraph();
+
+    const result = await graph.query(
+      `MATCH (e:Entity)
+       WHERE e.name = $name OR e.id = $name
+       OPTIONAL MATCH (e)-[r:RELATES_TO]-(neighbor:Entity)
+       RETURN e, collect(DISTINCT neighbor)[0..20] as neighbors,
+              collect(DISTINCT {src: e.id, tgt: neighbor.id, rel: r.relationship, str: r.strength})[0..20] as rels`,
+      { params: { name: entityName } }
+    );
+
+    if (!result.data || result.data.length === 0) return { nodes: [], edges: [] };
+
+    const row = result.data[0];
+    const center = row[0] || {};
+    const neighbors = row[1] || [];
+    const rels = row[2] || [];
+
+    const nodes: GraphNode[] = [];
+    const centerIdOrName = center.id || center.name || entityName;
+
+    nodes.push({
+      id: centerIdOrName,
+      label: center.name || entityName,
+      type: center.type || "concept",
+      description: center.description || "",
+      mentionCount: center.mention_count || 1,
+    });
+
+    for (const n of neighbors) {
+      if (!n || !n.name) continue;
+      nodes.push({
+        id: n.id || n.name,
+        label: n.name,
+        type: n.type || "concept",
+        description: n.description || "",
+        mentionCount: n.mention_count || 1,
+      });
+    }
+
+    const edges: GraphEdge[] = rels
+      .filter((r: any) => r && r.src && r.tgt)
+      .map((r: any) => ({
+        source: r.src,
+        target: r.tgt,
+        relationship: r.rel || "related_to",
+        strength: r.str || 0.5,
+      }));
+
+    return { nodes, edges };
+  } catch (error) {
+    logger.debug({ error, entityName }, "getEntityNeighborhood failed");
+    return { nodes: [], edges: [] };
+  }
+}
+
+// ============================================================================
 // INGESTION (called from learning extractor)
 // ============================================================================
 

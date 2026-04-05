@@ -603,4 +603,101 @@ router.get("/provider", async (_req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// MEMORY DASHBOARD — Recent memories, decisions, entities
+// ============================================================================
+
+/**
+ * GET /api/memory/recent
+ * Returns most recent agent_memory rows with agent names attached.
+ */
+router.get("/recent", async (req: Request, res: Response) => {
+  try {
+    const { db } = await import("../../db");
+    const { agentMemory, agents } = await import("@shared/schema");
+    const { desc, eq } = await import("drizzle-orm");
+
+    const limit = Math.min(parseInt(String(req.query.limit ?? "30")), 100);
+
+    const rows = await db
+      .select({
+        id: agentMemory.id,
+        content: agentMemory.content,
+        memoryType: agentMemory.memoryType,
+        importance: agentMemory.importance,
+        scope: agentMemory.scope,
+        tags: agentMemory.tags,
+        createdAt: agentMemory.createdAt,
+        agentName: agents.name,
+        agentSlug: agents.slug,
+      })
+      .from(agentMemory)
+      .leftJoin(agents, eq(agentMemory.agentId, agents.id))
+      .orderBy(desc(agentMemory.createdAt))
+      .limit(limit);
+
+    res.json(rows);
+  } catch (error) {
+    logger.error({ error }, "Failed to get recent memories");
+    res.status(500).json({ error: "Failed to get recent memories" });
+  }
+});
+
+/**
+ * GET /api/memory/decisions
+ * Returns decision journal entries.
+ */
+router.get("/decisions", async (req: Request, res: Response) => {
+  try {
+    const { db } = await import("../../db");
+    const { decisionMemories } = await import("@shared/schema");
+    const { desc } = await import("drizzle-orm");
+
+    const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
+
+    const rows = await db
+      .select()
+      .from(decisionMemories)
+      .orderBy(desc(decisionMemories.createdAt))
+      .limit(limit);
+
+    res.json(rows);
+  } catch (error) {
+    logger.error({ error }, "Failed to get decisions");
+    res.status(500).json({ error: "Failed to get decisions" });
+  }
+});
+
+/**
+ * GET /api/memory/entities
+ * Returns entity relations from Postgres for the entity browser.
+ */
+router.get("/entities", async (req: Request, res: Response) => {
+  try {
+    const { db } = await import("../../db");
+    const { entityRelations } = await import("@shared/schema");
+    const { desc, sql } = await import("drizzle-orm");
+
+    const limit = Math.min(parseInt(String(req.query.limit ?? "100")), 500);
+
+    // Aggregate unique source entities with their mention counts
+    const rows = await db
+      .select({
+        name: entityRelations.sourceName,
+        type: entityRelations.sourceType,
+        mentionCount: sql<number>`sum(${entityRelations.mentionCount})`,
+        lastSeen: sql<Date>`max(${entityRelations.lastSeen})`,
+      })
+      .from(entityRelations)
+      .groupBy(entityRelations.sourceName, entityRelations.sourceType)
+      .orderBy(desc(sql`sum(${entityRelations.mentionCount})`))
+      .limit(limit);
+
+    res.json(rows);
+  } catch (error) {
+    logger.error({ error }, "Failed to get entities");
+    res.status(500).json({ error: "Failed to get entities" });
+  }
+});
+
 export default router;

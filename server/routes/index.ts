@@ -57,6 +57,7 @@ import aiModelsRoutes from "./ai-models";
 import mantrasRoutes from "./mantras";
 import whoopRoutes from "./whoop";
 import debriefRoutes from "./debrief";
+import graphRoutes from "./graph";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
@@ -258,6 +259,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Session compaction, offline autonomy, and mobile access
   // ============================================================================
   app.use('/api/memory', memoryRoutes);
+  app.use('/api/graph', graphRoutes);
 
   // ============================================================================
   // VOICE (Jarvis-style interaction: STT, TTS, voice chat)
