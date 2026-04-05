@@ -14,6 +14,7 @@ temperature: 0.3
 schedule:
   knowledge_extraction: "0 22 * * *"
   knowledge_audit: "0 10 * * 3"
+  wiki_generation: "0 2 * * *"
 memory_scope: shared
 ---
 

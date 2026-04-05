@@ -55,6 +55,7 @@ const SettingsExternalAgents = lazy(() => import("@/pages/settings-external-agen
 const SettingsCommandsPage = lazy(() => import("@/pages/settings-commands"));
 const MemoryDashboard = lazy(() => import("@/pages/memory-dashboard"));
 const GraphExplorer = lazy(() => import("@/pages/graph-explorer"));
+const WikiPage = lazy(() => import("@/pages/wiki"));
 
 function Router() {
   // Initialize daily reminders service on app load
@@ -111,6 +112,7 @@ function Router() {
             <Route path="/agents/:slug" component={AgentDetailPage} />
             <Route path="/memory" component={MemoryDashboard} />
             <Route path="/graph" component={GraphExplorer} />
+            <Route path="/wiki" component={WikiPage} />
             <Route component={NotFound} />
           </Switch>
           </Suspense>

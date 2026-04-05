@@ -1612,6 +1612,24 @@ Include recommendations for each stale doc (archive, update, or keep), suggested
 });
 
 // ============================================================================
+// WIKI GENERATION (nightly via Librarian)
+// ============================================================================
+
+/**
+ * Generate/refresh wiki articles for the top 10 entities.
+ * Runs nightly via the Librarian agent schedule.
+ */
+registerJobHandler("wiki_generation", async (_agentId: string, _agentSlug: string) => {
+  try {
+    const { generateWikiBatch } = await import("../memory/wiki-synthesizer");
+    const result = await generateWikiBatch(10);
+    logger.info(result, "Wiki generation batch complete");
+  } catch (err) {
+    logger.error({ err }, "Wiki generation batch failed");
+  }
+});
+
+// ============================================================================
 // CREDIT BALANCE MONITOR
 // ============================================================================
 
