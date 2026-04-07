@@ -793,14 +793,13 @@ export async function getCompactedMemoriesForSync(
   const qdrant = getClient();
 
   // Catch both explicitly "pending" AND records with no sync_status field
-  // (memories created before the sync_status field was introduced)
+  // (memories created before the field was introduced) by excluding "synced"
   const result = await qdrant.scroll(QDRANT_COLLECTIONS.COMPACTED_MEMORIES, {
     filter: {
-      should: [
-        { key: "sync_status", match: { value: "pending" } },
-        { is_empty: { key: "sync_status" } },
+      must_not: [
+        { key: "archived", match: { value: true } },
+        { key: "sync_status", match: { value: "synced" } },
       ],
-      must_not: [{ key: "archived", match: { value: true } }],
     } as any,
     limit,
     with_payload: true,
