@@ -792,9 +792,14 @@ export async function getCompactedMemoriesForSync(
 ): Promise<Array<{ id: string; payload: CompactedMemoryPayload }>> {
   const qdrant = getClient();
 
+  // Catch both explicitly "pending" AND records with no sync_status field
+  // (memories created before the sync_status field was introduced)
   const result = await qdrant.scroll(QDRANT_COLLECTIONS.COMPACTED_MEMORIES, {
     filter: {
-      must: [{ key: "sync_status", match: { value: "pending" } }],
+      should: [
+        { key: "sync_status", match: { value: "pending" } },
+        { is_empty: { key: "sync_status" } },
+      ],
       must_not: [{ key: "archived", match: { value: true } }],
     } as any,
     limit,

@@ -23,6 +23,7 @@ schedule:
   check_credit_balance: "30 */6 * * *"
   syntheliq_reconcile: "15 */6 * * *"
   memory_consolidation: "0 23 * * *"
+  pinecone_nightly_sync: "0 2 * * *"
   github_actions_sha_audit: "0 6 * * 1"
   venture_digest: "0 20 * * 0"
   free_model_scout: "0 9 */5 * *"
