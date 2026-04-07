@@ -167,7 +167,7 @@ export const QDRANT_COLLECTIONS = {
 } as const;
 
 export const LOCAL_EMBEDDING_DIMS = 1536; // Gemini 3072 → MRL truncated to 1536 (backward compatible)
-export const PINECONE_EMBEDDING_DIMS = 512; // Truncation from 1536 to save storage
+export const PINECONE_EMBEDDING_DIMS = 1536; // Match the Pinecone index dimension (index created at 1536)
 
 // ============================================================================
 // EMBEDDING TASK TYPES (Gemini Embedding 001)
