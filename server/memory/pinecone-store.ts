@@ -73,10 +73,10 @@ export async function upsertToPinecone(
     metadata: record.metadata as Record<string, string | number | boolean | string[]>,
   }));
 
-  // Pinecone batch limit is 100
+  // Pinecone batch limit is 100 (SDK v7 requires { records: [...] })
   for (let i = 0; i < vectors.length; i += 100) {
     const batch = vectors.slice(i, i + 100);
-    await index.upsert(batch as any);
+    await index.upsert({ records: batch } as any);
   }
 
   logger.debug(
