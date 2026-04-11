@@ -8,6 +8,7 @@ import { logger } from "../logger";
 import { insertTaskSchema } from "@shared/schema";
 import { z } from "zod";
 import { SLOT_TIMES, VALID_TASK_STATUSES } from "./constants";
+import { delegateFromUser } from "../agents/delegation-engine";
 
 const router = Router();
 
@@ -327,6 +328,112 @@ router.delete("/:id", async (req: Request, res: Response) => {
   } catch (error) {
     logger.error({ error }, "Error deleting task");
     res.status(500).json({ error: "Failed to delete task" });
+  }
+});
+
+// ============================================================================
+// Agent-Assisted Delegation
+// ============================================================================
+
+// GET /agent-ready — tasks tagged "agent-ready" by the scout
+router.get("/agent-ready", async (req: Request, res: Response) => {
+  try {
+    const allTasks = await storage.getTasks({});
+
+    // Filter to non-terminal tasks that have the "agent-ready" tag
+    const doneSt = new Set(["done", "cancelled", "archived"]);
+    const agentReadyTasks = allTasks.filter((t: any) => {
+      if (doneSt.has(t.status)) return false;
+      const tags = ensureTagsArray(t.tags);
+      return tags.includes("agent-ready");
+    });
+
+    // Enrich with venture name and parse suggested agent from notes
+    const enriched = await Promise.all(
+      agentReadyTasks.map(async (t: any) => {
+        let ventureName: string | null = null;
+        if (t.ventureId) {
+          const venture = await storage.getVenture(t.ventureId);
+          ventureName = venture?.name || null;
+        }
+
+        // Scout writes notes like: "[Scout] Suggested agent: cto -- reason here"
+        let suggestedAgent: string | null = null;
+        let suggestedReason: string | null = null;
+        if (t.notes) {
+          const match = t.notes.match(/\[Scout\].*?Suggested agent:\s*([a-z0-9-]+)\s*(?:--|—)?\s*(.*)/i);
+          if (match) {
+            suggestedAgent = match[1].trim();
+            suggestedReason = match[2]?.trim() || null;
+          }
+        }
+
+        return {
+          ...normalizeTask(t),
+          ventureName,
+          suggestedAgent,
+          suggestedReason,
+        };
+      })
+    );
+
+    res.json(enriched);
+  } catch (error) {
+    logger.error({ error }, "Error fetching agent-ready tasks");
+    res.status(500).json({ error: "Failed to fetch agent-ready tasks" });
+  }
+});
+
+// POST /:id/delegate-to-agent — bridge a task to the delegation engine
+router.post("/:id/delegate-to-agent", async (req: Request, res: Response) => {
+  try {
+    const { agentSlug } = req.body;
+    if (!agentSlug) {
+      return res.status(400).json({ error: "agentSlug is required" });
+    }
+
+    const task = await storage.getTask(String(req.params.id));
+    if (!task) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+
+    // Build description that gives the agent full task context
+    const description = [
+      task.notes || "",
+      task.ventureId ? `Venture ID: ${task.ventureId}` : "",
+      task.projectId ? `Project ID: ${task.projectId}` : "",
+      task.dueDate ? `Due: ${task.dueDate}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    // Priority: P0=0, P1=1, P2=2, P3=3 → delegation priority (lower = higher priority)
+    const priorityMap: Record<string, number> = { P0: 1, P1: 3, P2: 5, P3: 8 };
+    const delegationPriority = priorityMap[(task.priority as string) || "P1"] || 5;
+
+    const result = await delegateFromUser(agentSlug, task.title, description, delegationPriority);
+
+    if (result.error) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    // Mark task as in_progress and tag as agent-assigned
+    const tags = ensureTagsArray(task.tags);
+    const updatedTags = Array.from(new Set([...tags.filter((t) => t !== "agent-ready"), "agent-assigned"]));
+    await storage.updateTask(String(task.id), {
+      status: "in_progress",
+      tags: updatedTags,
+    } as any);
+
+    res.status(201).json({
+      agentTaskId: result.taskId,
+      taskId: task.id,
+      agentSlug,
+      message: `Task delegated to ${agentSlug}`,
+    });
+  } catch (error) {
+    logger.error({ error }, "Error delegating task to agent");
+    res.status(500).json({ error: "Failed to delegate task" });
   }
 });
 

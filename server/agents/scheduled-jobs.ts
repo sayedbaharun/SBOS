@@ -179,6 +179,35 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
     // Non-critical
   }
 
+  // Agent-ready tasks + pending reviews
+  let agentQueueSection = "";
+  try {
+    const allTasks = await storage.getTasks({});
+    const doneSt = new Set(["done", "cancelled", "archived"]);
+    const agentReadyCount = allTasks.filter((t: any) => {
+      if (doneSt.has(t.status)) return false;
+      const tags = Array.isArray(t.tags) ? t.tags : (t.tags ? String(t.tags).split(",").map((s: string) => s.trim()) : []);
+      return tags.includes("agent-ready");
+    }).length;
+
+    let pendingReviewCount = 0;
+    try {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      const { agentTasks } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const reviewRows = await db.select().from(agentTasks).where(eq(agentTasks.status, "needs_review"));
+      pendingReviewCount = reviewRows.length;
+    } catch { /* non-critical */ }
+
+    const parts: string[] = [];
+    if (agentReadyCount > 0) parts.push(`${agentReadyCount} task${agentReadyCount > 1 ? "s" : ""} tagged agent-ready (scout suggestions waiting)`);
+    if (pendingReviewCount > 0) parts.push(`${pendingReviewCount} deliverable${pendingReviewCount > 1 ? "s" : ""} pending your review`);
+    if (parts.length > 0) {
+      agentQueueSection = `\n\n## 🤖 Agent Queue\n${parts.join("\n")}`;
+    }
+  } catch { /* non-critical */ }
+
   // Check outcomes
   let outcomesPrompt = "";
   try {
@@ -194,7 +223,7 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
   }
 
   // Step 3: Have the CoS agent synthesize everything into one briefing
-  const prompt = `Generate your daily briefing for the founder. Here is the data:\n\n${briefingData.report}${activitySummary}${blockerSection}${intelligenceSection}${syntheliqSection}\n\nPresent this as your daily briefing, with your personality and insights. Highlight what matters most today. Flag any blockers prominently. If Syntheliq data is available, cross-reference with Syntheliq-related tasks and flag any potential matches.${outcomesPrompt}`;
+  const prompt = `Generate your daily briefing for the founder. Here is the data:\n\n${briefingData.report}${activitySummary}${blockerSection}${agentQueueSection}${intelligenceSection}${syntheliqSection}\n\nPresent this as your daily briefing, with your personality and insights. Highlight what matters most today. Flag any blockers prominently. If there are agent-ready tasks or pending deliverables, mention them so the founder can delegate or review. If Syntheliq data is available, cross-reference with Syntheliq-related tasks and flag any potential matches.${outcomesPrompt}`;
 
   const result = await executeAgentChat(agentSlug, prompt, "scheduler");
 
@@ -208,7 +237,7 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
       await sendProactiveMessage("telegram", chatId, formatMessage({
         header: msgHeader("☀️", "Daily Briefing"),
         body: msgTruncate(escapeHtml(result.response)),
-        cta: "/today for outcomes · /tasks for full list",
+        cta: "/today for outcomes · /tasks for full list · open dashboard to delegate",
       }));
     }
   } catch {

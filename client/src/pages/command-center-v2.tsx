@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { IntelligenceBriefingWidget } from "@/components/cockpit/intelligence-briefing-widget";
 import { EmailTriageWidget } from "@/components/cockpit/email-triage-widget";
 import { AgentPulseWidget } from "@/components/cockpit/agent-pulse-widget";
+import { ReviewQueueWidget } from "@/components/cockpit/review-queue-widget";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -31,7 +32,20 @@ import {
   DollarSign,
   Zap,
   ArrowRight,
+  Bot,
+  Sparkles,
+  X,
+  Loader2,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { useToast } from "@/hooks/use-toast";
 import { useWebSocket } from "@/hooks/use-websocket";
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -66,7 +80,7 @@ function ScheduleWidget() {
       const end = new Date(now);
       end.setHours(23, 59, 59);
       const res = await fetch(
-        `/api/calendar/events?start=${now.toISOString()}&end=${end.toISOString()}&maxResults=6`,
+        `/api/calendar/events?startDate=${now.toISOString()}&endDate=${end.toISOString()}&maxResults=6`,
         { credentials: "include" }
       );
       if (!res.ok) return [];
@@ -269,11 +283,119 @@ function WeeklyPulseWidget() {
   );
 }
 
+// ── widget: Scout Suggestions ─────────────────────────────────────────────
+
+function ScoutSuggestionsWidget() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: agentReadyTasks = [] } = useQuery<any[]>({
+    queryKey: ["tasks-agent-ready"],
+    queryFn: async () => {
+      const res = await fetch("/api/tasks/agent-ready", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    refetchInterval: 60000,
+  });
+
+  const delegate = useMutation({
+    mutationFn: async ({ taskId, agentSlug }: { taskId: string; agentSlug: string }) => {
+      const res = await fetch(`/api/tasks/${taskId}/delegate-to-agent`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentSlug }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      return res.json();
+    },
+    onSuccess: (_, { agentSlug }) => {
+      qc.invalidateQueries({ queryKey: ["tasks-agent-ready"] });
+      qc.invalidateQueries({ queryKey: ["dashboard-top3"] });
+      toast({ title: `Delegated to ${agentSlug}` });
+    },
+    onError: (e: any) => toast({ title: e.message || "Failed to delegate", variant: "destructive" }),
+  });
+
+  const dismiss = useMutation({
+    mutationFn: async (taskId: string) => {
+      const task = agentReadyTasks.find((t) => t.id === taskId);
+      const newTags = (task?.tags || []).filter((tag: string) => tag !== "agent-ready");
+      await fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags: newTags }),
+      });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks-agent-ready"] }),
+  });
+
+  if (agentReadyTasks.length === 0) return null;
+
+  return (
+    <Card className="border-violet-500/30 bg-violet-500/5">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-xs font-semibold text-violet-400 flex items-center gap-2">
+          <Sparkles className="h-3.5 w-3.5" />
+          Scout found {agentReadyTasks.length} task{agentReadyTasks.length > 1 ? "s" : ""} for agents
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {agentReadyTasks.slice(0, 4).map((t: any) => (
+          <div key={t.id} className="flex items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm truncate leading-tight">{t.title}</p>
+              {t.suggestedAgent && (
+                <p className="text-[10px] text-muted-foreground">
+                  → <span className="text-violet-400">{t.suggestedAgent}</span>
+                  {t.suggestedReason && ` · ${t.suggestedReason}`}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              {t.suggestedAgent ? (
+                <Button
+                  size="sm"
+                  className="h-6 px-2 text-[10px] bg-violet-600 hover:bg-violet-700 text-white"
+                  onClick={() => delegate.mutate({ taskId: t.id, agentSlug: t.suggestedAgent })}
+                  disabled={delegate.isPending}
+                >
+                  {delegate.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Delegate"}
+                </Button>
+              ) : null}
+              <button
+                onClick={() => dismiss.mutate(t.id)}
+                className="h-6 w-6 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── widget: Tasks ──────────────────────────────────────────────────────────
 
 function TasksWidget() {
   const [, navigate] = useLocation();
+  const { toast } = useToast();
   const qc = useQueryClient();
+
+  const { data: agents = [] } = useQuery<any[]>({
+    queryKey: ["agents-list"],
+    queryFn: async () => {
+      const res = await fetch("/api/agents", { credentials: "include" });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (Array.isArray(data) ? data : data.agents || []).filter((a: any) => a.isActive);
+    },
+    staleTime: 300000,
+  });
 
   const { data: top3Data = { tasks: [] }, isLoading } = useQuery<any>({
     queryKey: ["dashboard-top3"],
@@ -302,9 +424,25 @@ function TasksWidget() {
         body: JSON.stringify({ status: "done" }),
       });
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["dashboard-top3"] });
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["dashboard-top3"] }),
+  });
+
+  const delegateTask = useMutation({
+    mutationFn: async ({ taskId, agentSlug }: { taskId: string; agentSlug: string }) => {
+      const res = await fetch(`/api/tasks/${taskId}/delegate-to-agent`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentSlug }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      return res.json();
     },
+    onSuccess: (_, { agentSlug }) => {
+      qc.invalidateQueries({ queryKey: ["dashboard-top3"] });
+      toast({ title: `Task delegated to ${agentSlug}` });
+    },
+    onError: (e: any) => toast({ title: e.message || "Failed to delegate", variant: "destructive" }),
   });
 
   const oneThingToShip = dayData?.oneThingToShip;
@@ -343,7 +481,7 @@ function TasksWidget() {
           tasks.map((t: any, idx: number) => (
             <div
               key={t.id}
-              className="flex items-start gap-3 p-2.5 rounded-lg bg-muted/20 hover:bg-muted/40 transition-colors group"
+              className="flex items-start gap-2 p-2.5 rounded-lg bg-muted/20 hover:bg-muted/40 transition-colors group"
             >
               <button
                 onClick={() => completeTask.mutate(t.id)}
@@ -353,14 +491,41 @@ function TasksWidget() {
               </button>
               <div className="min-w-0 flex-1">
                 <div className="font-medium text-sm leading-tight">{t.title}</div>
-                <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2">
+                <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
                   <span className={t.priority === "P0" ? "text-red-400" : t.priority === "P1" ? "text-orange-400" : ""}>{t.priority}</span>
                   {t.ventureName && <span className="truncate">· {t.ventureName}</span>}
                   {t.isOverdue && <span className="text-red-400 font-medium">OVERDUE</span>}
                   {t.isDueToday && !t.isOverdue && <span className="text-amber-400 font-medium">Due today</span>}
+                  {(t.tags || []).includes("agent-assigned") && (
+                    <span className="text-violet-400 flex items-center gap-0.5">
+                      <Bot className="h-2.5 w-2.5" />delegated
+                    </span>
+                  )}
                 </div>
               </div>
-              <span className="text-xs text-muted-foreground w-4 tabular-nums">{idx + 1}</span>
+              {/* Assign to agent dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="h-6 w-6 flex items-center justify-center text-muted-foreground hover:text-violet-400 transition-colors opacity-0 group-hover:opacity-100 shrink-0 mt-0.5">
+                    <Bot className="h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuLabel className="text-xs">Assign to agent</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {agents.slice(0, 10).map((agent: any) => (
+                    <DropdownMenuItem
+                      key={agent.slug}
+                      className="text-xs"
+                      onClick={() => delegateTask.mutate({ taskId: t.id, agentSlug: agent.slug })}
+                    >
+                      <Bot className="h-3 w-3 mr-1.5 opacity-60" />
+                      {agent.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <span className="text-xs text-muted-foreground w-4 tabular-nums mt-0.5">{idx + 1}</span>
             </div>
           ))
         )}
@@ -684,7 +849,9 @@ export default function CommandCenterV2() {
         {/* CENTER: Execution */}
         <div className="space-y-4">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground pl-0.5">Execution</p>
+          <ScoutSuggestionsWidget />
           <TasksWidget />
+          <ReviewQueueWidget />
           <IntelligenceBriefingWidget />
           <div className="[&_.email-compact]:block">
             <EmailTriageWidget />
