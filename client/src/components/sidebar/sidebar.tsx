@@ -22,6 +22,8 @@ import {
   Brain,
   Network,
   ScrollText,
+  GraduationCap,
+  Megaphone,
 } from "lucide-react";
 import NavSection, { NavItemConfig } from "./nav-section";
 import VenturesNavSection from "./ventures-nav-section";
@@ -106,6 +108,8 @@ const navigationSections: Array<{ label: string; items: NavItemConfig[]; default
       { href: "/health-hub", icon: Heart, label: "Health" },
       { href: "/shopping", icon: ShoppingCart, label: "Shopping" },
       { href: "/books", icon: BookOpen, label: "Books" },
+      { href: "/learning", icon: GraduationCap, label: "Learning" },
+      { href: "/brand", icon: Megaphone, label: "Brand" },
       { href: "/people", icon: User, label: "People" },
     ],
   },

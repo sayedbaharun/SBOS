@@ -1267,6 +1267,75 @@ export type InsertBook = z.infer<typeof insertBookSchema>;
 export type Book = typeof books.$inferSelect;
 
 // ----------------------------------------------------------------------------
+// COURSES
+// ----------------------------------------------------------------------------
+
+export const courseStatusEnum = pgEnum('course_status', ['not_started', 'in_progress', 'completed']);
+
+export const courses = pgTable(
+  "courses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    title: text("title").notNull(),
+    instructor: text("instructor"),
+    platform: text("platform"),
+    url: text("url"),
+    status: courseStatusEnum("status").default("not_started").notNull(),
+    progress: integer("progress").default(0).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_courses_status").on(table.status),
+    index("idx_courses_created_at").on(table.createdAt),
+  ]
+);
+
+export const insertCourseSchema = createInsertSchema(courses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCourse = z.infer<typeof insertCourseSchema>;
+export type Course = typeof courses.$inferSelect;
+
+// ----------------------------------------------------------------------------
+// PODCASTS
+// ----------------------------------------------------------------------------
+
+export const podcastStatusEnum = pgEnum('podcast_status', ['listening', 'completed', 'dropped']);
+
+export const podcasts = pgTable(
+  "podcasts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    title: text("title").notNull(),
+    host: text("host"),
+    platform: text("platform"),
+    url: text("url"),
+    status: podcastStatusEnum("status").default("listening").notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_podcasts_status").on(table.status),
+    index("idx_podcasts_created_at").on(table.createdAt),
+  ]
+);
+
+export const insertPodcastSchema = createInsertSchema(podcasts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertPodcast = z.infer<typeof insertPodcastSchema>;
+export type Podcast = typeof podcasts.$inferSelect;
+
+// ----------------------------------------------------------------------------
 // FINANCIAL ACCOUNTS (Net Worth Tracking)
 // ----------------------------------------------------------------------------
 

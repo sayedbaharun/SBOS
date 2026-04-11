@@ -38,6 +38,8 @@ const CalendarPage = lazy(() => import("@/pages/calendar"));
 const WeeklyPlanning = lazy(() => import("@/pages/weekly-planning"));
 const Shopping = lazy(() => import("@/pages/shopping"));
 const Books = lazy(() => import("@/pages/books"));
+const LearningPage = lazy(() => import("@/pages/learning"));
+const BrandPage = lazy(() => import("@/pages/brand"));
 const Finance = lazy(() => import("@/pages/finance"));
 const CapturePage = lazy(() => import("@/pages/capture"));
 const TradingPage = lazy(() => import("@/pages/trading"));
@@ -96,6 +98,8 @@ function Router() {
             <Route path="/weekly" component={WeeklyPlanning} />
             <Route path="/shopping" component={Shopping} />
             <Route path="/books" component={Books} />
+            <Route path="/learning" component={LearningPage} />
+            <Route path="/brand" component={BrandPage} />
             <Route path="/finance" component={Finance} />
             <Route path="/people" component={PeoplePage} />
             <Route path="/capture" component={CapturePage} />

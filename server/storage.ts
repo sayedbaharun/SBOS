@@ -33,6 +33,10 @@ import {
   type InsertShoppingItem,
   type Book,
   type InsertBook,
+  type Course,
+  type InsertCourse,
+  type Podcast,
+  type InsertPodcast,
   type AiAgentPrompt,
   type InsertAiAgentPrompt,
   type ChatMessage,
@@ -104,6 +108,8 @@ import {
   customCategories,
   shoppingItems,
   books,
+  courses,
+  podcasts,
   aiAgentPrompts,
   chatMessages,
   cooChatSessions,
@@ -377,6 +383,20 @@ export interface IStorage {
   createBook(data: InsertBook): Promise<Book>;
   updateBook(id: string, data: Partial<InsertBook>): Promise<Book | undefined>;
   deleteBook(id: string): Promise<void>;
+
+  // Courses
+  getCourses(filters?: { status?: string }): Promise<Course[]>;
+  getCourse(id: string): Promise<Course | undefined>;
+  createCourse(data: InsertCourse): Promise<Course>;
+  updateCourse(id: string, data: Partial<InsertCourse>): Promise<Course | undefined>;
+  deleteCourse(id: string): Promise<void>;
+
+  // Podcasts
+  getPodcasts(filters?: { status?: string }): Promise<Podcast[]>;
+  getPodcast(id: string): Promise<Podcast | undefined>;
+  createPodcast(data: InsertPodcast): Promise<Podcast>;
+  updatePodcast(id: string, data: Partial<InsertPodcast>): Promise<Podcast | undefined>;
+  deletePodcast(id: string): Promise<void>;
 
   // Financial Accounts
   getFinancialAccounts(filters?: { type?: string; isActive?: boolean; isAsset?: boolean }): Promise<FinancialAccount[]>;
@@ -2439,6 +2459,78 @@ export class DBStorage implements IStorage {
 
   async deleteBook(id: string): Promise<void> {
     await this.db.delete(books).where(eq(books.id, id));
+  }
+
+  // ============================================================================
+  // COURSES
+  // ============================================================================
+
+  async getCourses(filters?: { status?: string }): Promise<Course[]> {
+    const conditions = [];
+    if (filters?.status) {
+      conditions.push(eq(courses.status, filters.status as any));
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    return await this.db.select().from(courses).where(whereClause).orderBy(desc(courses.createdAt));
+  }
+
+  async getCourse(id: string): Promise<Course | undefined> {
+    const [course] = await this.db.select().from(courses).where(eq(courses.id, id)).limit(1);
+    return course;
+  }
+
+  async createCourse(data: InsertCourse): Promise<Course> {
+    const [course] = await this.db.insert(courses).values(data).returning();
+    return course;
+  }
+
+  async updateCourse(id: string, updates: Partial<InsertCourse>): Promise<Course | undefined> {
+    const [updated] = await this.db
+      .update(courses)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(courses.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteCourse(id: string): Promise<void> {
+    await this.db.delete(courses).where(eq(courses.id, id));
+  }
+
+  // ============================================================================
+  // PODCASTS
+  // ============================================================================
+
+  async getPodcasts(filters?: { status?: string }): Promise<Podcast[]> {
+    const conditions = [];
+    if (filters?.status) {
+      conditions.push(eq(podcasts.status, filters.status as any));
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    return await this.db.select().from(podcasts).where(whereClause).orderBy(desc(podcasts.createdAt));
+  }
+
+  async getPodcast(id: string): Promise<Podcast | undefined> {
+    const [podcast] = await this.db.select().from(podcasts).where(eq(podcasts.id, id)).limit(1);
+    return podcast;
+  }
+
+  async createPodcast(data: InsertPodcast): Promise<Podcast> {
+    const [podcast] = await this.db.insert(podcasts).values(data).returning();
+    return podcast;
+  }
+
+  async updatePodcast(id: string, updates: Partial<InsertPodcast>): Promise<Podcast | undefined> {
+    const [updated] = await this.db
+      .update(podcasts)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(podcasts.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deletePodcast(id: string): Promise<void> {
+    await this.db.delete(podcasts).where(eq(podcasts.id, id));
   }
 
   // ============================================================================

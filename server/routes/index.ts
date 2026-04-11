@@ -29,6 +29,8 @@ import calendarRoutes from "./calendar";
 import driveRoutes from "./drive";
 import shoppingRoutes from "./shopping";
 import booksRoutes from "./books";
+import coursesRoutes from "./courses";
+import podcastsRoutes from "./podcasts";
 import financeRoutes from "./finance";
 import peopleRoutes from "./people";
 import { strategiesRouter, checklistsRouter } from "./trading";
@@ -294,6 +296,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
   app.use('/api/shopping', shoppingRoutes);
   app.use('/api/books', booksRoutes);
+  app.use('/api/courses', coursesRoutes);
+  app.use('/api/podcasts', podcastsRoutes);
   app.use('/api/finance', financeRoutes);
   app.use('/api/people', peopleRoutes);
 
