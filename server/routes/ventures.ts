@@ -5,8 +5,9 @@
 import { Router, Request, Response } from "express";
 import { storage } from "../storage";
 import { logger } from "../logger";
-import { insertVentureSchema } from "@shared/schema";
+import { insertVentureSchema, insertVentureGoalSchema, insertKeyResultSchema } from "@shared/schema";
 import { z } from "zod";
+import { stageVenturePack, approveVenturePack } from "../agents/venture-pack";
 
 const router = Router();
 
@@ -147,6 +148,203 @@ router.get("/:ventureId/content", async (req: Request, res: Response) => {
   } catch (error) {
     logger.error({ error }, "Error fetching venture content");
     res.status(500).json({ error: "Failed to fetch venture content" });
+  }
+});
+
+// ============================================================================
+// VENTURE GOALS
+// ============================================================================
+
+// List goals for a venture
+router.get("/:ventureId/goals", async (req: Request, res: Response) => {
+  try {
+    const goals = await storage.getVentureGoals(req.params.ventureId);
+    // Attach key results to each goal
+    const withKRs = await Promise.all(
+      goals.map(async (g) => ({ ...g, keyResults: await storage.getKeyResults(g.id) }))
+    );
+    res.json(withKRs);
+  } catch (error) {
+    logger.error({ error }, "Error fetching venture goals");
+    res.status(500).json({ error: "Failed to fetch venture goals" });
+  }
+});
+
+// Create a goal (optionally with key results in body)
+router.post("/:ventureId/goals", async (req: Request, res: Response) => {
+  try {
+    const parse = insertVentureGoalSchema.safeParse({ ...req.body, ventureId: req.params.ventureId });
+    if (!parse.success) return res.status(400).json({ error: parse.error.issues });
+
+    const goal = await storage.createVentureGoal(parse.data);
+
+    // Create key results if provided
+    const krs = req.body.keyResults as Array<{ title: string; targetValue: number; unit: string; projectId?: string }> | undefined;
+    const createdKRs = krs
+      ? await Promise.all(krs.map((kr) => storage.createKeyResult({ ...kr, goalId: goal.id, currentValue: 0 })))
+      : [];
+
+    // Set this as the venture's currentGoalId
+    await storage.updateVenture(req.params.ventureId, { currentGoalId: goal.id } as any);
+
+    res.status(201).json({ ...goal, keyResults: createdKRs });
+  } catch (error) {
+    logger.error({ error }, "Error creating venture goal");
+    res.status(500).json({ error: "Failed to create venture goal" });
+  }
+});
+
+// Update a goal
+router.patch("/goals/:goalId", async (req: Request, res: Response) => {
+  try {
+    const updated = await storage.updateVentureGoal(req.params.goalId, req.body);
+    if (!updated) return res.status(404).json({ error: "Goal not found" });
+    res.json(updated);
+  } catch (error) {
+    logger.error({ error }, "Error updating venture goal");
+    res.status(500).json({ error: "Failed to update venture goal" });
+  }
+});
+
+// Delete a goal
+router.delete("/goals/:goalId", async (req: Request, res: Response) => {
+  try {
+    await storage.deleteVentureGoal(req.params.goalId);
+    res.json({ success: true });
+  } catch (error) {
+    logger.error({ error }, "Error deleting venture goal");
+    res.status(500).json({ error: "Failed to delete venture goal" });
+  }
+});
+
+// List key results for a goal
+router.get("/goals/:goalId/key-results", async (req: Request, res: Response) => {
+  try {
+    const krs = await storage.getKeyResults(req.params.goalId);
+    res.json(krs);
+  } catch (error) {
+    logger.error({ error }, "Error fetching key results");
+    res.status(500).json({ error: "Failed to fetch key results" });
+  }
+});
+
+// Add a key result to a goal
+router.post("/goals/:goalId/key-results", async (req: Request, res: Response) => {
+  try {
+    const parse = insertKeyResultSchema.safeParse({ ...req.body, goalId: req.params.goalId, currentValue: req.body.currentValue ?? 0 });
+    if (!parse.success) return res.status(400).json({ error: parse.error.issues });
+    const kr = await storage.createKeyResult(parse.data);
+    res.status(201).json(kr);
+  } catch (error) {
+    logger.error({ error }, "Error creating key result");
+    res.status(500).json({ error: "Failed to create key result" });
+  }
+});
+
+// Update a key result
+router.patch("/key-results/:krId", async (req: Request, res: Response) => {
+  try {
+    const updated = await storage.updateKeyResult(req.params.krId, req.body);
+    if (!updated) return res.status(404).json({ error: "Key result not found" });
+    res.json(updated);
+  } catch (error) {
+    logger.error({ error }, "Error updating key result");
+    res.status(500).json({ error: "Failed to update key result" });
+  }
+});
+
+// Quick progress update
+router.patch("/key-results/:krId/progress", async (req: Request, res: Response) => {
+  try {
+    const { currentValue } = req.body;
+    if (typeof currentValue !== "number") return res.status(400).json({ error: "currentValue must be a number" });
+    const updated = await storage.updateKeyResultProgress(req.params.krId, currentValue);
+    if (!updated) return res.status(404).json({ error: "Key result not found" });
+    res.json(updated);
+  } catch (error) {
+    logger.error({ error }, "Error updating key result progress");
+    res.status(500).json({ error: "Failed to update progress" });
+  }
+});
+
+// Delete a key result
+router.delete("/key-results/:krId", async (req: Request, res: Response) => {
+  try {
+    await storage.deleteKeyResult(req.params.krId);
+    res.json({ success: true });
+  } catch (error) {
+    logger.error({ error }, "Error deleting key result");
+    res.status(500).json({ error: "Failed to delete key result" });
+  }
+});
+
+// ============================================================================
+// Venture Pack (Drive staging + approval pipeline)
+// ============================================================================
+
+// POST /api/ventures/:id/stage-pack — generate docs in Drive staging folder
+router.post("/:ventureId/stage-pack", async (req: Request, res: Response) => {
+  try {
+    const venture = await storage.getVenture(String(req.params.ventureId));
+    if (!venture) return res.status(404).json({ error: "Venture not found" });
+
+    const questionnaire = req.body ?? {};
+    if (!questionnaire.ventureType) questionnaire.ventureType = venture.domain ?? "other";
+
+    const pack = await stageVenturePack({ venture, questionnaire });
+    res.status(201).json(pack);
+  } catch (error) {
+    logger.error({ error }, "Error staging venture pack");
+    res.status(500).json({ error: "Failed to stage venture pack" });
+  }
+});
+
+// POST /api/ventures/:id/approve-pack — commit staged pack to DB
+router.post("/:ventureId/approve-pack", async (req: Request, res: Response) => {
+  try {
+    const venture = await storage.getVenture(String(req.params.ventureId));
+    if (!venture) return res.status(404).json({ error: "Venture not found" });
+
+    const { goals, projects, vision, mission } = req.body;
+    if (!Array.isArray(goals) || !Array.isArray(projects)) {
+      return res.status(400).json({ error: "goals and projects arrays are required" });
+    }
+
+    const result = await approveVenturePack({
+      ventureId: venture.id,
+      goals,
+      projects,
+      vision,
+      mission,
+    });
+
+    res.status(201).json(result);
+  } catch (error) {
+    logger.error({ error }, "Error approving venture pack");
+    res.status(500).json({ error: "Failed to approve venture pack" });
+  }
+});
+
+// GET /api/ventures/:id/staged-pack — get staged pack status (Drive folder link)
+router.get("/:ventureId/staged-pack", async (req: Request, res: Response) => {
+  try {
+    const venture = await storage.getVenture(String(req.params.ventureId));
+    if (!venture) return res.status(404).json({ error: "Venture not found" });
+
+    // Return staging status from active goal (if any) + venture fields
+    const activeGoal = await storage.getActiveVentureGoal(venture.id);
+    res.json({
+      ventureId: venture.id,
+      ventureName: venture.name,
+      vision: (venture as any).vision ?? null,
+      mission: (venture as any).mission ?? null,
+      currentGoalId: (venture as any).currentGoalId ?? null,
+      activeGoal: activeGoal ?? null,
+      stagingStatus: activeGoal ? "committed" : "none",
+    });
+  } catch (error) {
+    logger.error({ error }, "Error fetching staged pack status");
+    res.status(500).json({ error: "Failed to fetch staged pack status" });
   }
 });
 

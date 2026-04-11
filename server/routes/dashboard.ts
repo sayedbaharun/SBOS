@@ -485,4 +485,130 @@ router.get("/scorecard", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/dashboard/scorecard-history?days=7 — daily scores for sparkline
+router.get("/scorecard-history", async (req: Request, res: Response) => {
+  try {
+    const days = Math.min(parseInt(String(req.query.days || "7")), 30);
+    const history: Array<{ date: string; score: number }> = [];
+
+    const today = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split("T")[0];
+
+      const [healthEntries, dayData] = await Promise.all([
+        storage.getHealthEntries({ dateGte: dateStr, dateLte: dateStr }),
+        storage.getDay(dateStr),
+      ]);
+      const health = healthEntries[0];
+
+      let score = 0;
+      if (health?.sleepHours) score += Math.min((health.sleepHours / 8) * 40, 40);
+      if (health?.energyLevel) score += (health.energyLevel / 5) * 20;
+      if (health?.workoutDone) score += 20;
+      if (dayData?.morningRituals) score += 10;
+      if (dayData?.eveningRituals?.reviewCompleted) score += 10;
+
+      history.push({ date: dateStr, score: Math.round(score) });
+    }
+
+    res.json(history);
+  } catch (error) {
+    console.error("[Dashboard Scorecard History] Error:", error);
+    res.status(500).json({ error: "Failed to fetch scorecard history" });
+  }
+});
+
+// GET /api/dashboard/ventures-v2 — ventures with active goal + key result progress
+router.get("/ventures-v2", async (req: Request, res: Response) => {
+  try {
+    const ventures = await storage.getVentures();
+    const results = await Promise.all(
+      ventures
+        .filter((v) => v.status !== "archived")
+        .map(async (v) => {
+          const activeGoal = await storage.getActiveVentureGoal(v.id);
+          if (!activeGoal) {
+            return { ...v, activeGoal: null, progressPercent: 0, overallStatus: "no_goal", keyResults: [] };
+          }
+          const krs = await storage.getKeyResults(activeGoal.id);
+          const totalProgress = krs.length > 0
+            ? krs.reduce((sum, kr) => sum + (kr.targetValue > 0 ? Math.min(1, kr.currentValue / kr.targetValue) : 0), 0) / krs.length
+            : 0;
+          const overallStatus =
+            krs.every((kr) => kr.status === "completed") ? "completed" :
+            krs.some((kr) => kr.status === "behind") ? "behind" :
+            krs.some((kr) => kr.status === "at_risk") ? "at_risk" : "on_track";
+
+          return {
+            ...v,
+            activeGoal,
+            keyResults: krs,
+            progressPercent: Math.round(totalProgress * 100),
+            overallStatus,
+          };
+        })
+    );
+    res.json(results);
+  } catch (error) {
+    console.error("[Dashboard Ventures V2] Error:", error);
+    res.status(500).json({ error: "Failed to fetch ventures v2" });
+  }
+});
+
+// GET /api/dashboard/financials — budget + spending aggregation
+router.get("/financials", async (req: Request, res: Response) => {
+  try {
+    const projects = await storage.getProjects({});
+    const totalBudget = projects.reduce((sum, p) => sum + (p.budget || 0), 0);
+    const totalSpent = projects.reduce((sum, p) => sum + (p.budgetSpent || 0), 0);
+    const totalRevenue = projects.reduce((sum, p) => sum + (p.revenueGenerated || 0), 0);
+
+    res.json({
+      totalBudget,
+      totalSpent,
+      totalRevenue,
+      netPosition: totalRevenue - totalSpent,
+      projectCount: projects.length,
+      overspentProjects: projects.filter((p) => (p.budgetSpent || 0) > (p.budget || 0)).length,
+    });
+  } catch (error) {
+    console.error("[Dashboard Financials] Error:", error);
+    res.status(500).json({ error: "Failed to fetch financials" });
+  }
+});
+
+// GET /api/dashboard/venture-goals — all active venture goals with key results + venture info
+router.get("/venture-goals", async (req: Request, res: Response) => {
+  try {
+    const data = await storage.getAllActiveGoalsWithProgress();
+    // Compute aggregate progress per goal
+    const enriched = data.map((goal) => {
+      const krs = goal.keyResults;
+      const totalProgress = krs.length > 0
+        ? krs.reduce((sum, kr) => sum + Math.min(1, kr.currentValue / kr.targetValue), 0) / krs.length
+        : 0;
+      const completedKRs = krs.filter((kr) => kr.status === "completed").length;
+      const atRiskKRs = krs.filter((kr) => kr.status === "at_risk").length;
+      const behindKRs = krs.filter((kr) => kr.status === "behind").length;
+
+      const overallStatus =
+        behindKRs > 0 ? "behind" :
+        atRiskKRs > 0 ? "at_risk" :
+        completedKRs === krs.length && krs.length > 0 ? "completed" : "on_track";
+
+      return {
+        ...goal,
+        progressPercent: Math.round(totalProgress * 100),
+        overallStatus,
+      };
+    });
+    res.json(enriched);
+  } catch (error) {
+    console.error("[Dashboard Venture Goals] Error:", error);
+    res.status(500).json({ error: "Failed to fetch venture goals" });
+  }
+});
+
 export default router;

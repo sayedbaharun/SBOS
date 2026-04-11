@@ -787,5 +787,82 @@ export function buildCoreTools(agent: Agent, permissions: string[]): OpenAI.Chat
     });
   }
 
+  // Create venture goal
+  if (availableTools.includes("create_venture_goal") && (permissions.includes("write") || permissions.includes("create_project"))) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "create_venture_goal",
+        description: "Create a monthly or quarterly goal for a venture with a target statement. Always propose goals to the user before creating them.",
+        parameters: {
+          type: "object",
+          properties: {
+            ventureId: { type: "string", description: "The venture UUID to set the goal for" },
+            period: { type: "string", enum: ["monthly", "quarterly", "annual"], description: "Goal time period" },
+            periodStart: { type: "string", description: "Start date YYYY-MM-DD (e.g., first day of the month/quarter)" },
+            periodEnd: { type: "string", description: "End date YYYY-MM-DD (e.g., last day of the month/quarter)" },
+            targetStatement: { type: "string", description: "Clear statement of what success looks like by the end of the period. Be specific and outcome-focused." },
+            keyResults: {
+              type: "array",
+              description: "2-4 measurable key results that prove the goal is achieved",
+              items: {
+                type: "object",
+                properties: {
+                  title: { type: "string", description: "Measurable outcome (e.g., 'Close 3 client contracts')" },
+                  targetValue: { type: "number", description: "Numeric target" },
+                  unit: { type: "string", description: "Unit of measurement (e.g., clients, AED, features, %)" },
+                  projectId: { type: "string", description: "Optional: link to an existing project" },
+                },
+                required: ["title", "targetValue", "unit"],
+              },
+            },
+          },
+          required: ["ventureId", "period", "periodStart", "periodEnd", "targetStatement"],
+        },
+      },
+    });
+  }
+
+  // Create key result
+  if (availableTools.includes("create_key_result") && (permissions.includes("write") || permissions.includes("create_project"))) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "create_key_result",
+        description: "Add a key result to an existing venture goal",
+        parameters: {
+          type: "object",
+          properties: {
+            goalId: { type: "string", description: "The venture goal UUID" },
+            title: { type: "string", description: "Measurable outcome statement" },
+            targetValue: { type: "number", description: "Numeric target value" },
+            unit: { type: "string", description: "Unit of measurement (clients, AED, features, %, etc.)" },
+            projectId: { type: "string", description: "Optional: link to an existing project UUID" },
+          },
+          required: ["goalId", "title", "targetValue", "unit"],
+        },
+      },
+    });
+  }
+
+  // Update key result progress
+  if (availableTools.includes("update_key_result_progress") && (permissions.includes("write") || permissions.includes("create_task"))) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "update_key_result_progress",
+        description: "Update the current progress value of a key result",
+        parameters: {
+          type: "object",
+          properties: {
+            keyResultId: { type: "string", description: "The key result UUID" },
+            currentValue: { type: "number", description: "The updated current value (e.g., 2 if 2 out of 3 clients are closed)" },
+          },
+          required: ["keyResultId", "currentValue"],
+        },
+      },
+    });
+  }
+
   return tools;
 }

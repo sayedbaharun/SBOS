@@ -15,6 +15,7 @@ import ProjectWizard from "@/components/venture-hq/project-wizard";
 import AiAgentConfig from "@/components/venture-hq/ai-agent-config";
 import VentureAiChat from "@/components/venture-hq/venture-ai-chat";
 import VentureContent from "@/components/venture-hq/venture-content";
+import VentureGoals from "@/components/venture-hq/venture-goals";
 
 interface Venture {
   id: string;
@@ -33,7 +34,7 @@ export default function VentureDetail() {
   const ventureId = params?.id;
   const [createProjectModalOpen, setCreateProjectModalOpen] = useState(false);
   const [projectWizardOpen, setProjectWizardOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("projects");
+  const [activeTab, setActiveTab] = useState("goals");
   const [aiSubTab, setAiSubTab] = useState<"chat" | "config">("chat");
 
   // Check if this is a trading venture
@@ -98,6 +99,7 @@ export default function VentureDetail() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
             <TabsList className="inline-flex w-auto">
+              <TabsTrigger value="goals" className="text-xs sm:text-sm">Goals</TabsTrigger>
               <TabsTrigger value="projects" className="text-xs sm:text-sm">Projects</TabsTrigger>
               <TabsTrigger value="phases" className="text-xs sm:text-sm">Phases</TabsTrigger>
               <TabsTrigger value="tasks" className="text-xs sm:text-sm">Tasks</TabsTrigger>
@@ -120,6 +122,10 @@ export default function VentureDetail() {
             </div>
           )}
         </div>
+
+        <TabsContent value="goals">
+          <VentureGoals ventureId={venture.id} />
+        </TabsContent>
 
         <TabsContent value="projects">
           <ProjectsBoard ventureId={venture.id} />

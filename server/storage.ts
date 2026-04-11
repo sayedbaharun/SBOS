@@ -180,6 +180,12 @@ import {
   mantras,
   type IntegrationToken,
   integrationTokens,
+  type VentureGoal,
+  type InsertVentureGoal,
+  ventureGoals,
+  type KeyResult,
+  type InsertKeyResult,
+  keyResults,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { eq, desc, and, or, gte, lte, not, inArray, like, sql, asc, isNull } from "drizzle-orm";
@@ -221,6 +227,23 @@ export interface IStorage {
   createVenture(data: InsertVenture): Promise<Venture>;
   updateVenture(id: string, data: Partial<InsertVenture>): Promise<Venture | undefined>;
   deleteVenture(id: string): Promise<void>;
+
+  // Venture Goals
+  getVentureGoals(ventureId: string): Promise<VentureGoal[]>;
+  getVentureGoal(id: string): Promise<VentureGoal | undefined>;
+  getActiveVentureGoal(ventureId: string): Promise<VentureGoal | undefined>;
+  createVentureGoal(data: InsertVentureGoal): Promise<VentureGoal>;
+  updateVentureGoal(id: string, data: Partial<InsertVentureGoal>): Promise<VentureGoal | undefined>;
+  deleteVentureGoal(id: string): Promise<void>;
+  getAllActiveGoalsWithProgress(): Promise<Array<VentureGoal & { keyResults: KeyResult[]; venture: Pick<Venture, 'id' | 'name' | 'slug' | 'icon' | 'color' | 'status'> }>>;
+
+  // Key Results
+  getKeyResults(goalId: string): Promise<KeyResult[]>;
+  getKeyResult(id: string): Promise<KeyResult | undefined>;
+  createKeyResult(data: InsertKeyResult): Promise<KeyResult>;
+  updateKeyResult(id: string, data: Partial<InsertKeyResult>): Promise<KeyResult | undefined>;
+  updateKeyResultProgress(id: string, currentValue: number): Promise<KeyResult | undefined>;
+  deleteKeyResult(id: string): Promise<void>;
 
   // Projects
   getProjects(filters?: { ventureId?: string; limit?: number; offset?: number }): Promise<Project[]>;
@@ -1010,6 +1033,123 @@ export class DBStorage implements IStorage {
 
   async deleteVenture(id: string): Promise<void> {
     await this.db.delete(ventures).where(eq(ventures.id, id));
+  }
+
+  // ============================================================================
+  // VENTURE GOALS
+  // ============================================================================
+
+  async getVentureGoals(ventureId: string): Promise<VentureGoal[]> {
+    return await this.db
+      .select()
+      .from(ventureGoals)
+      .where(eq(ventureGoals.ventureId, ventureId))
+      .orderBy(desc(ventureGoals.createdAt));
+  }
+
+  async getVentureGoal(id: string): Promise<VentureGoal | undefined> {
+    const [goal] = await this.db.select().from(ventureGoals).where(eq(ventureGoals.id, id));
+    return goal;
+  }
+
+  async getActiveVentureGoal(ventureId: string): Promise<VentureGoal | undefined> {
+    const [goal] = await this.db
+      .select()
+      .from(ventureGoals)
+      .where(and(eq(ventureGoals.ventureId, ventureId), eq(ventureGoals.status, 'active')))
+      .orderBy(desc(ventureGoals.createdAt))
+      .limit(1);
+    return goal;
+  }
+
+  async createVentureGoal(data: InsertVentureGoal): Promise<VentureGoal> {
+    const [goal] = await this.db.insert(ventureGoals).values(data as any).returning();
+    return goal;
+  }
+
+  async updateVentureGoal(id: string, data: Partial<InsertVentureGoal>): Promise<VentureGoal | undefined> {
+    const [updated] = await this.db
+      .update(ventureGoals)
+      .set({ ...(data as any), updatedAt: new Date() })
+      .where(eq(ventureGoals.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteVentureGoal(id: string): Promise<void> {
+    await this.db.delete(ventureGoals).where(eq(ventureGoals.id, id));
+  }
+
+  async getAllActiveGoalsWithProgress(): Promise<Array<VentureGoal & { keyResults: KeyResult[]; venture: Pick<Venture, 'id' | 'name' | 'slug' | 'icon' | 'color' | 'status'> }>> {
+    const activeGoals = await this.db
+      .select()
+      .from(ventureGoals)
+      .where(eq(ventureGoals.status, 'active'))
+      .orderBy(desc(ventureGoals.createdAt));
+
+    const results = await Promise.all(
+      activeGoals.map(async (goal) => {
+        const [krs, venture] = await Promise.all([
+          this.getKeyResults(goal.id),
+          this.getVenture(goal.ventureId),
+        ]);
+        if (!venture) return null;
+        return {
+          ...goal,
+          keyResults: krs,
+          venture: { id: venture.id, name: venture.name, slug: venture.slug, icon: venture.icon, color: venture.color, status: venture.status },
+        };
+      })
+    );
+    return results.filter(Boolean) as Array<VentureGoal & { keyResults: KeyResult[]; venture: Pick<Venture, 'id' | 'name' | 'slug' | 'icon' | 'color' | 'status'> }>;
+  }
+
+  // ============================================================================
+  // KEY RESULTS
+  // ============================================================================
+
+  async getKeyResults(goalId: string): Promise<KeyResult[]> {
+    return await this.db
+      .select()
+      .from(keyResults)
+      .where(eq(keyResults.goalId, goalId))
+      .orderBy(asc(keyResults.createdAt));
+  }
+
+  async getKeyResult(id: string): Promise<KeyResult | undefined> {
+    const [kr] = await this.db.select().from(keyResults).where(eq(keyResults.id, id));
+    return kr;
+  }
+
+  async createKeyResult(data: InsertKeyResult): Promise<KeyResult> {
+    const [kr] = await this.db.insert(keyResults).values(data).returning();
+    return kr;
+  }
+
+  async updateKeyResult(id: string, data: Partial<InsertKeyResult>): Promise<KeyResult | undefined> {
+    const updates: Record<string, unknown> = { ...data, updatedAt: new Date() };
+    // Auto-complete if currentValue >= targetValue
+    if (data.currentValue !== undefined) {
+      const existing = await this.getKeyResult(id);
+      if (existing && data.currentValue >= existing.targetValue && existing.status !== 'completed') {
+        updates.status = 'completed';
+        updates.completedAt = new Date();
+      }
+    }
+    const [updated] = await this.db
+      .update(keyResults)
+      .set(updates)
+      .where(eq(keyResults.id, id))
+      .returning();
+    return updated;
+  }
+
+  async updateKeyResultProgress(id: string, currentValue: number): Promise<KeyResult | undefined> {
+    return this.updateKeyResult(id, { currentValue });
+  }
+
+  async deleteKeyResult(id: string): Promise<void> {
+    await this.db.delete(keyResults).where(eq(keyResults.id, id));
   }
 
   // ============================================================================

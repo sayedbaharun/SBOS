@@ -779,6 +779,41 @@ export async function executeTool(
         }
       }
 
+      case "create_venture_goal": {
+        const { ventureId, period, periodStart, periodEnd, targetStatement, keyResults: krs } = args;
+        const goal = await storage.createVentureGoal({ ventureId, period, periodStart, periodEnd, targetStatement });
+        // Update venture's currentGoalId
+        await storage.updateVenture(ventureId, { currentGoalId: goal.id } as any);
+        // Create key results if provided
+        const createdKRs = krs && Array.isArray(krs)
+          ? await Promise.all(krs.map((kr: any) => storage.createKeyResult({ ...kr, goalId: goal.id, currentValue: 0 })))
+          : [];
+        return {
+          result: `Created venture goal: "${targetStatement}" (${period}, ${periodStart} → ${periodEnd}). ${createdKRs.length} key results created.`,
+          action: { actionType: "create_venture_goal", parameters: args, status: "completed" },
+        };
+      }
+
+      case "create_key_result": {
+        const { goalId, title, targetValue, unit, projectId } = args;
+        const kr = await storage.createKeyResult({ goalId, title, targetValue, unit, projectId, currentValue: 0 });
+        return {
+          result: `Created key result: "${title}" (target: ${targetValue} ${unit})`,
+          action: { actionType: "create_key_result", parameters: args, status: "completed" },
+        };
+      }
+
+      case "update_key_result_progress": {
+        const { keyResultId, currentValue } = args;
+        const updated = await storage.updateKeyResultProgress(keyResultId, currentValue);
+        if (!updated) return { result: `Key result ${keyResultId} not found` };
+        const pct = Math.round((currentValue / updated.targetValue) * 100);
+        return {
+          result: `Updated key result progress: ${currentValue}/${updated.targetValue} ${updated.unit} (${pct}%). Status: ${updated.status}`,
+          action: { actionType: "update_key_result_progress", parameters: args, status: "completed" },
+        };
+      }
+
       default:
         return { result: `Unknown tool: ${toolName}` };
     }

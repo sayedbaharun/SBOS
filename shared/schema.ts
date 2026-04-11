@@ -235,6 +235,26 @@ export const categoryTypeEnum = pgEnum('category_type', [
 
 export const themeEnum = pgEnum('theme', ['light', 'dark', 'system']);
 
+export const goalPeriodEnum = pgEnum('goal_period', [
+  'monthly',
+  'quarterly',
+  'annual'
+]);
+
+export const goalStatusEnum = pgEnum('goal_status', [
+  'active',
+  'completed',
+  'missed',
+  'carried_over'
+]);
+
+export const keyResultStatusEnum = pgEnum('key_result_status', [
+  'on_track',
+  'at_risk',
+  'behind',
+  'completed'
+]);
+
 // ----------------------------------------------------------------------------
 // CORE TABLES (Keep from Aura)
 // ----------------------------------------------------------------------------
@@ -426,6 +446,9 @@ export const ventures = pgTable(
     slug: varchar("slug", { length: 100 }).unique(), // URL-friendly identifier (e.g., "mydub-ai")
     status: ventureStatusEnum("status").default("planning").notNull(),
     oneLiner: text("one_liner"),
+    vision: text("vision"),   // Long-term vision statement
+    mission: text("mission"), // Mission statement
+    currentGoalId: uuid("current_goal_id"), // FK set manually after goal creation (avoids circular ref)
     domain: ventureDomainEnum("domain"), // Deprecated but kept for backward compatibility
     primaryFocus: text("primary_focus"), // Deprecated but kept for backward compatibility
     color: varchar("color", { length: 7 }), // Hex color code
@@ -748,6 +771,12 @@ export const weeks = pgTable(
       avgEnergy?: number;
       avgSleep?: number;
     }>(),
+    // Per-venture weekly targets aligned to active goals
+    ventureTargets: jsonb("venture_targets").$type<{
+      ventureId: string;
+      target: string;
+      keyResultId?: string;
+    }[]>(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
@@ -3985,3 +4014,75 @@ export const insertMantraSchema = createInsertSchema(mantras).omit({
 
 export type Mantra = typeof mantras.$inferSelect;
 export type InsertMantra = z.infer<typeof insertMantraSchema>;
+
+// ============================================================================
+// VENTURE GOALS & KEY RESULTS
+// ============================================================================
+
+export const ventureGoals = pgTable(
+  "venture_goals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ventureId: uuid("venture_id").references(() => ventures.id, { onDelete: "cascade" }).notNull(),
+    period: goalPeriodEnum("period").notNull(),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    targetStatement: text("target_statement").notNull(), // "What does success look like?"
+    status: goalStatusEnum("status").default("active").notNull(),
+    reviewNotes: text("review_notes"),
+    // Drive staging folder ID (set during pack generation, cleared on approval)
+    stagingFolderId: text("staging_folder_id"),
+    stagingStatus: text("staging_status").$type<"pending" | "staged" | "approved" | "rejected">().default("pending"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_venture_goals_venture_id").on(table.ventureId),
+    index("idx_venture_goals_status").on(table.status),
+    index("idx_venture_goals_period").on(table.periodStart, table.periodEnd),
+  ]
+);
+
+export const insertVentureGoalSchema = createInsertSchema(ventureGoals)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    periodStart: dateStringRequiredSchema,
+    periodEnd: dateStringRequiredSchema,
+  });
+
+export type VentureGoal = typeof ventureGoals.$inferSelect;
+export type InsertVentureGoal = z.infer<typeof insertVentureGoalSchema>;
+
+// ----------------------------------------------------------------------------
+
+export const keyResults = pgTable(
+  "key_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    goalId: uuid("goal_id").references(() => ventureGoals.id, { onDelete: "cascade" }).notNull(),
+    title: text("title").notNull(), // Measurable outcome statement
+    targetValue: real("target_value").notNull(),
+    currentValue: real("current_value").default(0).notNull(),
+    unit: text("unit").notNull(), // "clients", "AED", "features", "%"
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    status: keyResultStatusEnum("status").default("on_track").notNull(),
+    completedAt: timestamp("completed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_key_results_goal_id").on(table.goalId),
+    index("idx_key_results_status").on(table.status),
+    index("idx_key_results_project_id").on(table.projectId),
+  ]
+);
+
+export const insertKeyResultSchema = createInsertSchema(keyResults).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  completedAt: true,
+});
+
+export type KeyResult = typeof keyResults.$inferSelect;
+export type InsertKeyResult = z.infer<typeof insertKeyResultSchema>;
