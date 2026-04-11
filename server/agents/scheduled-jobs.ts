@@ -853,24 +853,35 @@ export async function runPipelineHealthCheck(): Promise<PipelineHealthResult> {
   const alerts: string[] = [];
 
   // --- Check 1: Session log ingestion (during active hours 8am-midnight Dubai / UTC+4) ---
+  // Alert only if the most recent session log is >8 hours old during active hours.
+  // This avoids false positives from simply not talking to an agent for a few hours.
   let sessionLogCheck: PipelineHealthResult["checks"]["sessionLogIngestion"];
+  const SESSION_LOG_GAP_HOURS = 8;
   try {
     const nowUTC = new Date();
     const dubaiHour = (nowUTC.getUTCHours() + 4) % 24;
     const isActiveHours = dubaiHour >= 8 && dubaiHour < 24;
 
     if (isActiveHours) {
-      const [{ count: recentCount }] = await database
-        .select({ count: sql`COUNT(*)::int` })
+      const rows = await database
+        .select({ createdAt: sessionLogs.createdAt })
         .from(sessionLogs)
-        .where(gte(sessionLogs.createdAt, new Date(Date.now() - 4 * 60 * 60 * 1000)));
+        .orderBy(sql`${sessionLogs.createdAt} DESC`)
+        .limit(1);
 
-      if (recentCount === 0) {
-        sessionLogCheck = { status: "fail", detail: `No session logs in last 4 hours (active hours, Dubai hour: ${dubaiHour})` };
-        alerts.push(`Session log ingestion: No new session_logs rows in last 4 hours during active hours`);
-        logger.warn({ dubaiHour }, "Pipeline health: No session logs in last 4 hours during active hours");
+      const lastLog = rows[0]?.createdAt;
+      const gapMs = lastLog ? Date.now() - new Date(lastLog).getTime() : Infinity;
+      const gapHours = Math.round(gapMs / 1000 / 3600);
+
+      if (gapMs > SESSION_LOG_GAP_HOURS * 60 * 60 * 1000) {
+        const detail = lastLog
+          ? `Last session log was ${gapHours}h ago (threshold: ${SESSION_LOG_GAP_HOURS}h, Dubai hour: ${dubaiHour})`
+          : `No session logs exist at all`;
+        sessionLogCheck = { status: "fail", detail };
+        alerts.push(`Session log ingestion: No new session_logs rows in last ${SESSION_LOG_GAP_HOURS} hours during active hours`);
+        logger.warn({ dubaiHour, gapHours }, "Pipeline health: Session log gap exceeded threshold");
       } else {
-        sessionLogCheck = { status: "pass", detail: `${recentCount} session log(s) in last 4 hours` };
+        sessionLogCheck = { status: "pass", detail: `Last session log ${gapHours}h ago` };
       }
     } else {
       sessionLogCheck = { status: "skip", detail: `Outside active hours (Dubai hour: ${dubaiHour})` };

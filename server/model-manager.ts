@@ -60,6 +60,23 @@ function getGroqClient(): OpenAI | null {
   return groqClient;
 }
 
+// ============================================================================
+// DIRECT OPENAI FALLBACK (bypasses OpenRouter when it's having a bad day)
+// ============================================================================
+
+let directOpenAIClient: OpenAI | null = null;
+
+function getDirectOpenAIClient(): OpenAI | null {
+  if (!process.env.OPENAI_API_KEY) return null;
+  if (!directOpenAIClient) {
+    directOpenAIClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      baseURL: "https://api.openai.com/v1",
+    });
+  }
+  return directOpenAIClient;
+}
+
 /** Returns true for errors that indicate OpenRouter credits are exhausted */
 function isCreditsExhausted(error: any): boolean {
   return (
@@ -122,6 +139,7 @@ const providerHealth: Record<string, ProviderHealthStatus> = {
   openrouter: createHealthEntry(),
   kilo: createHealthEntry(),
   groq: createHealthEntry(),
+  openai_direct: createHealthEntry(),
   local: createHealthEntry(),
 };
 
@@ -176,6 +194,10 @@ export function getProviderHealth(): Record<string, ProviderHealthStatus & { con
     groq: {
       ...providerHealth.groq,
       configured: !!process.env.GROQ_API_KEY,
+    },
+    openai_direct: {
+      ...providerHealth.openai_direct,
+      configured: !!process.env.OPENAI_API_KEY,
     },
     local: {
       ...providerHealth.local,
@@ -384,7 +406,6 @@ async function localChatCompletion(
 const MODEL_COST_PER_MILLION: Record<string, { input: number; output: number }> = {
   "anthropic/claude-opus-4": { input: 1500, output: 7500 },
   "anthropic/claude-sonnet-4": { input: 300, output: 1500 },
-  "anthropic/claude-3.5-sonnet": { input: 300, output: 1500 },
   "anthropic/claude-3.5-haiku": { input: 80, output: 400 },
   "openai/gpt-4o": { input: 250, output: 1000 },
   "meta-llama/llama-4-scout:free": { input: 15, output: 60 },
@@ -441,10 +462,12 @@ export function logTokenUsage(
 }
 
 // Model configuration with fallback cascade (OpenRouter model names)
+// Free-tier models at the end mean we survive even if OpenRouter credits run out
 export const MODEL_CASCADE = [
   { name: "openai/gpt-4o", maxRetries: 2, description: "Primary - Best quality" },
-  { name: "meta-llama/llama-4-scout:free", maxRetries: 2, description: "Fallback 1 - Fast and efficient" },
-  { name: "anthropic/claude-3.5-sonnet", maxRetries: 1, description: "Fallback 2 - Reliable alternative" },
+  { name: "meta-llama/llama-4-scout:free", maxRetries: 2, description: "Fallback 1 - Free fast model" },
+  { name: "anthropic/claude-sonnet-4", maxRetries: 1, description: "Fallback 2 - Reliable Anthropic" },
+  { name: "google/gemini-2.0-flash-exp:free", maxRetries: 1, description: "Fallback 3 - Free Gemini catch-all" },
 ] as const;
 
 // Available models for selection in UI (via OpenRouter)
@@ -452,7 +475,7 @@ export const AVAILABLE_MODELS = [
   // Anthropic models (newest first)
   { id: "anthropic/claude-opus-4", name: "Claude Opus 4", provider: "Anthropic", description: "Most powerful Claude, best for complex tasks" },
   { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", provider: "Anthropic", description: "Excellent balance of speed and capability" },
-  { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", provider: "Anthropic", description: "Previous gen, still excellent" },
+  { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", provider: "Anthropic", description: "Strong balance of speed and capability" },
   { id: "anthropic/claude-3.5-haiku", name: "Claude 3.5 Haiku", provider: "Anthropic", description: "Fast and affordable Claude" },
   // OpenAI models
   { id: "openai/gpt-4.5-preview", name: "GPT-4.5 Preview", provider: "OpenAI", description: "Latest and most capable GPT model" },
@@ -697,14 +720,14 @@ export async function chatCompletion(
     }
   }
 
-  // ── Kilo Code fallback: retry the selected model via Kilo gateway ──
+  // ── Kilo Code fallback: triggers on ANY cascade failure (not just credit exhaustion) ──
   const kiloFallback = getKiloClient();
-  if (kiloFallback && lastError && isCreditsExhausted(lastError)) {
-    markOpenRouterExhausted(); // Skip OpenRouter for next 5 min
+  if (kiloFallback && lastError) {
+    if (isCreditsExhausted(lastError)) markOpenRouterExhausted();
     const kiloModel = selectedModel;
     const startTime = Date.now();
     try {
-      logger.info({ model: kiloModel }, `OpenRouter credits exhausted — falling back to Kilo gateway`);
+      logger.info({ model: kiloModel }, `OpenRouter cascade exhausted — falling back to Kilo gateway`);
       const response = await kiloFallback.chat.completions.create({
         model: kiloModel,
         messages: params.messages,
@@ -733,50 +756,85 @@ export async function chatCompletion(
       };
     } catch (kiloError: any) {
       recordFailure("kilo", kiloModel);
-      logger.error({ error: kiloError.message, model: kiloModel }, `❌ Kilo fallback also failed`);
+      logger.warn({ error: kiloError.message, model: kiloModel }, `❌ Kilo fallback failed — trying direct OpenAI`);
     }
   }
 
-  // ── Groq fallback: cheap fast-tier LLM as last resort before giving up ──
+  // ── Direct OpenAI fallback: bypasses OpenRouter entirely ──
+  const directOpenAI = getDirectOpenAIClient();
+  if (directOpenAI && lastError) {
+    const directModel = "gpt-4o-mini"; // cheap, reliable, always available
+    const startTime = Date.now();
+    try {
+      logger.info({ model: directModel }, `Trying direct OpenAI (bypassing OpenRouter)`);
+      const response = await directOpenAI.chat.completions.create({
+        model: directModel,
+        messages: params.messages,
+        tools: params.tools,
+        tool_choice: params.tool_choice,
+        temperature: params.temperature ?? 0.7,
+        max_tokens: params.max_tokens,
+        response_format: params.response_format,
+      });
+
+      const latencyMs = Date.now() - startTime;
+      logger.info({ model: directModel, latencyMs, provider: "openai_direct" }, `✅ Direct OpenAI fallback successful`);
+      recordSuccess("openai_direct", latencyMs, directModel);
+      logTokenUsage(`openai/${directModel}`, response.usage, "web_chat");
+
+      return {
+        response,
+        metrics: {
+          modelUsed: `openai/${directModel}`,
+          attemptNumber: totalAttempts + 1,
+          totalAttempts: totalAttempts + 1,
+          success: true,
+          tokensUsed: response.usage?.total_tokens,
+          latencyMs,
+        },
+      };
+    } catch (directError: any) {
+      recordFailure("openai_direct", directModel);
+      logger.warn({ error: directError.message }, `❌ Direct OpenAI fallback also failed`);
+    }
+  }
+
+  // ── Groq fallback: all tiers, last resort before dead letter ──
   const groqFallback = getGroqClient();
   if (groqFallback) {
-    // Only use Groq for fast/mid tier — skip for top-tier models (keep Claude for executive reasoning)
-    const isTopTier = selectedModel.includes("opus") || selectedModel.includes("o1") || selectedModel.includes("gpt-4o") && !selectedModel.includes("mini");
-    if (!isTopTier) {
-      const groqModel = "llama-3.3-70b-versatile";
-      const startTime = Date.now();
-      try {
-        logger.info({ model: groqModel }, `All primary providers failed — falling back to Groq`);
-        const response = await groqFallback.chat.completions.create({
-          model: groqModel,
-          messages: params.messages,
-          tools: params.tools,
-          tool_choice: params.tool_choice,
-          temperature: params.temperature ?? 0.7,
-          max_tokens: params.max_tokens,
-          response_format: params.response_format,
-        });
+    const groqModel = "llama-3.3-70b-versatile";
+    const startTime = Date.now();
+    try {
+      logger.info({ model: groqModel }, `All primary providers failed — falling back to Groq (all tiers)`);
+      const response = await groqFallback.chat.completions.create({
+        model: groqModel,
+        messages: params.messages,
+        tools: params.tools,
+        tool_choice: params.tool_choice,
+        temperature: params.temperature ?? 0.7,
+        max_tokens: params.max_tokens,
+        response_format: params.response_format,
+      });
 
-        const latencyMs = Date.now() - startTime;
-        logger.info({ model: groqModel, latencyMs, provider: "groq" }, `✅ Groq fallback successful`);
-        recordSuccess("groq", latencyMs, groqModel);
-        logTokenUsage(`groq/${groqModel}`, response.usage, "web_chat");
+      const latencyMs = Date.now() - startTime;
+      logger.info({ model: groqModel, latencyMs, provider: "groq" }, `✅ Groq fallback successful`);
+      recordSuccess("groq", latencyMs, groqModel);
+      logTokenUsage(`groq/${groqModel}`, response.usage, "web_chat");
 
-        return {
-          response,
-          metrics: {
-            modelUsed: `groq/${groqModel}`,
-            attemptNumber: totalAttempts + 1,
-            totalAttempts: totalAttempts + 1,
-            success: true,
-            tokensUsed: response.usage?.total_tokens,
-            latencyMs,
-          },
-        };
-      } catch (groqError: any) {
-        recordFailure("groq", groqModel);
-        logger.error({ error: groqError.message, model: groqModel }, `❌ Groq fallback also failed`);
-      }
+      return {
+        response,
+        metrics: {
+          modelUsed: `groq/${groqModel}`,
+          attemptNumber: totalAttempts + 1,
+          totalAttempts: totalAttempts + 1,
+          success: true,
+          tokensUsed: response.usage?.total_tokens,
+          latencyMs,
+        },
+      };
+    } catch (groqError: any) {
+      recordFailure("groq", groqModel);
+      logger.error({ error: groqError.message, model: groqModel }, `❌ Groq fallback also failed`);
     }
   }
 
@@ -786,7 +844,7 @@ export async function chatCompletion(
     totalAttempts,
     modelsAttempted: orderedCascade.map(m => m.name),
     lastError: errorMessage,
-  }, `🚨 All model fallbacks exhausted (including Kilo + Groq)`);
+  }, `🚨 All model fallbacks exhausted (OpenRouter + Kilo + DirectOpenAI + Groq)`);
 
   throw new Error(`All AI models failed after ${totalAttempts} attempts: ${errorMessage}`);
 }
