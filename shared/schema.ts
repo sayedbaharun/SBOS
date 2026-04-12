@@ -4109,3 +4109,75 @@ export const insertDailyBriefSchema = createInsertSchema(dailyBriefs).omit({
 
 export type DailyBrief = typeof dailyBriefs.$inferSelect;
 export type InsertDailyBrief = z.infer<typeof insertDailyBriefSchema>;
+
+// ----------------------------------------------------------------------------
+// APPROVAL POLICIES: Auto-approve rules for agent deliverables
+// Allows low-risk deliverables to skip the manual review queue.
+// ----------------------------------------------------------------------------
+
+export const approvalPolicies = pgTable("approval_policies", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ventureId: uuid("venture_id").references(() => ventures.id, { onDelete: "cascade" }),
+  agentSlug: text("agent_slug"),
+  deliverableType: text("deliverable_type"),
+  maxCostUSD: real("max_cost_usd"),
+  autoApprove: boolean("auto_approve").default(true).notNull(),
+  reason: text("reason"),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertApprovalPolicySchema = createInsertSchema(approvalPolicies);
+export type ApprovalPolicy = typeof approvalPolicies.$inferSelect;
+export type InsertApprovalPolicy = typeof approvalPolicies.$inferInsert;
+
+// ----------------------------------------------------------------------------
+// DECISION AUDIT TRAIL
+// Records every agent tool invocation for traceability ("why did agent X do Y?")
+// ----------------------------------------------------------------------------
+
+export const decisions = pgTable("decisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  agentSlug: text("agent_slug").notNull(),
+  conversationId: uuid("conversation_id"),
+  action: text("action").notNull(),
+  inputs: jsonb("inputs"),
+  reasoning: text("reasoning"),
+  outputs: jsonb("outputs"),
+  tokensUsed: integer("tokens_used"),
+  costUSD: real("cost_usd"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertDecisionSchema = createInsertSchema(decisions);
+export type Decision = typeof decisions.$inferSelect;
+export type InsertDecision = typeof decisions.$inferInsert;
+
+// ----------------------------------------------------------------------------
+// EVENT BUS: Event subscriptions + event log (Track G, Wave 2)
+// ----------------------------------------------------------------------------
+
+export const eventSubscriptions = pgTable("event_subscriptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventType: text("event_type").notNull(),
+  agentSlug: text("agent_slug").notNull(),
+  filterJson: jsonb("filter_json"),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const eventLog = pgTable("event_log", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventType: text("event_type").notNull(),
+  payload: jsonb("payload"),
+  deliveredToAgents: jsonb("delivered_to_agents").$type<string[]>().default([]),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertEventSubscriptionSchema = createInsertSchema(eventSubscriptions);
+export const insertEventLogSchema = createInsertSchema(eventLog);
+export type EventSubscription = typeof eventSubscriptions.$inferSelect;
+export type InsertEventSubscription = typeof eventSubscriptions.$inferInsert;
+export type EventLog = typeof eventLog.$inferSelect;

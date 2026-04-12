@@ -64,6 +64,10 @@ import wikiRoutes from "./wiki";
 import morningBriefRoutes from "./morning-brief";
 import agentWorldRoutes from "./agent-world";
 import nlRoutes from "./nl";
+import approvalPoliciesRoutes from "./approval-policies";
+import decisionsRoutes from "./decisions";
+import eventsRoutes from "./events";
+import eventSubscriptionsRoutes from "./event-subscriptions";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
@@ -274,6 +278,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
   app.use('/api/agent', agentWorldRoutes);
   app.use('/api/nl', nlRoutes);
+
+  // ============================================================================
+  // APPROVAL POLICIES (auto-approve rules for agent deliverables)
+  // ============================================================================
+  app.use('/api/approval-policies', requireAuth, approvalPoliciesRoutes);
+
+  // ============================================================================
+  // DECISION AUDIT TRAIL (every agent tool invocation logged)
+  // ============================================================================
+  app.use('/api/decisions', requireAuth, decisionsRoutes);
+
+  // ============================================================================
+  // EVENT BUS (publish events, manage subscriptions, fan out to agents)
+  // ============================================================================
+  app.use('/api/events', requireAuth, eventsRoutes);
+  app.use('/api/event-subscriptions', requireAuth, eventSubscriptionsRoutes);
 
   // ============================================================================
   // VOICE (Jarvis-style interaction: STT, TTS, voice chat)

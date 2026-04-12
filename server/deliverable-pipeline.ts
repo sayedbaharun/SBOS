@@ -308,6 +308,29 @@ export async function exportToReview(
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Auto-approve policy check — runs BEFORE the Drive/review-queue path.
+  // If a matching policy approves the deliverable, skip the queue entirely.
+  // ---------------------------------------------------------------------------
+  try {
+    const { evaluatePolicy } = await import("./agents/approval-policy-evaluator");
+    const costUSD = (task.result as any)?.costUSD ?? 0;
+    const policyResult = await evaluatePolicy(
+      task.deliverableType || "unknown",
+      task.assignedTo || "",
+      (task as any).ventureId || null,
+      costUSD
+    );
+    if (policyResult.autoApprove) {
+      logger.info({ taskId, policy: policyResult.matchedPolicyId }, "Auto-approving deliverable via policy");
+      const { approveDeliverable } = await import("./routes/review-actions");
+      await approveDeliverable(taskId, `Auto-approved: ${policyResult.reason || "policy match"}`);
+      return {};
+    }
+  } catch (policyErr) {
+    logger.warn({ policyErr, taskId }, "Policy evaluator error — falling through to review queue");
+  }
+
   if (!isDriveConfigured()) {
     return {};
   }

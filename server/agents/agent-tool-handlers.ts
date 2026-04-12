@@ -24,6 +24,7 @@ import { generateProject, generateCode, listGeneratedProjects } from "./tools/co
 import { deploy, getDeploymentHistory, getDeploymentStatus } from "./tools/deployer";
 import { hybridSearch } from "../vector-search";
 import { buildLifeContext } from "./tools/life-context";
+import { recordDecision } from "../decisions/recorder";
 
 // Lazy DB
 let db: any = null;
@@ -201,7 +202,7 @@ export async function executeTool(
           createdByAgentId: agent.id,
         } as any);
 
-        return {
+        const createTaskResult = {
           result: `Created task: "${task.title}" (ID: ${task.id})`,
           action: {
             actionType: "create_task",
@@ -211,6 +212,8 @@ export async function executeTool(
             status: "success",
           },
         };
+        recordDecision({ agentSlug: agent.slug, action: toolName, inputs: args, outputs: { result: createTaskResult.result, taskId: task.id } });
+        return createTaskResult;
       }
 
       case "update_task": {
@@ -407,7 +410,7 @@ export async function executeTool(
           notifyDeliverableSubmitted(deliverableTask.id, args.title, args.type, agent.name, driveUrl, vercelUrl).catch(() => {});
         } catch { /* non-critical */ }
 
-        return {
+        const submitResult = {
           result: `Deliverable submitted for review: "${args.title}" (ID: ${deliverableTask.id}).${driveUrl ? ` View in Drive: ${driveUrl}` : ""} Sayed will review it in the Review Queue.`,
           action: {
             actionType: "submit_deliverable",
@@ -417,6 +420,8 @@ export async function executeTool(
             status: "success",
           },
         };
+        recordDecision({ agentSlug: agent.slug, action: toolName, inputs: { title: args.title, type: args.type }, outputs: { result: submitResult.result, taskId: deliverableTask.id } });
+        return submitResult;
       }
 
       case "create_project": {
@@ -788,19 +793,23 @@ export async function executeTool(
         const createdKRs = krs && Array.isArray(krs)
           ? await Promise.all(krs.map((kr: any) => storage.createKeyResult({ ...kr, goalId: goal.id, currentValue: 0 })))
           : [];
-        return {
+        const goalResult = {
           result: `Created venture goal: "${targetStatement}" (${period}, ${periodStart} → ${periodEnd}). ${createdKRs.length} key results created.`,
           action: { actionType: "create_venture_goal", parameters: args, status: "completed" },
         };
+        recordDecision({ agentSlug: agent.slug, action: toolName, inputs: args, outputs: { result: goalResult.result, goalId: goal.id } });
+        return goalResult;
       }
 
       case "create_key_result": {
         const { goalId, title, targetValue, unit, projectId } = args;
         const kr = await storage.createKeyResult({ goalId, title, targetValue, unit, projectId, currentValue: 0 });
-        return {
+        const krResult = {
           result: `Created key result: "${title}" (target: ${targetValue} ${unit})`,
           action: { actionType: "create_key_result", parameters: args, status: "completed" },
         };
+        recordDecision({ agentSlug: agent.slug, action: toolName, inputs: args, outputs: { result: krResult.result, krId: kr.id } });
+        return krResult;
       }
 
       case "update_key_result_progress": {
