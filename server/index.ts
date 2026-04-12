@@ -68,14 +68,20 @@ app.use(helmet({
 // SECURITY: Rate Limiting - Prevents brute force and DoS attacks
 // ============================================================================
 
-// Global rate limiter - 100 requests per minute per IP
+// Global rate limiter - protects non-API routes from abuse
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: isProduction ? 100 : 1000, // More permissive in development
+  max: isProduction ? 100 : 1000,
   message: { error: 'Too many requests, please try again later' },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.path === '/health' || req.path.startsWith('/@') || req.path.startsWith('/node_modules') || req.path.startsWith('/src'),
+  // Skip /health, dev HMR paths, and /api (has its own limiter below to avoid stacking)
+  skip: (req) =>
+    req.path === '/health' ||
+    req.path.startsWith('/@') ||
+    req.path.startsWith('/node_modules') ||
+    req.path.startsWith('/src') ||
+    req.path.startsWith('/api'),
 });
 
 // Strict rate limiter for authentication endpoints
@@ -87,13 +93,15 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// API rate limiter - more permissive than auth
+// API rate limiter — authenticated users get a bypass (single-user personal app).
+// Unauthenticated traffic (bots, scrapers) is still capped.
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: isProduction ? 60 : 300, // 60 requests/minute in production
+  max: isProduction ? 200 : 500,
   message: { error: 'API rate limit exceeded' },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => !!(req as any).session?.userId,
 });
 
 app.use(globalLimiter);

@@ -348,34 +348,44 @@ router.get("/agent-ready", async (req: Request, res: Response) => {
       return tags.includes("agent-ready");
     });
 
-    // Enrich with venture name and parse suggested agent from notes
-    const enriched = await Promise.all(
+    // Enrich with venture name and parse suggested agent from notes.
+    // Use allSettled so one bad row never kills the whole response.
+    const results = await Promise.allSettled(
       agentReadyTasks.map(async (t: any) => {
-        let ventureName: string | null = null;
-        if (t.ventureId) {
-          const venture = await storage.getVenture(t.ventureId);
-          ventureName = venture?.name || null;
-        }
-
-        // Scout writes notes like: "[Scout] Suggested agent: cto -- reason here"
-        let suggestedAgent: string | null = null;
-        let suggestedReason: string | null = null;
-        if (t.notes) {
-          const match = t.notes.match(/\[Scout\].*?Suggested agent:\s*([a-z0-9-]+)\s*(?:--|—)?\s*(.*)/i);
-          if (match) {
-            suggestedAgent = match[1].trim();
-            suggestedReason = match[2]?.trim() || null;
+        try {
+          let ventureName: string | null = null;
+          if (t.ventureId) {
+            const venture = await storage.getVenture(t.ventureId);
+            ventureName = venture?.name || null;
           }
-        }
 
-        return {
-          ...normalizeTask(t),
-          ventureName,
-          suggestedAgent,
-          suggestedReason,
-        };
+          // Scout writes notes like: "[Scout] Suggested agent: cto -- reason here"
+          let suggestedAgent: string | null = null;
+          let suggestedReason: string | null = null;
+          if (t.notes) {
+            const match = t.notes.match(/\[Scout\].*?Suggested agent:\s*([a-z0-9-]+)\s*(?:--|—)?\s*(.*)/i);
+            if (match) {
+              suggestedAgent = match[1].trim();
+              suggestedReason = match[2]?.trim() || null;
+            }
+          }
+
+          return {
+            ...normalizeTask(t),
+            ventureName,
+            suggestedAgent,
+            suggestedReason,
+          };
+        } catch (rowError) {
+          logger.error({ error: rowError, taskId: t.id }, "Error enriching agent-ready task");
+          return null;
+        }
       })
     );
+
+    const enriched = results
+      .filter((r) => r.status === "fulfilled" && r.value !== null)
+      .map((r) => (r as PromiseFulfilledResult<any>).value);
 
     res.json(enriched);
   } catch (error) {

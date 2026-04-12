@@ -1,7 +1,7 @@
 // SB-OS Service Worker
-const CACHE_NAME = 'sb-os-v4';
-const STATIC_CACHE = 'sbos-static-v4';
-const DYNAMIC_CACHE = 'sbos-dynamic-v4';
+const CACHE_NAME = 'sb-os-v5';
+const STATIC_CACHE = 'sbos-static-v5';
+const DYNAMIC_CACHE = 'sbos-dynamic-v5';
 
 // Assets to cache immediately on install (static assets only, NOT HTML routes)
 const STATIC_ASSETS = [
@@ -68,23 +68,26 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // JS/CSS bundles with hash in filename - cache forever (immutable)
-  if (url.pathname.match(/\.[a-f0-9]{8,}\.(js|css)$/)) {
+  // JS/CSS bundles with Vite content hash in filename - cache forever (immutable).
+  // Vite uses base64url chars (A-Z, a-z, 0-9, _, -) not just hex, so broaden the regex.
+  if (url.pathname.match(/[-_][A-Za-z0-9_-]{6,}\.(js|css)$/)) {
     event.respondWith(cacheFirst(request));
     return;
   }
 
-  // Other static assets - network first with cache fallback
-  event.respondWith(networkFirst(request));
+  // Other static assets - network first with cache fallback.
+  // Do NOT cache /assets/* in the dynamic cache — stale hashed bundles cause MIME errors on redeploy.
+  event.respondWith(networkFirst(request, url.pathname.startsWith('/assets/')));
 });
 
-// Network first strategy (for API calls)
-async function networkFirst(request) {
+// Network first strategy (for API calls and non-immutable assets).
+// skipCache=true prevents stale hashed assets from being stored in the dynamic cache.
+async function networkFirst(request, skipCache = false) {
   try {
     const response = await fetch(request);
 
-    // Cache successful responses
-    if (response.ok) {
+    // Cache successful responses unless caller opted out
+    if (response.ok && !skipCache) {
       const cache = await caches.open(DYNAMIC_CACHE);
       cache.put(request, response.clone());
     }
