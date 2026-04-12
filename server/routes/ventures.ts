@@ -8,6 +8,7 @@ import { logger } from "../logger";
 import { insertVentureSchema, insertVentureGoalSchema, insertKeyResultSchema } from "@shared/schema";
 import { z } from "zod";
 import { stageVenturePack, approveVenturePack } from "../agents/venture-pack";
+import { publishEvent } from "../events/bus";
 
 const router = Router();
 
@@ -261,6 +262,18 @@ router.patch("/key-results/:krId/progress", async (req: Request, res: Response) 
     const updated = await storage.updateKeyResultProgress(req.params.krId, currentValue);
     if (!updated) return res.status(404).json({ error: "Key result not found" });
     res.json(updated);
+
+    // Publish event if KR is now at_risk or behind (fire-and-forget)
+    if (updated.status === "at_risk" || updated.status === "behind") {
+      publishEvent("kr.at_risk", {
+        krId: updated.id,
+        title: updated.title,
+        goalId: updated.goalId,
+        status: updated.status,
+        currentValue: updated.currentValue,
+        targetValue: updated.targetValue,
+      }).catch(() => {});
+    }
   } catch (error) {
     logger.error({ error }, "Error updating key result progress");
     res.status(500).json({ error: "Failed to update progress" });

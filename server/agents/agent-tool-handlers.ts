@@ -209,7 +209,7 @@ export async function executeTool(
             entityType: "task",
             entityId: task.id,
             parameters: args,
-            status: "success",
+            status: "success" as const,
           },
         };
         recordDecision({ agentSlug: agent.slug, action: toolName, inputs: args, outputs: { result: createTaskResult.result, taskId: task.id } });
@@ -417,7 +417,7 @@ export async function executeTool(
             entityType: "agent_task",
             entityId: deliverableTask.id,
             parameters: { title: args.title, type: args.type },
-            status: "success",
+            status: "success" as const,
           },
         };
         recordDecision({ agentSlug: agent.slug, action: toolName, inputs: { title: args.title, type: args.type }, outputs: { result: submitResult.result, taskId: deliverableTask.id } });
@@ -795,7 +795,7 @@ export async function executeTool(
           : [];
         const goalResult = {
           result: `Created venture goal: "${targetStatement}" (${period}, ${periodStart} → ${periodEnd}). ${createdKRs.length} key results created.`,
-          action: { actionType: "create_venture_goal", parameters: args, status: "completed" },
+          action: { actionType: "create_venture_goal", parameters: args, status: "success" as const },
         };
         recordDecision({ agentSlug: agent.slug, action: toolName, inputs: args, outputs: { result: goalResult.result, goalId: goal.id } });
         return goalResult;
@@ -806,7 +806,7 @@ export async function executeTool(
         const kr = await storage.createKeyResult({ goalId, title, targetValue, unit, projectId, currentValue: 0 });
         const krResult = {
           result: `Created key result: "${title}" (target: ${targetValue} ${unit})`,
-          action: { actionType: "create_key_result", parameters: args, status: "completed" },
+          action: { actionType: "create_key_result", parameters: args, status: "success" as const },
         };
         recordDecision({ agentSlug: agent.slug, action: toolName, inputs: args, outputs: { result: krResult.result, krId: kr.id } });
         return krResult;
@@ -819,7 +819,7 @@ export async function executeTool(
         const pct = Math.round((currentValue / updated.targetValue) * 100);
         return {
           result: `Updated key result progress: ${currentValue}/${updated.targetValue} ${updated.unit} (${pct}%). Status: ${updated.status}`,
-          action: { actionType: "update_key_result_progress", parameters: args, status: "completed" },
+          action: { actionType: "update_key_result_progress", parameters: args, status: "success" as const },
         };
       }
 

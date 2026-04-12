@@ -1,9 +1,10 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Sun, Shield } from "lucide-react";
+import { User, Sun, Shield, ShieldCheck } from "lucide-react";
 import ProfileSettings from "@/components/settings/profile-settings";
 import MorningRitualConfig from "@/components/settings/morning-ritual-config";
 import SecuritySettings from "@/components/settings/security-settings";
 import SettingsNav from "@/components/settings/settings-nav";
+import { ApprovalPoliciesManager } from "@/components/approval-policies/approval-policies-manager";
 
 export default function SettingsPage() {
   return (
@@ -26,7 +27,7 @@ export default function SettingsPage() {
 
         {/* Tabs */}
         <Tabs defaultValue="profile" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="profile" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               <span className="hidden sm:inline">Profile</span>
@@ -38,6 +39,10 @@ export default function SettingsPage() {
             <TabsTrigger value="morning" className="flex items-center gap-2">
               <Sun className="h-4 w-4" />
               <span className="hidden sm:inline">Morning Ritual</span>
+            </TabsTrigger>
+            <TabsTrigger value="policies" className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4" />
+              <span className="hidden sm:inline">Agent Policies</span>
             </TabsTrigger>
           </TabsList>
 
@@ -51,6 +56,10 @@ export default function SettingsPage() {
 
           <TabsContent value="morning">
             <MorningRitualConfig />
+          </TabsContent>
+
+          <TabsContent value="policies">
+            <ApprovalPoliciesManager />
           </TabsContent>
         </Tabs>
       </div>

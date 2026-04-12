@@ -22,6 +22,7 @@ import {
   XCircle,
   History,
   Database,
+  ScanLine,
 } from "lucide-react";
 import {
   getAgentIdentity,
@@ -30,6 +31,7 @@ import {
   TIER_LABELS,
   TIER_COLORS,
 } from "@/lib/agent-identity";
+import { DecisionTracePanel } from "@/components/decisions/decision-trace-panel";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -626,6 +628,10 @@ export default function AgentDetailPage() {
             <History className="h-3 w-3" />
             Activity
           </TabsTrigger>
+          <TabsTrigger value="decisions" className="text-[12px] gap-1.5 h-7">
+            <ScanLine className="h-3 w-3" />
+            Decisions
+          </TabsTrigger>
         </TabsList>
 
         <div className="mt-4">
@@ -640,6 +646,9 @@ export default function AgentDetailPage() {
           </TabsContent>
           <TabsContent value="activity" className="mt-0">
             <ActivityTab slug={slug} />
+          </TabsContent>
+          <TabsContent value="decisions" className="mt-0">
+            <DecisionTracePanel agentSlug={slug} />
           </TabsContent>
         </div>
       </Tabs>

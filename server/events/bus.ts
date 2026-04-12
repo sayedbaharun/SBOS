@@ -50,7 +50,7 @@ export async function publishEvent(
     }
 
     // Stamp the depth before delegating
-    const enrichedPayload = { ...payload, __eventDepth: currentDepth + 1 };
+    const enrichedPayload: Record<string, any> = { ...payload, __eventDepth: currentDepth + 1 };
 
     // ── Log the event ────────────────────────────────────────────────────────
     const [logRow] = await database

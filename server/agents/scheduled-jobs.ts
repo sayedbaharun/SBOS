@@ -2467,3 +2467,45 @@ registerJobHandler("free_model_scout", async (_agentId: string, _agentSlug: stri
     logger.warn({ error: err.message }, "free_model_scout: Failed");
   }
 });
+
+// ============================================================================
+// SCAN BACKLOG — Task Automation Scout tags tasks as 'agent-ready'
+// Runs 3x/day (8am, 1pm, 6pm Dubai). After the scout runs, publishes
+// task.agent_ready events for each recently-tagged task.
+// ============================================================================
+
+/**
+ * Scan Backlog — Task Automation Scout evaluates all venture task backlogs,
+ * tags actionable tasks with 'agent-ready', then publishes events for each.
+ */
+registerJobHandler("scan_backlog", async (agentId: string, agentSlug: string) => {
+  const prompt = `Scan all venture task backlogs. For each todo/in_progress task, evaluate if an existing AI agent could carry it out autonomously. Tag matching tasks with 'agent-ready' using the update_task tool and note which agent should handle it in the task notes. Focus on tasks that are clearly defined and don't require human judgment or external access.`;
+
+  const result = await executeAgentChat(agentSlug, prompt, "scheduler");
+  logger.info({ agentSlug, response: result?.response?.slice(0, 200) }, "scan_backlog: scout run complete");
+
+  // After scan completes, publish events for agent-ready tasks updated in last 10 minutes
+  try {
+    const { publishEvent } = await import("../events/bus");
+    const { storage } = await import("../storage");
+    const agentReadyTasks = await storage.getTasks({ limit: 20 } as any);
+    const recentlyTagged = agentReadyTasks.filter((t: any) => {
+      if (!t.tags || !Array.isArray(t.tags)) return false;
+      if (!t.tags.includes("agent-ready")) return false;
+      // Only tasks updated in the last 10 minutes
+      const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000);
+      return t.updatedAt && new Date(t.updatedAt) > tenMinAgo;
+    });
+    for (const task of recentlyTagged.slice(0, 5)) {
+      await publishEvent("task.agent_ready", {
+        taskId: task.id,
+        title: task.title,
+        ventureId: task.ventureId,
+        priority: task.priority,
+      });
+    }
+    logger.info({ count: recentlyTagged.length }, "scan_backlog: published task.agent_ready events");
+  } catch (err) {
+    logger.warn({ err }, "[scan_backlog] Failed to publish agent-ready events");
+  }
+});

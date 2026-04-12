@@ -475,6 +475,11 @@ app.use((req, res, next) => {
         log('Agent template sync skipped: ' + String(syncError));
       }
 
+      // Seed default event subscriptions (fire-and-forget — non-blocking)
+      import('./events/seed-subscriptions').then(({ seedDefaultEventSubscriptions }) => {
+        seedDefaultEventSubscriptions();
+      }).catch(() => {});
+
       // Initialize agent scheduler (proactive agent execution — reads schedules from DB)
       const { initializeScheduler } = await import('./agents/agent-scheduler');
       await initializeScheduler();

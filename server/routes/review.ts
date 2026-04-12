@@ -16,6 +16,7 @@ import {
   requestChanges,
 } from "./review-actions";
 import { recordReviewFeedback } from "../review-feedback";
+import { publishEvent } from "../events/bus";
 
 const router = Router();
 
@@ -165,6 +166,14 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
 router.post("/:id/reject", async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
+
+    // Fetch task metadata before rejection so we can include it in the event
+    const database = await getDb();
+    const [taskRow] = await database
+      .select({ assignedTo: agentTasks.assignedTo, deliverableType: agentTasks.deliverableType })
+      .from(agentTasks)
+      .where(eq(agentTasks.id, id));
+
     const result = await rejectDeliverable(id, req.body?.feedback);
 
     if (!result.success) {
@@ -174,6 +183,14 @@ router.post("/:id/reject", async (req: Request, res: Response) => {
     recordReviewFeedback(id, req.body?.feedback || "", "rejected").catch((e) =>
       logger.warn({ error: e }, "Failed to record review feedback")
     );
+
+    // Publish event for agent learning (fire-and-forget)
+    publishEvent("review.rejected", {
+      agentTaskId: id,
+      feedback: req.body?.feedback || "",
+      agentSlug: taskRow?.assignedTo ?? "",
+      deliverableType: taskRow?.deliverableType ?? "",
+    }).catch(() => {});
 
     res.json({ success: true });
   } catch (error) {
