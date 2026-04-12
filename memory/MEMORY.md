@@ -64,32 +64,19 @@
 
 → Full stack: `memory/context/tools-and-stack.md`
 
-## Current Focus (Phase 11 — 2026-03-30)
+## Current Focus (2026-04-11)
 
-### What shipped today
-- **Groq as 4th LLM provider** — `server/groq-client.ts` + model-manager + cerebras cascade (Cerebras → Groq → Ollama)
-- **Memory system upgraded**: Gemini Embedding 001, A-MAC quality gate, Ebbinghaus decay, inline dedup, proactive surfacing (`POST /api/memory/proactive`)
-- **README rewritten** — 4 Mermaid diagrams, accurate stats (432 TS files, 72 tables, 403 endpoints, 18 agents)
-- **Docs restructured** — flat `docs/*.md` → `docs/system/`, `docs/reference/`, `docs/guides/`, `docs/ventures/`, `docs/archive/`
-- **Shared memory bridge** — `memory/` in SBOS root, `.claude/CLAUDE.md` reads it on session start
-- **Knowledge Hub file processing upgraded** (`1a5548d`) — Gemini 2.5 Flash replaces GPT-4o for image OCR (94% cheaper) + scanned PDF vision path added. `server/file-extraction.ts`.
+### What shipped (2026-04-11)
+- **Model cascade bulletproofed** — 8-shot fallback: OpenRouter → Kilo → direct OpenAI → Groq. `OPENAI_API_KEY` added to Railway. Deprecated `claude-3.5-sonnet` removed. Commit `294f34b`.
+- **Personal Brand + Learning pages** — `/brand` + `/learning` routes. New `courses` + `podcasts` DB tables. Sidebar links added.
+- **Notion export imported** — 53 books, 7 Knowledge Base docs (trading strategy, command board, brand prompt, quotes, investors, trading journal, project taxonomy), 4 Qdrant memory files. Source deleted.
+- **Command Center V4** — Full 3-column CEO dashboard (Your Day | Execution | Business Health). Commits `0477abb` + `d6dc93e`.
+- **Venture OKR system** — `venture_goals` + `key_results` tables, Goals tab on venture detail, venture pack Drive staging, OKR agent tools.
+- **Daily Operating Workflow** — Scout suggestions banner, per-task agent delegation, Review Queue re-added, daily_briefing counts agent-ready tasks + pending reviews.
 
-### Memory system health (verified 2026-03-30)
-- Qdrant: ✅ 176 raw_memories, 0 compacted, 39 entity_index
-- Gemini Embedding 001: ✅ 1536-dim, 8 task types
-- Quality gate: ✅ "ok" → rejected, real content → stored
-- Pinecone: ✅ configured, sync running (was 0 records, backfill triggered)
-- Proactive surfacer: ✅ `POST /api/memory/proactive` returning results
-- Ingest-markdown bridge: ✅ `POST /api/memory/ingest-markdown` accepting content
-- LLM providers: OpenRouter ✅ · Kilo ✅ · Groq ✅ (configured) · Local ❌ (not set up)
-
-## Open Threads
-
-- [ ] Pinecone backfill — sync triggered, confirm record count > 0 on next status check
-- [ ] Populate DB with real ventures/projects/tasks (DB wiped 2026-03-30 — testing with real data)
-- [ ] ArabMoneyOfficial and MyDub.ai project files in memory/projects/ are sparse — fill in when ready
-- [ ] Verify Knowledge Hub file upload on Railway: check `metadata.processingModel = "gemini-2.5-flash"` after uploading image/PDF
-- [x] OpenRouter account: sb@revolvgroup.com
-- [x] CLAUDE.md numbers fixed: 72 tables, 35 pages, 403 endpoints, 18 agents
-- [x] Groq API key added to Railway
-- [x] Gemini 2.5 Flash for file extraction (commit `1a5548d`)
+### Open Threads
+- [ ] Verify `db:push` on Railway — `venture_goals` + `key_results` tables may need push
+- [ ] Test venture pack end-to-end: stage → Drive docs → approve → DB records created
+- [ ] Populate DB with real ventures/projects/tasks (using real data since 2026-03-30 wipe)
+- [x] Model cascade — 8 shots, 5 providers, effectively bulletproof
+- [x] Notion export fully imported + source deleted
