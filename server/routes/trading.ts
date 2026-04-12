@@ -235,4 +235,45 @@ checklistsRouter.delete("/:id", async (req: Request, res: Response) => {
   }
 });
 
-export { strategiesRouter, checklistsRouter };
+// ============================================================================
+// ECONOMIC CALENDAR ROUTER
+// ============================================================================
+
+// In-memory cache — 1 hour TTL
+let calendarCache: { data: unknown[]; fetchedAt: number } | null = null;
+const CACHE_TTL_MS = 60 * 60 * 1000;
+
+const calendarRouter = Router();
+
+calendarRouter.get("/", async (req: Request, res: Response) => {
+  try {
+    if (calendarCache && Date.now() - calendarCache.fetchedAt < CACHE_TTL_MS) {
+      return res.json(calendarCache.data);
+    }
+
+    const response = await fetch(
+      "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; SB-OS/1.0)",
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`ForexFactory returned ${response.status}`);
+    }
+
+    const raw = (await response.json()) as unknown[];
+    calendarCache = { data: raw, fetchedAt: Date.now() };
+    res.json(raw);
+  } catch (error) {
+    logger.error({ error }, "Error fetching economic calendar");
+    // Degrade gracefully — return cached data if available, else empty
+    res.json(calendarCache?.data ?? []);
+  }
+});
+
+export { strategiesRouter, checklistsRouter, calendarRouter };

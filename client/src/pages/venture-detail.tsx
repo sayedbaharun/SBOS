@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useRoute, useLocation } from "wouter";
-import { Plus, Bot, Settings, Sparkles, ArrowRight } from "lucide-react";
+import { useRoute } from "wouter";
+import { Plus, Bot, Settings, Sparkles, TrendingUp } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import VentureDetailHeader from "@/components/venture-hq/venture-detail-header";
 import ProjectsBoard from "@/components/venture-hq/projects-board";
 import VenturePhasesList from "@/components/venture-hq/venture-phases-list";
@@ -16,6 +16,8 @@ import AiAgentConfig from "@/components/venture-hq/ai-agent-config";
 import VentureAiChat from "@/components/venture-hq/venture-ai-chat";
 import VentureContent from "@/components/venture-hq/venture-content";
 import VentureGoals from "@/components/venture-hq/venture-goals";
+import TradingHub from "@/components/trading/trading-hub";
+import TradingAiChat from "@/components/trading/trading-ai-chat";
 
 interface Venture {
   id: string;
@@ -30,7 +32,6 @@ interface Venture {
 
 export default function VentureDetail() {
   const [, params] = useRoute("/ventures/:id");
-  const [, navigate] = useLocation();
   const ventureId = params?.id;
   const [createProjectModalOpen, setCreateProjectModalOpen] = useState(false);
   const [projectWizardOpen, setProjectWizardOpen] = useState(false);
@@ -100,6 +101,12 @@ export default function VentureDetail() {
           <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
             <TabsList className="inline-flex w-auto">
               <TabsTrigger value="goals" className="text-xs sm:text-sm">Goals</TabsTrigger>
+              {isTradingVenture(venture) && (
+                <TabsTrigger value="trading-hub" className="text-xs sm:text-sm whitespace-nowrap flex items-center gap-1">
+                  <TrendingUp className="h-3 w-3" />
+                  Trading Hub
+                </TabsTrigger>
+              )}
               <TabsTrigger value="projects" className="text-xs sm:text-sm">Projects</TabsTrigger>
               <TabsTrigger value="phases" className="text-xs sm:text-sm">Phases</TabsTrigger>
               <TabsTrigger value="tasks" className="text-xs sm:text-sm">Tasks</TabsTrigger>
@@ -127,6 +134,12 @@ export default function VentureDetail() {
           <VentureGoals ventureId={venture.id} />
         </TabsContent>
 
+        {isTradingVenture(venture) && (
+          <TabsContent value="trading-hub">
+            <TradingHub ventureId={venture.id} />
+          </TabsContent>
+        )}
+
         <TabsContent value="projects">
           <ProjectsBoard ventureId={venture.id} />
         </TabsContent>
@@ -149,19 +162,10 @@ export default function VentureDetail() {
 
         <TabsContent value="ai-agent" className="space-y-4">
           {isTradingVenture(venture) ? (
-            /* Trading ventures use the specialized Trading Agent */
-            <Card>
-              <CardContent className="p-8 text-center space-y-4">
-                <Bot className="h-16 w-16 mx-auto text-muted-foreground" />
-                <h3 className="text-xl font-semibold">Specialized Trading Agent Available</h3>
-                <p className="text-muted-foreground max-w-md mx-auto">
-                  For trading, use the dedicated Trading Agent with advanced features like position sizing,
-                  trade logging, performance analytics, and psychology coaching based on legendary traders.
-                </p>
-                <Button onClick={() => navigate("/trading")} size="lg">
-                  <ArrowRight className="h-4 w-4 mr-2" />
-                  Go to Trading Agent
-                </Button>
+            /* Trading ventures use the specialized Trading AI directly */
+            <Card className="h-[600px]">
+              <CardContent className="p-6 h-full">
+                <TradingAiChat />
               </CardContent>
             </Card>
           ) : (
