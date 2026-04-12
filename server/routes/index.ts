@@ -61,6 +61,9 @@ import whoopRoutes from "./whoop";
 import debriefRoutes from "./debrief";
 import graphRoutes from "./graph";
 import wikiRoutes from "./wiki";
+import morningBriefRoutes from "./morning-brief";
+import agentWorldRoutes from "./agent-world";
+import nlRoutes from "./nl";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
@@ -225,6 +228,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // CORE ENTITIES
   // ============================================================================
   app.use('/api/dashboard', dashboardRoutes);
+  app.use('/api/dashboard', morningBriefRoutes);
   app.use('/api/ventures', venturesRoutes);
   app.use('/api/venture-lab', ventureLabRoutes);
   app.use('/api/projects', projectsRoutes);
@@ -264,6 +268,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/memory', memoryRoutes);
   app.use('/api/graph', graphRoutes);
   app.use('/api/wiki', wikiRoutes);
+
+  // ============================================================================
+  // AI-NATIVE INTERFACES (world-state snapshot + NL query surface)
+  // ============================================================================
+  app.use('/api/agent', agentWorldRoutes);
+  app.use('/api/nl', nlRoutes);
 
   // ============================================================================
   // VOICE (Jarvis-style interaction: STT, TTS, voice chat)

@@ -4086,3 +4086,26 @@ export const insertKeyResultSchema = createInsertSchema(keyResults).omit({
 
 export type KeyResult = typeof keyResults.$inferSelect;
 export type InsertKeyResult = z.infer<typeof insertKeyResultSchema>;
+
+// ----------------------------------------------------------------------------
+// DAILY BRIEFS: Agent-written morning brief, pre-computed at 7am Dubai
+// ----------------------------------------------------------------------------
+
+export const dailyBriefs = pgTable("daily_briefs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  date: text("date").notNull().unique(),                        // YYYY-MM-DD Dubai
+  headline: text("headline").notNull(),                         // 1-sentence lead
+  bullets: jsonb("bullets").$type<string[]>().default([]),      // 3-5 bullet points
+  agentReadyCount: integer("agent_ready_count").default(0),
+  reviewPendingCount: integer("review_pending_count").default(0),
+  generatedAt: timestamp("generated_at").defaultNow().notNull(),
+  agentSlug: text("agent_slug"),                                // which agent wrote it
+});
+
+export const insertDailyBriefSchema = createInsertSchema(dailyBriefs).omit({
+  id: true,
+  generatedAt: true,
+});
+
+export type DailyBrief = typeof dailyBriefs.$inferSelect;
+export type InsertDailyBrief = z.infer<typeof insertDailyBriefSchema>;

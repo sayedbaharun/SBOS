@@ -15,6 +15,7 @@ import {
   rejectDeliverable,
   requestChanges,
 } from "./review-actions";
+import { recordReviewFeedback } from "../review-feedback";
 
 const router = Router();
 
@@ -170,6 +171,10 @@ router.post("/:id/reject", async (req: Request, res: Response) => {
       return res.status(404).json({ error: result.error });
     }
 
+    recordReviewFeedback(id, req.body?.feedback || "", "rejected").catch((e) =>
+      logger.warn({ error: e }, "Failed to record review feedback")
+    );
+
     res.json({ success: true });
   } catch (error) {
     logger.error({ error }, "Error rejecting deliverable");
@@ -192,6 +197,10 @@ router.post("/:id/request-changes", async (req: Request, res: Response) => {
     if (!result.success) {
       return res.status(404).json({ error: result.error });
     }
+
+    recordReviewFeedback(id, req.body?.feedback || "", "changes_requested").catch((e) =>
+      logger.warn({ error: e }, "Failed to record review feedback")
+    );
 
     res.json({ success: true });
   } catch (error) {

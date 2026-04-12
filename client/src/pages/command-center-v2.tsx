@@ -4,9 +4,11 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { IntelligenceBriefingWidget } from "@/components/cockpit/intelligence-briefing-widget";
+import { MorningBriefWidget } from "@/components/cockpit/morning-brief-widget";
 import { EmailTriageWidget } from "@/components/cockpit/email-triage-widget";
 import { AgentPulseWidget } from "@/components/cockpit/agent-pulse-widget";
 import { ReviewQueueWidget } from "@/components/cockpit/review-queue-widget";
+import { NlQueryBar } from "@/components/nl-query-bar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -770,6 +772,11 @@ export default function CommandCenterV2() {
           </div>
         </div>
 
+        {/* NL Query Bar */}
+        <div className="flex-1 max-w-lg mx-4">
+          <NlQueryBar />
+        </div>
+
         {/* Readiness ring */}
         <div className="flex items-center gap-3">
           <div className="text-right">
@@ -841,6 +848,7 @@ export default function CommandCenterV2() {
         {/* LEFT: Your Day */}
         <div className="space-y-4">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground pl-0.5">Your Day</p>
+          <MorningBriefWidget />
           <ScheduleWidget />
           <InboxWidget />
           <WeeklyPulseWidget />

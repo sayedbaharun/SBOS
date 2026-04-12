@@ -244,6 +244,64 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
     // Telegram not configured — skip
   }
 
+  // Persist brief to daily_briefs table for CC V4 morning brief widget
+  try {
+    const { dailyBriefs } = await import("@shared/schema");
+    const { sql: sqlTag } = await import("drizzle-orm");
+    const briefDb = await getDb();
+    const todayDate = today; // already computed as getUserDate() result
+    await briefDb.insert(dailyBriefs).values({
+      date: todayDate,
+      headline: briefingData.oneThing || "Your day is briefed — check Telegram for details.",
+      bullets: [
+        briefingData.taskSummary,
+        briefingData.urgentCount > 0 ? `${briefingData.urgentCount} urgent items` : null,
+        (() => {
+          try {
+            const allTasksForBrief: any[] = (database as any)._latestTasks || [];
+            const doneSt = new Set(["done", "cancelled", "archived"]);
+            const cnt = allTasksForBrief.filter((t: any) => {
+              if (doneSt.has(t.status)) return false;
+              const tags = Array.isArray(t.tags) ? t.tags : (t.tags ? String(t.tags).split(",").map((s: string) => s.trim()) : []);
+              return tags.includes("agent-ready");
+            }).length;
+            return cnt > 0 ? `${cnt} tasks ready for agents` : null;
+          } catch { return null; }
+        })(),
+      ].filter(Boolean) as string[],
+      agentReadyCount: (() => {
+        try {
+          const allT = (database as any)._latestTasks || [];
+          const doneSt = new Set(["done", "cancelled", "archived"]);
+          return allT.filter((t: any) => {
+            if (doneSt.has(t.status)) return false;
+            const tags = Array.isArray(t.tags) ? t.tags : (t.tags ? String(t.tags).split(",").map((s: string) => s.trim()) : []);
+            return tags.includes("agent-ready");
+          }).length;
+        } catch { return 0; }
+      })(),
+      reviewPendingCount: (() => {
+        try {
+          // agentQueueSection was computed above; use its pendingReviewCount if accessible
+          // We re-derive a rough count from the agentQueueSection string
+          const m = agentQueueSection.match(/(\d+) deliverable/);
+          return m ? parseInt(m[1], 10) : 0;
+        } catch { return 0; }
+      })(),
+      agentSlug,
+    }).onConflictDoUpdate({
+      target: dailyBriefs.date,
+      set: {
+        headline: sqlTag`excluded.headline`,
+        bullets: sqlTag`excluded.bullets`,
+        generatedAt: sqlTag`now()`,
+      },
+    });
+    logger.info({ date: todayDate }, "Daily brief persisted to daily_briefs table");
+  } catch (e: any) {
+    logger.warn({ error: e.message }, "Failed to persist daily brief");
+  }
+
   logger.info(
     { agentSlug, tokensUsed: result.tokensUsed },
     "Daily briefing generated (with integrated intelligence)"
