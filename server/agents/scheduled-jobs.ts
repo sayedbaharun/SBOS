@@ -306,6 +306,15 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
     { agentSlug, tokensUsed: result.tokensUsed },
     "Daily briefing generated (with integrated intelligence)"
   );
+
+  // Publish event for reactive subscriptions
+  try {
+    const { publishEvent } = await import("../events/bus");
+    await publishEvent("brief.morning.ready", {
+      summary: result.response.slice(0, 500),
+      date: today,
+    });
+  } catch { /* non-fatal */ }
 });
 
 /**
@@ -628,6 +637,14 @@ registerJobHandler("evening_review", async (_agentId: string, agentSlug: string)
   }
 
   logger.info({ agentSlug }, "Evening review sent");
+
+  // Publish event for reactive subscriptions
+  try {
+    const { publishEvent } = await import("../events/bus");
+    await publishEvent("brief.evening.ready", {
+      date: today,
+    });
+  } catch { /* non-fatal */ }
 });
 
 /**
@@ -2228,6 +2245,14 @@ registerJobHandler("github_actions_sha_audit", async (_agentId: string, _agentSl
 
   if (issues.length === 0) {
     logger.info("github_actions_sha_audit: All workflow actions are SHA-pinned ✓");
+    // Publish event even when clean — subscribers need to know the audit ran
+    try {
+      const { publishEvent } = await import("../events/bus");
+      await publishEvent("audit.security.completed", {
+        unpinnedCount: 0,
+        date: getUserDate(),
+      });
+    } catch { /* non-fatal */ }
     return;
   }
 
@@ -2254,6 +2279,15 @@ registerJobHandler("github_actions_sha_audit", async (_agentId: string, _agentSl
   } catch (err: any) {
     logger.warn({ error: err.message }, "github_actions_sha_audit: Could not send Telegram alert");
   }
+
+  // Publish event for reactive subscriptions
+  try {
+    const { publishEvent } = await import("../events/bus");
+    await publishEvent("audit.security.completed", {
+      unpinnedCount: issues.length,
+      date: getUserDate(),
+    });
+  } catch { /* non-fatal */ }
 });
 
 // ============================================================================
@@ -2508,4 +2542,12 @@ registerJobHandler("scan_backlog", async (agentId: string, agentSlug: string) =>
   } catch (err) {
     logger.warn({ err }, "[scan_backlog] Failed to publish agent-ready events");
   }
+});
+
+// ============================================================================
+// PROACTIVE MORNING LOOP — Auto-delegates agent-ready tasks at 7:30am Dubai
+// ============================================================================
+registerJobHandler("proactive_morning_loop", async (_agentId: string, _agentSlug: string) => {
+  const { runProactiveMorningLoop } = await import("./proactive-loop");
+  await runProactiveMorningLoop();
 });

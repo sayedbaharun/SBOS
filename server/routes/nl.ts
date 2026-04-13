@@ -118,6 +118,9 @@ router.post("/query", async (req: Request, res: Response) => {
 When the user asks a question, call answer_question with a clear, direct answer.
 When the user wants to create a task, call create_task with the task details.
 When the user asks about their current state or what's happening, call get_world_state.
+When the user wants to delegate a task to an agent, call delegate_task with the task ID and agent slug.
+When the user wants to update progress on a key result or metric, call update_kr_progress.
+When the user wants to create a goal or OKR for a venture, call create_venture_goal.
 
 CURRENT WORLD STATE:
 ${worldState}
@@ -208,6 +211,91 @@ Be concise. Use specific data from the world state when answering questions.`;
             answer: `Could not create task: ${createErr.message}`,
             action: null,
           });
+        }
+      }
+
+      if (toolName === "delegate_task") {
+        const { taskId, agentSlug } = toolArgs;
+        if (!taskId || !agentSlug) {
+          return res.json({ answer: "Need both a task ID and an agent slug to delegate.", action: null });
+        }
+        try {
+          const { delegateFromUser } = await import("../agents/delegation-engine");
+          const storage = await getStorage();
+          const task = await storage.getTask(String(taskId));
+          if (!task) return res.json({ answer: `Task ${taskId} not found.`, action: null });
+          const result = await delegateFromUser(String(agentSlug), task.title, task.notes || '', 2);
+          if (result.error) return res.json({ answer: `Delegation failed: ${result.error}`, action: null });
+          // Mark task in_progress + agent-assigned
+          const existingTags = Array.isArray(task.tags)
+            ? task.tags
+            : task.tags
+            ? String(task.tags).split(',').map((s: string) => s.trim())
+            : [];
+          await storage.updateTask(String(taskId), {
+            status: 'in_progress' as const,
+            tags: [...existingTags, 'agent-assigned'],
+          });
+          return res.json({
+            answer: `Task "${task.title}" delegated to ${agentSlug}.`,
+            action: { type: "delegate_task", payload: { taskId, agentSlug, agentTaskId: result.taskId } },
+          });
+        } catch (err: any) {
+          return res.json({ answer: `Delegation error: ${err.message}`, action: null });
+        }
+      }
+
+      if (toolName === "update_kr_progress") {
+        const { keyResultId, currentValue } = toolArgs;
+        if (!keyResultId || currentValue === undefined) {
+          return res.json({ answer: "Need keyResultId and currentValue to update progress.", action: null });
+        }
+        try {
+          const storage = await getStorage();
+          const updated = await storage.updateKeyResultProgress(String(keyResultId), Number(currentValue));
+          if (!updated) return res.json({ answer: `Key result ${keyResultId} not found.`, action: null });
+          return res.json({
+            answer: `Key result progress updated to ${currentValue}${updated.unit ? ' ' + updated.unit : ''}.`,
+            action: { type: "update_kr_progress", payload: { keyResultId, currentValue, status: updated.status } },
+          });
+        } catch (err: any) {
+          return res.json({ answer: `KR update error: ${err.message}`, action: null });
+        }
+      }
+
+      if (toolName === "create_venture_goal") {
+        const { ventureId, period, periodStart, periodEnd, targetStatement, keyResults = [] } = toolArgs;
+        if (!ventureId || !period || !periodStart || !periodEnd || !targetStatement) {
+          return res.json({ answer: "Missing required fields to create a venture goal.", action: null });
+        }
+        try {
+          const storage = await getStorage();
+          const goal = await storage.createVentureGoal({
+            ventureId: String(ventureId),
+            period,
+            periodStart,
+            periodEnd,
+            targetStatement,
+            status: 'active',
+          });
+          const createdKRs = [];
+          for (const kr of keyResults) {
+            const created = await storage.createKeyResult({
+              goalId: goal.id,
+              title: kr.title,
+              targetValue: Number(kr.targetValue),
+              currentValue: 0,
+              unit: kr.unit,
+              status: 'on_track',
+            });
+            createdKRs.push(created);
+          }
+          return res.json({
+            answer: `Goal created: "${targetStatement}" with ${createdKRs.length} key result${createdKRs.length !== 1 ? 's' : ''}.`,
+            action: { type: "create_venture_goal", payload: { goalId: goal.id, keyResultIds: createdKRs.map((kr: any) => kr.id) } },
+          });
+        } catch (err: any) {
+          return res.json({ answer: `Goal creation error: ${err.message}`, action: null });
         }
       }
     }

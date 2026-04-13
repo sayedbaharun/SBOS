@@ -75,4 +75,106 @@ export const NL_TOOLS: NlTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "delegate_task",
+      description:
+        "Delegate an existing task to an AI agent. Use when the user wants to assign, delegate, or hand off a task to an agent. Requires the task ID and agent slug.",
+      parameters: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "UUID of the task to delegate" },
+          agentSlug: {
+            type: "string",
+            description:
+              "Slug of the agent to delegate to (e.g. 'chief-of-staff', 'cmo', 'cto')",
+          },
+        },
+        required: ["taskId", "agentSlug"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_kr_progress",
+      description:
+        "Update the current progress value of a key result. Use when the user says they completed X, achieved Y, or wants to update progress on a goal metric.",
+      parameters: {
+        type: "object",
+        properties: {
+          keyResultId: {
+            type: "string",
+            description: "UUID of the key result to update",
+          },
+          currentValue: {
+            type: "number",
+            description:
+              "The new current value (not a delta — the absolute new value)",
+          },
+        },
+        required: ["keyResultId", "currentValue"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_venture_goal",
+      description:
+        "Create a new goal (OKR) for a venture with optional key results. Use when the user wants to set a goal, target, or OKR for one of their ventures.",
+      parameters: {
+        type: "object",
+        properties: {
+          ventureId: {
+            type: "string",
+            description: "UUID of the venture this goal belongs to",
+          },
+          period: {
+            type: "string",
+            enum: ["monthly", "quarterly", "annual"],
+            description: "Goal period",
+          },
+          periodStart: {
+            type: "string",
+            description: "ISO date string for period start (YYYY-MM-DD)",
+          },
+          periodEnd: {
+            type: "string",
+            description: "ISO date string for period end (YYYY-MM-DD)",
+          },
+          targetStatement: {
+            type: "string",
+            description:
+              "What does success look like? E.g. 'Close 3 enterprise clients'",
+          },
+          keyResults: {
+            type: "array",
+            description:
+              "Optional list of key results to create alongside the goal",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                targetValue: { type: "number" },
+                unit: {
+                  type: "string",
+                  description: "e.g. 'clients', 'AED', 'features', '%'",
+                },
+              },
+              required: ["title", "targetValue", "unit"],
+            },
+          },
+        },
+        required: [
+          "ventureId",
+          "period",
+          "periodStart",
+          "periodEnd",
+          "targetStatement",
+        ],
+      },
+    },
+  },
 ];

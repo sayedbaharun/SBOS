@@ -12,6 +12,8 @@ const defaultSubscriptions = [
   { eventType: "task.agent_ready", agentSlug: "chief-of-staff", filterJson: null },
   { eventType: "review.rejected", agentSlug: "chief-of-staff", filterJson: null },
   { eventType: "kr.at_risk", agentSlug: "chief-of-staff", filterJson: null },
+  { eventType: "audit.security.completed", agentSlug: "chief-of-staff", filterJson: null },
+  { eventType: "morning.loop.completed", agentSlug: "chief-of-staff", filterJson: null },
 ];
 
 /**
