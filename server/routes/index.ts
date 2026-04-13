@@ -34,6 +34,7 @@ import podcastsRoutes from "./podcasts";
 import financeRoutes from "./finance";
 import peopleRoutes from "./people";
 import { strategiesRouter, checklistsRouter, calendarRouter } from "./trading";
+import tradingCcRouter from "./trading-cc";
 import ticktickRoutes from "./ticktick";
 import aiChatRoutes from "./ai-chat";
 import fearSettingsRoutes from "./fear-settings";
@@ -337,6 +338,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/trading-strategies', strategiesRouter);
   app.use('/api/trading-checklists', checklistsRouter);
   app.use('/api/trading/economic-calendar', calendarRouter);
+  app.use('/api/trading', tradingCcRouter);
 
   // ============================================================================
   // DECISION MAKING

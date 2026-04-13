@@ -1805,6 +1805,62 @@ export const insertDailyTradingChecklistSchema = createInsertSchema(dailyTrading
 export type InsertDailyTradingChecklist = z.infer<typeof insertDailyTradingChecklistSchema>;
 export type DailyTradingChecklist = typeof dailyTradingChecklists.$inferSelect;
 
+// Trading Bias: Pre-market bias and key levels per instrument per day
+export const tradingBiasDirectionEnum = pgEnum("trading_bias_direction", ["long", "short", "neutral"]);
+
+export interface TradingKeyLevel {
+  label: string; // e.g. "PDH", "Asian High", "Daily Pivot"
+  price: number;
+  kind?: "support" | "resistance" | "pivot" | "range" | "other";
+}
+
+export const tradingBias = pgTable(
+  "trading_bias",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    date: date("date").notNull(),
+    instrument: text("instrument").notNull(), // e.g. "XAUUSD", "EURUSD"
+    direction: tradingBiasDirectionEnum("direction").notNull(),
+    htfContext: text("htf_context"), // Higher timeframe narrative
+    keyLevels: jsonb("key_levels").$type<TradingKeyLevel[]>().default([]),
+    invalidation: text("invalidation"), // Where bias is wrong
+    target: text("target"), // Where bias plays out
+    notes: text("notes"),
+    lockedAt: timestamp("locked_at"), // When bias was committed (pre-market lock)
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_trading_bias_date").on(table.date),
+    index("idx_trading_bias_instrument").on(table.instrument),
+    index("idx_trading_bias_date_instrument").on(table.date, table.instrument),
+  ]
+);
+
+export const insertTradingBiasSchema = createInsertSchema(tradingBias)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    date: z.union([z.string(), z.date()]).pipe(z.coerce.date()),
+  });
+
+export type InsertTradingBias = z.infer<typeof insertTradingBiasSchema>;
+export type TradingBias = typeof tradingBias.$inferSelect;
+
+// Trading Risk Config: Single-row guardrails for the trader
+export const tradingRiskConfig = pgTable("trading_risk_config", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  accountStartingBalance: integer("account_starting_balance").default(10000).notNull(), // cents? stored as dollars whole
+  maxDailyLossPct: integer("max_daily_loss_pct").default(2).notNull(), // percent
+  maxRiskPerTradePct: integer("max_risk_per_trade_pct").default(1).notNull(), // percent
+  maxTradesPerDay: integer("max_trades_per_day").default(3).notNull(),
+  watchlistInstruments: jsonb("watchlist_instruments").$type<string[]>().default([
+    "XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "NAS100", "BTCUSD"
+  ]),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type TradingRiskConfig = typeof tradingRiskConfig.$inferSelect;
+
 // ----------------------------------------------------------------------------
 // PEOPLE / RELATIONSHIPS CRM
 // ----------------------------------------------------------------------------
