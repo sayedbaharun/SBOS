@@ -201,11 +201,14 @@ export async function processIncomingMessage(
  * Send a proactive message via a specific channel.
  * Messages are enqueued for reliable delivery with retry logic.
  * Use sendProactiveMessageDirect() for bypass (used by queue processor).
+ *
+ * @param threadId - Optional Telegram forum topic thread_id. Routes message into that topic.
  */
 export async function sendProactiveMessage(
   platform: string,
   chatId: string,
-  text: string
+  text: string,
+  threadId?: number
 ): Promise<void> {
   try {
     const { storage } = await import("../storage");
@@ -214,28 +217,32 @@ export async function sendProactiveMessage(
       chatId,
       text,
       parseMode: "html",
+      ...(threadId !== undefined ? { threadId } : {}),
       status: "pending",
       attempts: 0,
       maxAttempts: 3,
       nextAttemptAt: new Date(),
     });
-    logger.debug({ platform, chatId }, "Proactive message enqueued");
+    logger.debug({ platform, chatId, threadId }, "Proactive message enqueued");
   } catch (err: any) {
     // Fallback to direct send if queue fails (DB down, etc.)
     logger.warn({ error: err.message }, "Queue enqueue failed, falling back to direct send");
-    await sendProactiveMessageDirect(platform, chatId, text, "html");
+    await sendProactiveMessageDirect(platform, chatId, text, "html", threadId);
   }
 }
 
 /**
  * Send a proactive message directly (bypasses queue).
  * Used by the queue processor and as fallback.
+ *
+ * @param threadId - Optional Telegram forum topic thread_id.
  */
 export async function sendProactiveMessageDirect(
   platform: string,
   chatId: string,
   text: string,
-  parseMode: "html" | "markdown" = "html"
+  parseMode: "html" | "markdown" = "html",
+  threadId?: number
 ): Promise<void> {
   const adapter = adapters.get(platform);
   if (!adapter) {
@@ -247,6 +254,7 @@ export async function sendProactiveMessageDirect(
     chatId,
     text,
     parseMode,
+    threadId,
   });
 
   // Log proactive outgoing message

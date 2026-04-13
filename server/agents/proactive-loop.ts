@@ -267,9 +267,11 @@ async function sendSummary(
   try {
     const { sendProactiveMessage } = await import("../channels/channel-manager");
     const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+    const { resolveTopicByKey } = await import("../channels/topic-router");
+    const threadId = await resolveTopicByKey("morning-loop");
     const chatIds = getAuthorizedChatIds();
     for (const chatId of chatIds) {
-      await sendProactiveMessage("telegram", chatId, message);
+      await sendProactiveMessage("telegram", chatId, message, threadId);
     }
   } catch (err: any) {
     logger.warn({ error: err?.message }, "proactive-loop: failed to send Telegram message");

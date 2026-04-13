@@ -233,12 +233,14 @@ registerJobHandler("daily_briefing", async (agentId: string, agentSlug: string) 
   try {
     const { sendProactiveMessage } = await import("../channels/channel-manager");
     const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+    const { resolveTopicByKey } = await import("../channels/topic-router");
+    const threadId = await resolveTopicByKey("morning-loop");
     for (const chatId of getAuthorizedChatIds()) {
       await sendProactiveMessage("telegram", chatId, formatMessage({
         header: msgHeader("☀️", "Daily Briefing"),
         body: msgTruncate(escapeHtml(result.response)),
         cta: "/today for outcomes · /tasks for full list · open dashboard to delegate",
-      }));
+      }), threadId);
     }
   } catch {
     // Telegram not configured — skip
@@ -629,8 +631,10 @@ registerJobHandler("evening_review", async (_agentId: string, agentSlug: string)
   try {
     const { sendProactiveMessage } = await import("../channels/channel-manager");
     const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+    const { resolveTopicByKey } = await import("../channels/topic-router");
+    const threadId = await resolveTopicByKey("evening-review");
     for (const chatId of getAuthorizedChatIds()) {
-      await sendProactiveMessage("telegram", chatId, message);
+      await sendProactiveMessage("telegram", chatId, message, threadId);
     }
   } catch {
     // Telegram not configured — skip
@@ -2262,6 +2266,8 @@ registerJobHandler("github_actions_sha_audit", async (_agentId: string, _agentSl
   try {
     const { sendProactiveMessage } = await import("../channels/channel-manager");
     const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+    const { resolveTopicByKey } = await import("../channels/topic-router");
+    const threadId = await resolveTopicByKey("on-fire");
     const body = [
       `Found ${issues.length} workflow${issues.length > 1 ? "s" : ""} using mutable action refs:`,
       "",
@@ -2274,7 +2280,7 @@ registerJobHandler("github_actions_sha_audit", async (_agentId: string, _agentSl
       await sendProactiveMessage("telegram", chatId, formatMessage({
         header: "⚠️ Security: Unpinned GitHub Actions",
         sections: [{ content: body }],
-      }));
+      }), threadId);
     }
   } catch (err: any) {
     logger.warn({ error: err.message }, "github_actions_sha_audit: Could not send Telegram alert");

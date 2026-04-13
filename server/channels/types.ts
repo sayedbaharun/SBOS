@@ -45,6 +45,8 @@ export interface OutgoingMessage {
   parseMode?: "html" | "markdown";
   /** Whether this is a reply to a specific message */
   replyToMessageId?: string;
+  /** Telegram forum topic thread ID (message_thread_id) — routes to specific topic */
+  threadId?: number;
 }
 
 // ============================================================================

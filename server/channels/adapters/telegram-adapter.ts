@@ -1692,7 +1692,7 @@ class TelegramAdapter implements ChannelAdapter {
     }
 
     try {
-      await this.sendLongMessage(msg.chatId, msg.text, msg.parseMode);
+      await this.sendLongMessage(msg.chatId, msg.text, msg.parseMode, msg.threadId);
       this.stats.messagesSent++;
       this.stats.lastActivity = new Date();
     } catch (error: any) {
@@ -1753,11 +1753,13 @@ class TelegramAdapter implements ChannelAdapter {
 
   /**
    * Send a long message, splitting at 4096 char Telegram limit.
+   * If threadId is provided, sends into the specified forum topic.
    */
   private async sendLongMessage(
     chatId: string,
     text: string,
-    parseMode?: "html" | "markdown"
+    parseMode?: "html" | "markdown",
+    threadId?: number
   ): Promise<void> {
     if (!this.bot) return;
 
@@ -1766,11 +1768,14 @@ class TelegramAdapter implements ChannelAdapter {
       : parseMode === "markdown" ? "MarkdownV2"
       : undefined;
 
+    const extra: Record<string, any> = { parse_mode: tgParseMode };
+    if (threadId !== undefined && threadId !== null) {
+      extra.message_thread_id = threadId;
+    }
+
     const maxLen = 4000; // Leave buffer below 4096 limit
     if (text.length <= maxLen) {
-      await this.bot.telegram.sendMessage(chatId, text, {
-        parse_mode: tgParseMode,
-      });
+      await this.bot.telegram.sendMessage(chatId, text, extra);
       return;
     }
 
@@ -1793,9 +1798,7 @@ class TelegramAdapter implements ChannelAdapter {
     }
 
     for (const chunk of chunks) {
-      await this.bot.telegram.sendMessage(chatId, chunk, {
-        parse_mode: tgParseMode,
-      });
+      await this.bot.telegram.sendMessage(chatId, chunk, extra);
     }
   }
 

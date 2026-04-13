@@ -40,7 +40,7 @@ async function processQueue(): Promise<void> {
 
     for (const msg of messages) {
       try {
-        await sendProactiveMessageDirect(msg.platform, msg.chatId, msg.text, msg.parseMode || "html");
+        await sendProactiveMessageDirect(msg.platform, msg.chatId, msg.text, msg.parseMode || "html", msg.threadId ?? undefined);
         await storage.markMessageSent(msg.id);
         logger.debug({ id: msg.id, platform: msg.platform }, "Queued message sent");
       } catch (error: any) {

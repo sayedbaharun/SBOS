@@ -3732,6 +3732,7 @@ export const outboundMessageQueue = pgTable(
     chatId: text("chat_id").notNull(),
     text: text("text").notNull(),
     parseMode: text("parse_mode").$type<"html" | "markdown">().default("html"),
+    threadId: integer("thread_id"), // Telegram forum topic thread_id (null = general chat)
     status: messageQueueStatusEnum("status").default("pending").notNull(),
     attempts: integer("attempts").default(0).notNull(),
     maxAttempts: integer("max_attempts").default(3).notNull(),
@@ -4202,3 +4203,24 @@ export const agentJobRuns = pgTable("agent_job_runs", {
 export const insertAgentJobRunSchema = createInsertSchema(agentJobRuns).omit({ id: true, ranAt: true });
 export type AgentJobRun = typeof agentJobRuns.$inferSelect;
 export type InsertAgentJobRun = z.infer<typeof insertAgentJobRunSchema>;
+
+// ----------------------------------------------------------------------------
+// TELEGRAM TOPIC MAP: Routes events to Telegram forum topics (Wave 5)
+// ----------------------------------------------------------------------------
+
+export const telegramTopicMap = pgTable("telegram_topic_map", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  chatId: text("chat_id").notNull(),
+  topicKey: text("topic_key").notNull().unique(), // stable key e.g. 'on-fire', 'venture:syntheliq'
+  threadId: integer("thread_id").notNull(),       // message_thread_id from Telegram createForumTopic
+  ventureId: uuid("venture_id").references(() => ventures.id, { onDelete: "set null" }),
+  eventTypes: text("event_types").array().default([]).notNull(), // events routed to this topic
+  iconColor: integer("icon_color"),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertTelegramTopicMapSchema = createInsertSchema(telegramTopicMap).omit({ id: true, createdAt: true, updatedAt: true });
+export type TelegramTopicMap = typeof telegramTopicMap.$inferSelect;
+export type InsertTelegramTopicMap = z.infer<typeof insertTelegramTopicMapSchema>;
