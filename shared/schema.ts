@@ -3278,6 +3278,8 @@ export const agentMemory = pgTable(
     index("idx_agent_memory_importance").on(table.importance),
     index("idx_agent_memory_scope").on(table.scope),
     index("idx_agent_memory_venture_id").on(table.ventureId),
+    // GIN full-text index created via ensureMemoryIndexes() at startup (Drizzle
+    // 0.45 doesn't support functional index expressions via schema definition)
   ]
 );
 

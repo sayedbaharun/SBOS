@@ -423,10 +423,10 @@ function deduplicateResults(results: RetrievedMemory[]): RetrievedMemory[] {
 }
 
 // ============================================================================
-// KEYWORD SEARCH (BM25-lite on PostgreSQL agent_memory)
+// KEYWORD SEARCH (BM25 via PostgreSQL full-text search on agent_memory)
 // ============================================================================
 
-interface KeywordMemoryResult {
+export interface KeywordMemoryResult {
   id: string;
   content: string;
   score: number;
@@ -436,11 +436,19 @@ interface KeywordMemoryResult {
 }
 
 /**
- * Keyword search on agent_memory table.
- * Uses PostgreSQL ILIKE for term matching + recency/importance scoring.
- * Acts as the keyword arm alongside Qdrant vector search.
+ * Full-text keyword search on agent_memory table.
+ *
+ * Uses PostgreSQL's built-in full-text search:
+ *   - `plainto_tsquery('english', query)` — tokenises + stems the query, handles stop words
+ *   - `to_tsvector('english', content)` — indexed via GIN (idx_agent_memory_content_fts)
+ *   - `ts_rank_cd(..., 32)` — cover-density ranking, norm=32 divides by unique word count → [0,1]
+ *
+ * Final score combines BM25 rank, Ebbinghaus temporal decay, and importance weight,
+ * matching the same formula used across the hybrid retriever.
+ *
+ * Exported for benchmarking and unit testing.
  */
-async function keywordSearchMemories(
+export async function keywordSearchMemories(
   query: string,
   limit: number
 ): Promise<KeywordMemoryResult[]> {
@@ -450,58 +458,54 @@ async function keywordSearchMemories(
     const { agentMemory } = await import("@shared/schema");
     const { sql } = await import("drizzle-orm");
 
-    // Tokenize query into search terms
-    const terms = query
-      .toLowerCase()
-      .replace(/[^\w\s]/g, " ")
-      .split(/\s+/)
-      .filter((t) => t.length > 2);
+    // Normalise query — strip special chars that would confuse plainto_tsquery
+    const cleanQuery = query.replace(/[^\w\s]/g, " ").trim();
+    if (!cleanQuery) return [];
 
-    if (terms.length === 0) return [];
-
-    // Build ILIKE conditions for each term
+    // Full-text match with BM25-style cover-density ranking (norm flag 32 → [0,1])
     const rows = await db
-      .select()
+      .select({
+        id:         agentMemory.id,
+        content:    agentMemory.content,
+        importance: agentMemory.importance,
+        createdAt:  agentMemory.createdAt,
+        memoryType: agentMemory.memoryType,
+        rank: sql<number>`ts_rank_cd(
+          to_tsvector('english', ${agentMemory.content}),
+          plainto_tsquery('english', ${cleanQuery}),
+          32
+        )`,
+      })
       .from(agentMemory)
       .where(
-        sql`LOWER(${agentMemory.content}) LIKE ${"%" + terms[0] + "%"}`
+        sql`to_tsvector('english', ${agentMemory.content}) @@ plainto_tsquery('english', ${cleanQuery})`
       )
-      .orderBy(sql`${agentMemory.importance} DESC`)
+      .orderBy(
+        sql`ts_rank_cd(to_tsvector('english', ${agentMemory.content}), plainto_tsquery('english', ${cleanQuery}), 32) DESC`,
+        sql`${agentMemory.importance} DESC`
+      )
       .limit(limit * 2);
 
     if (rows.length === 0) return [];
 
-    // Score results: term coverage + Ebbinghaus decay + importance
-    const scored: KeywordMemoryResult[] = rows.map((r: any) => {
-      const contentLower = r.content.toLowerCase();
+    // Final score: BM25 rank + Ebbinghaus decay + importance (same weights as vector arm)
+    return rows
+      .map((r: any) => {
+        const importance = r.importance ?? 0.5;
+        const timestampMs = new Date(r.createdAt).getTime();
+        const decay = ebbinghausDecay(timestampMs, importance, 0);
+        const bm25 = Number(r.rank) || 0;
 
-      // Term coverage score (0-1)
-      const matchedTerms = terms.filter((t) => contentLower.includes(t));
-      const termCoverage = matchedTerms.length / terms.length;
-
-      const importance = r.importance || 0.5;
-      const timestampMs = new Date(r.createdAt).getTime();
-
-      // Ebbinghaus decay with importance-scaled half-life
-      const decay = ebbinghausDecay(timestampMs, importance, 0);
-
-      // Weighted score matching the standard formula weights
-      const score = 0.70 * termCoverage + 0.15 * decay + 0.15 * importance;
-
-      return {
-        id: r.id,
-        content: r.content,
-        score,
-        timestamp: new Date(r.createdAt).getTime(),
-        memoryType: r.memoryType,
-        importance,
-      };
-    });
-
-    // Filter to only results that match at least one term well
-    return scored
-      .filter((r) => r.score > 0.2)
-      .sort((a, b) => b.score - a.score)
+        return {
+          id:         r.id,
+          content:    r.content,
+          score:      0.70 * bm25 + 0.15 * decay + 0.15 * importance,
+          timestamp:  timestampMs,
+          memoryType: r.memoryType,
+          importance,
+        };
+      })
+      .sort((a: KeywordMemoryResult, b: KeywordMemoryResult) => b.score - a.score)
       .slice(0, limit);
   } catch (error) {
     logger.debug({ error }, "Keyword memory search failed");

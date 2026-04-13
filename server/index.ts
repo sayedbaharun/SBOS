@@ -557,6 +557,12 @@ app.use((req, res, next) => {
           .catch((err: any) => log('⚠ Qdrant KB sync deferred:', err.message))
       );
 
+      // Memory indexes: ensure GIN FTS index on agent_memory (idempotent)
+      import('./memory/ensure-indexes').then(({ ensureMemoryIndexes }) =>
+        ensureMemoryIndexes()
+          .catch((err: any) => log('⚠ Memory index init deferred:', err.message))
+      );
+
       // FalkorDB: init graph schema (if configured)
       if (process.env.FALKORDB_URL) {
         import('./memory/graph-store').then(({ initGraphSchema }) =>
