@@ -186,6 +186,7 @@ import {
   type KeyResult,
   type InsertKeyResult,
   keyResults,
+  agentJobRuns,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { eq, desc, and, or, gte, lte, not, inArray, like, sql, asc, isNull } from "drizzle-orm";
@@ -567,6 +568,10 @@ export interface IStorage {
   // Dead Letter Jobs (Project Ironclad)
   createDeadLetterJob(data: InsertDeadLetterJob): Promise<DeadLetterJob>;
   getDeadLetterJobs(limit?: number): Promise<DeadLetterJob[]>;
+
+  // Agent Job Runs (catch-up scheduler)
+  recordJobRun(agentSlug: string, jobName: string, status: string, triggeredBy: string, durationMs?: number): Promise<void>;
+  getLastJobRun(agentSlug: string, jobName: string): Promise<Date | null>;
 
   // Sub-Agent Runs (Project Ironclad)
   createSubAgentRun(data: InsertSubAgentRun): Promise<SubAgentRun>;
@@ -5260,6 +5265,24 @@ export class DBStorage implements IStorage {
       .from(deadLetterJobs)
       .orderBy(desc(deadLetterJobs.failedAt))
       .limit(limit);
+  }
+
+  // ==========================================================================
+  // AGENT JOB RUNS: catch-up scheduler persistence
+  // ==========================================================================
+
+  async recordJobRun(agentSlug: string, jobName: string, status: string, triggeredBy: string, durationMs?: number): Promise<void> {
+    await this.db.insert(agentJobRuns).values({ agentSlug, jobName, status, triggeredBy, durationMs });
+  }
+
+  async getLastJobRun(agentSlug: string, jobName: string): Promise<Date | null> {
+    const [row] = await this.db
+      .select({ ranAt: agentJobRuns.ranAt })
+      .from(agentJobRuns)
+      .where(and(eq(agentJobRuns.agentSlug, agentSlug), eq(agentJobRuns.jobName, jobName)))
+      .orderBy(desc(agentJobRuns.ranAt))
+      .limit(1);
+    return row?.ranAt ?? null;
   }
 
   // ==========================================================================

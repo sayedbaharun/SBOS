@@ -4181,3 +4181,22 @@ export const insertEventLogSchema = createInsertSchema(eventLog);
 export type EventSubscription = typeof eventSubscriptions.$inferSelect;
 export type InsertEventSubscription = typeof eventSubscriptions.$inferInsert;
 export type EventLog = typeof eventLog.$inferSelect;
+
+// ----------------------------------------------------------------------------
+// AGENT JOB RUNS: Persistent record of when each scheduled job last ran.
+// Used by catch-up scheduler to recover missed jobs after Railway restarts.
+// ----------------------------------------------------------------------------
+
+export const agentJobRuns = pgTable("agent_job_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  agentSlug: text("agent_slug").notNull(),
+  jobName: text("job_name").notNull(),
+  ranAt: timestamp("ran_at").defaultNow().notNull(),
+  status: text("status").notNull().default("success"),   // "success" | "failure" | "catchup"
+  triggeredBy: text("triggered_by").notNull().default("scheduler"), // "scheduler" | "manual" | "catchup"
+  durationMs: integer("duration_ms"),
+});
+
+export const insertAgentJobRunSchema = createInsertSchema(agentJobRuns).omit({ id: true, ranAt: true });
+export type AgentJobRun = typeof agentJobRuns.$inferSelect;
+export type InsertAgentJobRun = z.infer<typeof insertAgentJobRunSchema>;

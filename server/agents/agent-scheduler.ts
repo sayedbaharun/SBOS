@@ -9,6 +9,7 @@
  */
 
 import cron from "node-cron";
+import { CronExpressionParser } from "cron-parser";
 import { eq } from "drizzle-orm";
 import { logger } from "../logger";
 import { agents, type Agent } from "@shared/schema";
@@ -91,8 +92,93 @@ export async function initializeScheduler(): Promise<void> {
 
     isInitialized = true;
     logger.info({ jobCount, agentCount: allAgents.length }, "Agent scheduler initialized");
+
+    // Catch-up: fire any jobs missed during downtime (Railway restarts, etc.)
+    // Run async so it doesn't block server startup
+    runCatchUpJobs(allAgents).catch((err) =>
+      logger.error({ error: err.message }, "Catch-up scheduler error")
+    );
   } catch (error: any) {
     logger.error({ error: error.message }, "Failed to initialize agent scheduler");
+  }
+}
+
+// Jobs that fire too frequently to be worth catching up on restart
+const SKIP_CATCHUP_JOBS = new Set([
+  "embedding_backfill",  // runs every 30 min — next tick handles it
+  "check_credit_balance", // runs every 6h — minor, not worth double-firing
+]);
+
+/**
+ * After startup, check each registered job's last run against the previous
+ * scheduled time. If the job was supposed to run while the server was down,
+ * fire it immediately as a catch-up run.
+ */
+async function runCatchUpJobs(allAgents: Agent[]): Promise<void> {
+  const { storage } = await import("../storage");
+  let catchUpCount = 0;
+
+  for (const agent of allAgents) {
+    const schedule = agent.schedule as Record<string, string> | null;
+    if (!schedule) continue;
+
+    const tz = (agent as any).scheduleTimezone || "Asia/Dubai";
+
+    for (const [jobName, cronExpr] of Object.entries(schedule)) {
+      if (SKIP_CATCHUP_JOBS.has(jobName)) continue;
+      if (!cron.validate(cronExpr)) continue;
+
+      try {
+        // When was this job last supposed to run?
+        const interval = CronExpressionParser.parse(cronExpr, { tz });
+        const lastScheduled = interval.prev().toDate();
+
+        // When did it actually last run?
+        const lastRun = await storage.getLastJobRun(agent.slug, jobName);
+
+        if (!lastRun || lastRun < lastScheduled) {
+          logger.info(
+            { agentSlug: agent.slug, jobName, lastRun, lastScheduled },
+            "Catch-up: job was missed during downtime — firing now"
+          );
+
+          catchUpCount++;
+          const startedAt = Date.now();
+          try {
+            await executeScheduledJob(agent.id, agent.slug, jobName);
+            await storage.recordJobRun(agent.slug, jobName, "success", "catchup", Date.now() - startedAt);
+
+            // Update in-memory lastRun
+            const job = activeJobs.get(`${agent.slug}:${jobName}`);
+            if (job) { job.lastRun = new Date(); job.runCount++; }
+          } catch (err: any) {
+            logger.warn({ agentSlug: agent.slug, jobName, error: err.message }, "Catch-up job failed");
+            await storage.recordJobRun(agent.slug, jobName, "failure", "catchup", Date.now() - startedAt);
+          }
+        }
+      } catch (err: any) {
+        logger.warn({ agentSlug: agent.slug, jobName, error: err.message }, "Catch-up check failed");
+      }
+    }
+  }
+
+  if (catchUpCount > 0) {
+    logger.info({ catchUpCount }, "Catch-up scheduler complete");
+
+    // Notify via Telegram
+    try {
+      const { sendProactiveMessage } = await import("../channels/channel-manager");
+      const { getAuthorizedChatIds } = await import("../channels/adapters/telegram-adapter");
+      const msg = formatMessage({
+        header: msgHeader("🔄", "Scheduler Catch-Up"),
+        body: `${catchUpCount} job(s) were missed during downtime and have been re-run automatically.`,
+      });
+      for (const chatId of getAuthorizedChatIds()) {
+        await sendProactiveMessage("telegram", chatId, msg);
+      }
+    } catch { /* non-critical */ }
+  } else {
+    logger.info("Catch-up scheduler: no missed jobs");
   }
 }
 
@@ -118,6 +204,7 @@ function registerJob(agent: Agent, jobName: string, cronExpression: string, time
       "Executing scheduled agent job"
     );
 
+    const startedAt = Date.now();
     try {
       // Retry with FAST_BACKOFF (3 attempts: 500ms, 750ms, 1.1s)
       const { retryWithPolicy, FAST_BACKOFF } = await import("../infra/backoff");
@@ -137,6 +224,12 @@ function registerJob(agent: Agent, jobName: string, cronExpression: string, time
       job.lastRun = new Date();
       job.runCount++;
 
+      // Persist run record for catch-up scheduler
+      try {
+        const { storage } = await import("../storage");
+        await storage.recordJobRun(agent.slug, jobName, "success", "scheduler", Date.now() - startedAt);
+      } catch { /* non-critical */ }
+
       logger.info(
         { agentSlug: agent.slug, jobName, runCount: job.runCount },
         "Scheduled agent job completed"
@@ -147,6 +240,12 @@ function registerJob(agent: Agent, jobName: string, cronExpression: string, time
         { agentSlug: agent.slug, jobName, error: error.message },
         "Scheduled agent job failed after all retries"
       );
+
+      // Persist failure record
+      try {
+        const { storage } = await import("../storage");
+        await storage.recordJobRun(agent.slug, jobName, "failure", "scheduler", Date.now() - startedAt);
+      } catch { /* non-critical */ }
 
       // Dead letter + Telegram alert (Project Ironclad Phase 2)
       try {
@@ -215,10 +314,11 @@ export async function triggerJob(
     return { success: false, error: `Agent not found: ${agentSlug}` };
   }
 
+  const startedAt = Date.now();
   try {
     await executeScheduledJob(agent.id, agentSlug, jobName);
 
-    // Update run tracking if job is registered
+    // Update run tracking
     const jobKey = `${agentSlug}:${jobName}`;
     const job = activeJobs.get(jobKey);
     if (job) {
@@ -226,8 +326,18 @@ export async function triggerJob(
       job.runCount++;
     }
 
+    // Persist for catch-up scheduler
+    try {
+      const { storage } = await import("../storage");
+      await storage.recordJobRun(agentSlug, jobName, "success", "manual", Date.now() - startedAt);
+    } catch { /* non-critical */ }
+
     return { success: true };
   } catch (error: any) {
+    try {
+      const { storage } = await import("../storage");
+      await storage.recordJobRun(agentSlug, jobName, "failure", "manual", Date.now() - startedAt);
+    } catch { /* non-critical */ }
     return { success: false, error: error.message };
   }
 }
