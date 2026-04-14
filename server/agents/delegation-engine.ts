@@ -354,5 +354,17 @@ export async function delegateFromUser(
     `Task: ${title}\n\n${description || ""}`
   );
 
+  // AI-native: fire-and-forget execution so the task runs immediately without
+  // manual intervention. Lazy import avoids circular dep (delegation-engine ↔ agent-task).
+  // DO NOT add a cron drainer on top of this — single execution semantic is intentional.
+  import("./agent-task").then(({ executeAgentTask }) => {
+    executeAgentTask(task.id).catch((err: unknown) => {
+      logger.error(
+        { err, taskId: task.id, agentSlug: toAgentSlug },
+        "Async delegated task execution failed"
+      );
+    });
+  });
+
   return { taskId: task.id };
 }
