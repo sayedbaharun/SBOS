@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRoute } from "wouter";
-import { Plus, Bot, Settings, Sparkles, TrendingUp } from "lucide-react";
+import { Plus, Bot, Settings, Sparkles, TrendingUp, MessageCircle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import VentureDetailHeader from "@/components/venture-hq/venture-detail-header";
 import ProjectsBoard from "@/components/venture-hq/projects-board";
@@ -37,6 +38,8 @@ export default function VentureDetail() {
   const [projectWizardOpen, setProjectWizardOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("goals");
   const [aiSubTab, setAiSubTab] = useState<"chat" | "config">("chat");
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   // Check if this is a trading venture
   const isTradingVenture = (venture: Venture | undefined) =>
@@ -68,6 +71,37 @@ export default function VentureDetail() {
     enabled: !!ventureId,
   });
 
+  // Check if a Telegram topic exists for this venture
+  const { data: telegramTopic } = useQuery<{ threadId: number; topicKey: string }>({
+    queryKey: [`/api/ventures/${ventureId}/telegram-topic`],
+    queryFn: async () => {
+      const res = await fetch(`/api/ventures/${ventureId}/telegram-topic`, { credentials: "include" });
+      if (res.status === 404) return null as any;
+      if (!res.ok) return null as any;
+      return res.json();
+    },
+    enabled: !!ventureId,
+    retry: false,
+  });
+
+  const createTopicMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/ventures/${ventureId}/create-telegram-topic`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to create topic");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/ventures/${ventureId}/telegram-topic`] });
+      toast({ title: "Telegram topic created", description: `Thread ID: ${data.threadId}` });
+    },
+    onError: () => {
+      toast({ title: "Failed to create topic", description: "Check that the bot is an admin in the supergroup.", variant: "destructive" });
+    },
+  });
+
   if (isLoading) {
     return (
       <div className="container mx-auto p-4 md:p-6">
@@ -94,7 +128,23 @@ export default function VentureDetail() {
 
   return (
     <div className="container mx-auto p-4 md:p-6 space-y-6">
-      <VentureDetailHeader venture={venture} />
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <VentureDetailHeader venture={venture} />
+        </div>
+        {!telegramTopic && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => createTopicMutation.mutate()}
+            disabled={createTopicMutation.isPending}
+            className="shrink-0 mt-1"
+          >
+            <MessageCircle className="h-4 w-4 mr-2" />
+            {createTopicMutation.isPending ? "Creating..." : "Create Telegram Topic"}
+          </Button>
+        )}
+      </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

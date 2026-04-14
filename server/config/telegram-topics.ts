@@ -66,27 +66,6 @@ export const TELEGRAM_TOPICS: TopicDefinition[] = [
     eventTypes: ["venture.update", "venture.task.completed", "venture.kr.updated"],
     ventureSlug: "syntheliq",
   },
-  {
-    topicKey: "venture:aivant-realty",
-    name: "🏠 Aivant Realty",
-    iconColor: TOPIC_COLORS.BLUE,
-    eventTypes: ["venture.update", "venture.task.completed", "venture.kr.updated"],
-    ventureSlug: "aivant-realty",
-  },
-  {
-    topicKey: "venture:sigma-mindset",
-    name: "🧠 Sigma Mindset",
-    iconColor: TOPIC_COLORS.PURPLE,
-    eventTypes: ["venture.update", "venture.task.completed", "venture.kr.updated"],
-    ventureSlug: "sigma-mindset",
-  },
-  {
-    topicKey: "venture:sb-os",
-    name: "⚙️ SB-OS Meta",
-    iconColor: TOPIC_COLORS.PURPLE,
-    eventTypes: ["venture.update", "venture.task.completed", "venture.kr.updated"],
-    ventureSlug: "sb-os",
-  },
   // ── Operational cluster ──────────────────────────────────────────────────
   {
     topicKey: "inbox",

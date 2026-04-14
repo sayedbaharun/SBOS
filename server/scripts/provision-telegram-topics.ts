@@ -17,8 +17,8 @@
  */
 
 import "dotenv/config";
-import { drizzle } from "drizzle-orm/neon-serverless";
-import { Pool } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
 import { eq, and } from "drizzle-orm";
 import { telegramTopicMap, ventures } from "../../shared/schema";
 import { TELEGRAM_TOPICS, type TopicDefinition } from "../config/telegram-topics";
@@ -103,7 +103,7 @@ async function main() {
     process.exit(1);
   }
 
-  const pool = new Pool({ connectionString: DATABASE_URL });
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
   const db = drizzle(pool);
 
   console.log(`\n🚀  Provisioning Telegram topics for chat ${CHAT_ID}\n`);

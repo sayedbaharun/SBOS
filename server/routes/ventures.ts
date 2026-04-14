@@ -9,6 +9,7 @@ import { insertVentureSchema, insertVentureGoalSchema, insertKeyResultSchema } f
 import { z } from "zod";
 import { stageVenturePack, approveVenturePack } from "../agents/venture-pack";
 import { publishEvent } from "../events/bus";
+import { createTopicForVenture, getTopicForVenture } from "../channels/telegram-topic-service";
 
 const router = Router();
 
@@ -44,15 +45,18 @@ router.post("/", async (req: Request, res: Response) => {
     const venture = await storage.createVenture(validatedData);
     res.status(201).json(venture);
 
-    // Fire-and-forget: notify via Telegram about new venture
+    // Fire-and-forget: create Telegram topic + notify
     (async () => {
       try {
+        const threadId = await createTopicForVenture(venture);
+
         const chatId = process.env.AUTHORIZED_TELEGRAM_CHAT_IDS?.split(",")[0]?.trim();
         if (!chatId) return;
 
         const { sendProactiveMessage } = await import("../channels/channel-manager");
-        const message = `New venture created: ${venture.name}\n\nOpen the AI Agent tab on this venture to start planning — the Venture Architect will guide you through setting up projects, phases, and tasks.`;
-        await sendProactiveMessage("telegram", chatId, message);
+        const topicNote = threadId ? ` A Telegram topic has been created for this venture.` : "";
+        const message = `New venture created: ${venture.name}${topicNote}\n\nOpen the AI Agent tab on this venture to start planning.`;
+        await sendProactiveMessage("telegram", chatId, message, threadId ?? undefined);
       } catch (err) {
         logger.error({ err, ventureId: venture.id }, "Failed to send venture creation notification");
       }
@@ -98,6 +102,38 @@ router.delete("/:id", async (req: Request, res: Response) => {
   } catch (error) {
     logger.error({ error }, "Error deleting venture");
     res.status(500).json({ error: "Failed to delete venture" });
+  }
+});
+
+// GET /api/ventures/:id/telegram-topic — Get existing Telegram topic for venture
+router.get("/:id/telegram-topic", async (req: Request, res: Response) => {
+  try {
+    const topic = await getTopicForVenture(String(req.params.id));
+    if (!topic) {
+      return res.status(404).json({ error: "No Telegram topic found for this venture" });
+    }
+    res.json(topic);
+  } catch (error) {
+    logger.error({ error }, "Error fetching venture telegram topic");
+    res.status(500).json({ error: "Failed to fetch Telegram topic" });
+  }
+});
+
+// POST /api/ventures/:id/create-telegram-topic — Manually create topic for existing venture
+router.post("/:id/create-telegram-topic", async (req: Request, res: Response) => {
+  try {
+    const venture = await storage.getVentureByIdOrSlug(String(req.params.id));
+    if (!venture) {
+      return res.status(404).json({ error: "Venture not found" });
+    }
+    const threadId = await createTopicForVenture(venture);
+    if (threadId === null) {
+      return res.status(503).json({ error: "Telegram not configured or topic already exists" });
+    }
+    res.json({ success: true, threadId });
+  } catch (error) {
+    logger.error({ error }, "Error creating venture telegram topic");
+    res.status(500).json({ error: "Failed to create Telegram topic" });
   }
 });
 
