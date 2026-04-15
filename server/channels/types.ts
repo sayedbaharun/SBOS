@@ -28,6 +28,8 @@ export interface IncomingMessage {
   timestamp: Date;
   /** Any media URLs */
   mediaUrl?: string;
+  /** Telegram forum topic thread ID (message_thread_id) — undefined if not posted in a topic */
+  threadId?: number;
   /** Raw metadata from the channel */
   metadata?: Record<string, unknown>;
 }

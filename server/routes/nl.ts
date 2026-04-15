@@ -88,27 +88,12 @@ async function buildMiniContext(): Promise<string> {
   }
 }
 
-// ── Main route ───────────────────────────────────────────────────────────────
+// ── Core NL dispatch — also used by Telegram Inbox topic handler ─────────────
 
-router.post("/query", async (req: Request, res: Response) => {
-  // Guard: OpenAI not configured
+export async function handleNlQuery(q: string): Promise<{ answer: string; action: unknown }> {
   if (!openai) {
-    return res.json({
-      answer: "NL query requires OPENAI_API_KEY",
-      action: null,
-    });
+    return { answer: "NL query requires OPENAI_API_KEY", action: null };
   }
-
-  // Validate body
-  const parsed = queryBodySchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({
-      answer: "Invalid request: 'q' field is required",
-      action: null,
-    });
-  }
-
-  const { q } = parsed.data;
 
   try {
     const worldState = await buildMiniContext();
@@ -142,7 +127,7 @@ Be concise. Use specific data from the world state when answering questions.`;
     const message = response.choices[0]?.message;
 
     if (!message) {
-      return res.json({ answer: "No response from model", action: null });
+      return { answer: "No response from model", action: null };
     }
 
     // Handle tool calls
@@ -159,29 +144,28 @@ Be concise. Use specific data from the world state when answering questions.`;
       }
 
       if (toolName === "answer_question") {
-        return res.json({
+        return {
           answer: toolArgs.answer || "Could not generate an answer.",
           action: null,
-        });
+        };
       }
 
       if (toolName === "get_world_state") {
-        // Format the world state as a human-readable answer
         const worldStateAnswer = await buildFormattedWorldState();
-        return res.json({
+        return {
           answer: worldStateAnswer,
           action: { type: "get_world_state", payload: {} },
-        });
+        };
       }
 
       if (toolName === "create_task") {
         const { title, priority = "P2", ventureId } = toolArgs;
 
         if (!title) {
-          return res.json({
+          return {
             answer: "Could not extract a task title from your request.",
             action: null,
-          });
+          };
         }
 
         try {
@@ -193,7 +177,7 @@ Be concise. Use specific data from the world state when answering questions.`;
             ...(ventureId ? { ventureId: String(ventureId) } : {}),
           });
 
-          return res.json({
+          return {
             answer: `Task created: "${title}" (${priority})`,
             action: {
               type: "create_task",
@@ -204,29 +188,28 @@ Be concise. Use specific data from the world state when answering questions.`;
                 ventureId: newTask.ventureId,
               },
             },
-          });
+          };
         } catch (createErr: any) {
           logger.error({ createErr }, "[nl] Task creation failed");
-          return res.json({
+          return {
             answer: `Could not create task: ${createErr.message}`,
             action: null,
-          });
+          };
         }
       }
 
       if (toolName === "delegate_task") {
         const { taskId, agentSlug } = toolArgs;
         if (!taskId || !agentSlug) {
-          return res.json({ answer: "Need both a task ID and an agent slug to delegate.", action: null });
+          return { answer: "Need both a task ID and an agent slug to delegate.", action: null };
         }
         try {
           const { delegateFromUser } = await import("../agents/delegation-engine");
           const storage = await getStorage();
           const task = await storage.getTask(String(taskId));
-          if (!task) return res.json({ answer: `Task ${taskId} not found.`, action: null });
+          if (!task) return { answer: `Task ${taskId} not found.`, action: null };
           const result = await delegateFromUser(String(agentSlug), task.title, task.notes || '', 2);
-          if (result.error) return res.json({ answer: `Delegation failed: ${result.error}`, action: null });
-          // Mark task in_progress + agent-assigned
+          if (result.error) return { answer: `Delegation failed: ${result.error}`, action: null };
           const existingTags = Array.isArray(task.tags)
             ? task.tags
             : task.tags
@@ -236,37 +219,37 @@ Be concise. Use specific data from the world state when answering questions.`;
             status: 'in_progress' as const,
             tags: [...existingTags, 'agent-assigned'],
           });
-          return res.json({
+          return {
             answer: `Task "${task.title}" delegated to ${agentSlug}.`,
-            action: { type: "delegate_task", payload: { taskId, agentSlug, agentTaskId: result.taskId } },
-          });
+            action: { type: "delegate_task", payload: { taskId, agentSlug, agentTaskId: (result as any).taskId } },
+          };
         } catch (err: any) {
-          return res.json({ answer: `Delegation error: ${err.message}`, action: null });
+          return { answer: `Delegation error: ${err.message}`, action: null };
         }
       }
 
       if (toolName === "update_kr_progress") {
         const { keyResultId, currentValue } = toolArgs;
         if (!keyResultId || currentValue === undefined) {
-          return res.json({ answer: "Need keyResultId and currentValue to update progress.", action: null });
+          return { answer: "Need keyResultId and currentValue to update progress.", action: null };
         }
         try {
           const storage = await getStorage();
           const updated = await storage.updateKeyResultProgress(String(keyResultId), Number(currentValue));
-          if (!updated) return res.json({ answer: `Key result ${keyResultId} not found.`, action: null });
-          return res.json({
+          if (!updated) return { answer: `Key result ${keyResultId} not found.`, action: null };
+          return {
             answer: `Key result progress updated to ${currentValue}${updated.unit ? ' ' + updated.unit : ''}.`,
             action: { type: "update_kr_progress", payload: { keyResultId, currentValue, status: updated.status } },
-          });
+          };
         } catch (err: any) {
-          return res.json({ answer: `KR update error: ${err.message}`, action: null });
+          return { answer: `KR update error: ${err.message}`, action: null };
         }
       }
 
       if (toolName === "create_venture_goal") {
         const { ventureId, period, periodStart, periodEnd, targetStatement, keyResults = [] } = toolArgs;
         if (!ventureId || !period || !periodStart || !periodEnd || !targetStatement) {
-          return res.json({ answer: "Missing required fields to create a venture goal.", action: null });
+          return { answer: "Missing required fields to create a venture goal.", action: null };
         }
         try {
           const storage = await getStorage();
@@ -290,29 +273,40 @@ Be concise. Use specific data from the world state when answering questions.`;
             });
             createdKRs.push(created);
           }
-          return res.json({
+          return {
             answer: `Goal created: "${targetStatement}" with ${createdKRs.length} key result${createdKRs.length !== 1 ? 's' : ''}.`,
             action: { type: "create_venture_goal", payload: { goalId: goal.id, keyResultIds: createdKRs.map((kr: any) => kr.id) } },
-          });
+          };
         } catch (err: any) {
-          return res.json({ answer: `Goal creation error: ${err.message}`, action: null });
+          return { answer: `Goal creation error: ${err.message}`, action: null };
         }
       }
     }
 
     // Fallback: plain text content (no tool call)
     const textContent = message.content;
-    return res.json({
+    return {
       answer: textContent || "I'm not sure how to answer that.",
       action: null,
-    });
+    };
   } catch (err: any) {
     logger.error({ err }, "[nl] OpenAI call failed");
-    return res.json({
+    return {
       answer: `Query failed: ${err.message || "Unknown error"}`,
       action: null,
-    });
+    };
   }
+}
+
+// ── HTTP wrapper ─────────────────────────────────────────────────────────────
+
+router.post("/query", async (req: Request, res: Response) => {
+  const parsed = queryBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ answer: "Invalid request: 'q' field is required", action: null });
+  }
+  const result = await handleNlQuery(parsed.data.q);
+  return res.json(result);
 });
 
 // ── Helper: formatted world state summary ────────────────────────────────────

@@ -10,6 +10,7 @@ import { z } from "zod";
 import { stageVenturePack, approveVenturePack } from "../agents/venture-pack";
 import { publishEvent } from "../events/bus";
 import { createTopicForVenture, getTopicForVenture } from "../channels/telegram-topic-service";
+import { upsertVenturePinnedCard } from "../channels/pinned-cards";
 
 const router = Router();
 
@@ -299,7 +300,7 @@ router.patch("/key-results/:krId/progress", async (req: Request, res: Response) 
     if (!updated) return res.status(404).json({ error: "Key result not found" });
     res.json(updated);
 
-    // Publish event if KR is now at_risk or behind (fire-and-forget)
+    // Publish events + update pinned card (all fire-and-forget)
     if (updated.status === "at_risk" || updated.status === "behind") {
       publishEvent("kr.at_risk", {
         krId: updated.id,
@@ -310,6 +311,21 @@ router.patch("/key-results/:krId/progress", async (req: Request, res: Response) 
         targetValue: updated.targetValue,
       }).catch(() => {});
     }
+
+    publishEvent("kr.progress_updated", {
+      krId: updated.id,
+      goalId: updated.goalId,
+      currentValue: updated.currentValue,
+      targetValue: updated.targetValue,
+      status: updated.status,
+    }).catch(() => {});
+
+    // Resolve ventureId via goalId and refresh the pinned KR card in the venture's topic
+    storage.getVentureGoal(updated.goalId)
+      .then((goal: any) => {
+        if (goal?.ventureId) upsertVenturePinnedCard(String(goal.ventureId));
+      })
+      .catch(() => {});
   } catch (error) {
     logger.error({ error }, "Error updating key result progress");
     res.status(500).json({ error: "Failed to update progress" });

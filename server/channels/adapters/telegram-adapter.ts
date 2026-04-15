@@ -255,15 +255,25 @@ class TelegramAdapter implements ChannelAdapter {
           await ctx.reply("Usage: /capture <text>\nExample: /capture Research competitor pricing");
           return;
         }
+
+        // Auto-scope to venture if posted in a venture topic
+        const { resolveIntent } = await import("../../channels/topic-intents");
+        const intent = await resolveIntent(
+          ctx.chat.id.toString(),
+          (ctx.message as any)?.message_thread_id
+        );
+        const ventureId = intent.kind === "venture" ? intent.ventureId : null;
+
         const capture = await storage.createCapture({
           title: text,
           type: "idea",
           source: "brain",
           domain: "work",
           notes: null,
-          ventureId: null,
+          ventureId,
         } as any);
-        const reply = `Captured: "${capture.title}"`;
+        const scopeNote = ventureId ? " (scoped to this venture)" : "";
+        const reply = `Captured: "${capture.title}"${scopeNote}`;
         await ctx.reply(reply);
         this.saveMessageHistory(ctx.chat.id.toString(), `/capture ${text}`, reply, "command").catch(() => {});
       } catch (error: any) {
@@ -1158,8 +1168,43 @@ class TelegramAdapter implements ChannelAdapter {
           message.text = contextPrefix + message.text;
         }
 
+        // ── Phase 2/4: Topic intent routing ──────────────────────────────────
+        const { resolveIntent } = await import("../../channels/topic-intents");
+        const intent = await resolveIntent(chatId, message.threadId);
+
+        // Phase 4: Inbox topic → direct NL query (bypass agent loop)
+        if (intent.kind === "inbox") {
+          try {
+            const { handleNlQuery } = await import("../../routes/nl");
+            const nlResult = await handleNlQuery(ctx.message.text);
+            await this.sendLongMessage(chatId, nlResult.answer, undefined, message.threadId);
+            await this.saveMessageHistory(chatId, ctx.message.text, nlResult.answer, "nlp");
+          } catch (nlErr: any) {
+            logger.warn({ nlErr }, "[telegram] Inbox NL query failed, falling through to agent");
+            // On failure, fall through to normal agent routing below
+          }
+          this.stats.messagesSent++;
+          return;
+        }
+
+        // Phase 2: Venture topic → prefix with venture context so agent knows scope
+        if (intent.kind === "venture") {
+          try {
+            const { storage } = await import("../../storage");
+            const venture = await storage.getVenture(intent.ventureId);
+            if (venture) {
+              message.text = `[Context: venture=${venture.name}] ${message.text}`;
+            }
+          } catch {
+            // Non-fatal — message still routes without context prefix
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         // Partial streaming: send "thinking" placeholder, then edit with real response
-        const thinkingMsg = await ctx.reply("💭 Thinking...");
+        const thinkingMsg = await ctx.reply("💭 Thinking...", {
+          ...(message.threadId ? { message_thread_id: message.threadId } : {}),
+        } as any);
         const startTime = Date.now();
 
         const response = await processIncomingMessage(message);
@@ -1724,6 +1769,7 @@ class TelegramAdapter implements ChannelAdapter {
   // ============================================================================
 
   private normalizeTextMessage(ctx: any): IncomingMessage {
+    const threadId = ctx.message?.message_thread_id;
     return {
       channelMessageId: ctx.message.message_id.toString(),
       platform: "telegram",
@@ -1733,6 +1779,7 @@ class TelegramAdapter implements ChannelAdapter {
       text: ctx.message.text,
       messageType: "text",
       timestamp: new Date(ctx.message.date * 1000),
+      threadId: typeof threadId === "number" ? threadId : undefined,
     };
   }
 
