@@ -1,7 +1,7 @@
 # SB-OS: The Sayed Baharun Personal Operating System
 
 > **Complete Technical & Product Specification**
-> Last updated: 2026-03-30
+> Last updated: 2026-04-17
 
 This file is the single source of truth for the SB-OS codebase. It provides guidance for development (including Claude Code), architecture details, API reference, and product specifications.
 
@@ -28,6 +28,7 @@ This file is the single source of truth for the SB-OS codebase. It provides guid
 17. [Agent Operating System](#17-agent-operating-system)
 18. [Memory System](#18-memory-system)
 19. [Compaction Pipeline](#19-compaction-pipeline)
+20. [Agent OS Standards](#20-agent-os-standards)
 
 > Claude Code development instructions (hooks, memory protocol, MCP tools): see `.claude/CLAUDE.md`
 
@@ -105,16 +106,29 @@ It is:
 | **Fast LLM** | Cerebras API (used for compaction summarization — fast inference) |
 | **Build** | Vite (client), esbuild (server) |
 | **Validation** | Zod schemas (shared between client/server) |
-| **Auth** | Session-based authentication with password protection |
+| **Auth** | Session-based (SB-OS existing) — Clerk for all new Vercel-hosted ventures |
 | **Session Storage** | PostgreSQL via connect-pg-simple |
 | **Rich Text Editor** | BlockNote for document editing |
-| **AI** | OpenRouter API (multi-model support) |
+| **AI (primary)** | OpenRouter API / Kilocode — multi-model cascade |
+| **AI (fallback 1)** | OpenAI API |
+| **AI (fallback 2)** | Google AI (Gemini) — last resort |
+| **AI (fast)** | Cerebras API — compaction summarization |
 
 ---
 
 ## 3. Project Structure
 
 ```
+/.agent-os      Agent OS standards and product documentation
+  /product      Product specs, roadmap, decisions, code standards
+    mission.md          Product mission and vision
+    mission-lite.md     Condensed mission for AI context
+    tech-stack.md       Technical architecture and hosting matrix
+    roadmap.md          Development phases and feature list
+    decisions.md        Architectural decision log
+    code-style.md       Code style rules and engineering philosophy
+    dev-best-practices.md  Development practices, AI-native principles
+  /specs        Feature specs (created per-feature via /create-spec)
 /client         React frontend (Vite + TypeScript)
   /src
     /components   UI components (shadcn/ui + custom)
@@ -1464,11 +1478,35 @@ Components appear in `client/src/components/ui/`.
 - ✅ MantraBanner on /today page (gym schedule + rules + mantras)
 - ✅ /today page rebalance (Left: habits/health/evening; Right: day plan/admin/meals)
 
-### Phase 11: Testing & Real Use (Active — 2026-03-30)
+### Phase 11: Testing & Real Use ✅ COMPLETE
 - DB wiped clean (tasks, projects, phases cleared)
 - Testing all systems with real data from scratch
 
----
+### Phase 12: AI-Native Swarm + Telegram Topics ✅ COMPLETE (2026-04-11 to 2026-04-14)
+- ✅ Command Center V4 + OKR system (`0477abb`, `d6dc93e`)
+- ✅ Model cascade bulletproofed — 8-shot fallback across 5 providers (`294f34b`)
+- ✅ Wave 4 AI-Native Swarm — proactive morning loop (7:30am Dubai), NL write tools, event bus (`f2f7bfd`)
+- ✅ Catch-Up Scheduler — `agent_job_runs` table, missed cron recovery, Telegram alert (`888bd3c`)
+- ✅ Real BM25 + Benchmark Harness — `plainto_tsquery`, GIN index, R@5=1.000 baseline (`86e8070`)
+- ✅ Wave 5 Telegram Topics Phase 1 — `telegram_topic_map`, 13 topics, full routing pipeline (`c48bbd9`)
+- ✅ Wave 5.1 Auto-Topic + Orphan Cleanup — auto-create topic on venture creation, pin script (`6e9b5e6`)
+- ✅ Wave 5.2 Delegation Execution Gap Fixed — all delegation surfaces now auto-execute tasks (`4760128`)
+- ✅ Telegram Topics Phase 2/3/4 — inbound context injection, NL inbox routing, pinned KR cards (`4686969`)
+- ✅ Trading Command Center — `/trading` with session indicator, ForexFactory calendar, Dubai TZ (`72bebf4`)
+
+### Phase 13: Agent OS Standards ✅ COMPLETE (2026-04-17)
+- ✅ `.agent-os/product/` — mission, tech-stack (hosting matrix, Clerk, LLM cascade), roadmap, decisions (`6dc8d6b`)
+- ✅ `code-style.md` — engineering philosophy, legibility rules, TS/React/API/DB patterns
+- ✅ `dev-best-practices.md` — AI-native principles as top constraint, TDD, deployment, security
+- ✅ Tech stack locked: Clerk (Vercel ventures), Neon (Vercel DB), Railway PG (Railway DB), OpenRouter/Kilocode→OpenAI→Google
+
+### Phase 14: Venture Onboarding System 🔲 PLANNED
+- 🔲 `server/agents/venture-onboarding.ts` — venture type classifier, checklist filter, bulk task creator
+- 🔲 Google Drive scaffolder — `Ventures/{Name}/Brand/Legal/Content/Ops/` auto-created on venture creation
+- 🔲 Launch Readiness writer — updates `memory-system/{venture}.md` with per-category status
+- 🔲 Trigger on `POST /api/ventures` + manual button on venture detail page
+- 🔲 Skills: `brand-identity-builder`, `legal-scaffolder`, `content-strategy-builder`, `offer-architect`
+- See `.agent-os/product/roadmap.md` for full 3-phase breakdown
 
 ---
 
@@ -1717,9 +1755,17 @@ See **Section 17** for full documentation. Quick reference:
 - Requires `OPENROUTER_API_KEY` for LLM calls
 - Seed agents via `POST /api/agents/admin/seed`
 
-### Other Platforms
-- **Vercel** (with external database)
-- Any Node.js hosting platform
+### Hosting Decision Matrix
+
+| Platform | Use When | Examples |
+|----------|----------|---------|
+| **Railway** | Always-on Node.js, WebSockets, cron jobs, stateful processes | SB-OS, SyntheLIQ engine, mydclaw, tomaholic |
+| **Vercel** | Next.js apps, static sites, serverless API routes, Vercel Cron Jobs | syntheliq.com, X Dashboard, SENTINEL, venture landing pages |
+| **Evaluate** | Mobile apps, Python bots, local-only tools | Polymarket bot, iOS shortcuts |
+
+- **New ventures default**: Vercel (zero infra overhead, free tier)
+- **SB-OS modules / agent backends**: Railway (persistent, always-on)
+- Never Railway for a landing page. Never Vercel for a stateful backend.
 
 ## Mobile Access
 
@@ -1755,6 +1801,57 @@ See **Section 17** for full documentation. Quick reference:
 ## License
 
 Private project - not open source.
+
+---
+
+---
+
+## 20. Agent OS Standards
+
+All product documentation, code standards, and feature specs live in `.agent-os/` in the project root. This is the source of truth for how this codebase is built — read before writing any new feature.
+
+### 20.1. Directory Structure
+
+```
+.agent-os/
+├── product/
+│   ├── mission.md           ← Product vision, users, problems, features
+│   ├── mission-lite.md      ← 2-sentence condensed version for AI context
+│   ├── tech-stack.md        ← Full stack + hosting matrix + auth + DB + LLM cascade
+│   ├── roadmap.md           ← 3-phase build plan with effort estimates
+│   ├── decisions.md         ← Architectural decision log (read before making arch choices)
+│   ├── code-style.md        ← Engineering philosophy + all style rules
+│   └── dev-best-practices.md ← AI-native principles + process + deployment + security
+└── specs/
+    └── YYYY-MM-DD-spec-name/ ← Per-feature specs (created via /create-spec)
+        ├── spec.md
+        ├── spec-lite.md
+        └── sub-specs/
+```
+
+### 20.2. AI-Native Principle (Non-Negotiable)
+
+Every feature is built AI-first. Before writing any code, ask:
+- Can an agent trigger this?
+- Can an agent execute this without human input?
+- Is the output structured JSON that an agent can parse?
+
+A feature that requires daily human operation is not finished. See `dev-best-practices.md` for the full AI-native principles.
+
+### 20.3. Key Rules (Summary)
+
+- **Auth**: Clerk for new Vercel ventures. Session auth stays in SB-OS.
+- **DB**: Neon for Vercel-hosted apps. Railway PostgreSQL for Railway-hosted apps.
+- **LLM cascade**: OpenRouter/Kilocode → OpenAI → Google. Never hard-code one model.
+- **Code style**: Engineering philosophy first — write for junior engineers, no code for code's sake, files under 300 lines, single responsibility per module.
+- **Deploy**: `git push origin main` only. Never `railway up`. Confirm build before calling done.
+- **New features**: Read the spec, find existing patterns, build smallest version that satisfies it, one task at a time.
+
+### 20.4. Workflow
+
+1. `/plan-product` — sets up `.agent-os/product/` for a new product
+2. `/create-spec` — creates a spec folder with requirements, technical spec, DB schema, API spec, tasks
+3. `/execute-tasks` — implements the spec task by task
 
 ---
 
