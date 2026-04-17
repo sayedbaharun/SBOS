@@ -14,6 +14,8 @@
 - [ ] Launch Readiness writer — append Launch Readiness section to `memory-system/{venture}.md` `S`
 - [ ] Telegram notifier — send summary to venture topic via existing `telegram-topic-service.ts` `S`
 - [ ] Trigger hookup — fire from `POST /api/ventures` and manual "Onboard Venture" button on venture detail page `S`
+- [ ] `ingest-markdown` endpoint upgrade — extract entities from markdown content → FalkorDB (currently only goes to Qdrant) `M`
+- [ ] Tag markdown-sourced Qdrant records with `source: "memory-system-md"` and `quality: "curated"` for weighted retrieval `S`
 
 ### Dependencies
 
