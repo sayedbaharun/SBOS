@@ -35,6 +35,13 @@
 |------|---------------|
 | [`ventures/syntheliq-overview.md`](ventures/syntheliq-overview.md) | SyntheLIQ AI — business model, product architecture, SB-OS integration |
 
+## Travel Knowledge
+
+| File | What it covers |
+|------|---------------|
+| [`../knowledge/travel/travel-memberships.md`](../knowledge/travel/travel-memberships.md) | All loyalty program numbers, tiers, expiry — airlines (Qatar, Emirates, Virgin), hotels (IHG, Hilton, Marriott, Accor, Radisson, GHA), car rental, Amex Platinum benefits |
+| [`../knowledge/travel/oneworld-strategy.md`](../knowledge/travel/oneworld-strategy.md) | Qatar Privilege Club Gold / Oneworld Sapphire strategy across all 15 member airlines, Avios earning/redemption sweet spots, status retention requirements, path to Platinum |
+
 ## Archive
 
 Superseded docs are preserved in [`archive/`](archive/) for historical reference. Do not use as current reference.
