@@ -480,6 +480,14 @@ app.use((req, res, next) => {
         seedDefaultEventSubscriptions();
       }).catch(() => {});
 
+      // Seed Obsidian knowledge files (travel + ventures) — fire-and-forget, createDocIfNotExists is idempotent
+      import('./seeds/travel-knowledge').then(({ seedTravelKnowledge }) => {
+        seedTravelKnowledge(storage).catch(() => {});
+      }).catch(() => {});
+      import('./seeds/ventures-knowledge').then(({ seedVenturesKnowledge }) => {
+        seedVenturesKnowledge(storage).catch(() => {});
+      }).catch(() => {});
+
       // Initialize agent scheduler (proactive agent execution — reads schedules from DB)
       const { initializeScheduler } = await import('./agents/agent-scheduler');
       await initializeScheduler();

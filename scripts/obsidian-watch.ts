@@ -47,6 +47,19 @@ async function reseedFile(filePath: string) {
 
       await seedTravelKnowledge(storage);
       console.log(`[obsidian-watch] ✅ Re-seeded travel knowledge — agents will see changes within ~60s`);
+    } else if (category === "ventures") {
+      const { seedVenturesKnowledge } = await import("../server/seeds/ventures-knowledge.js");
+
+      // Delete stale version of this specific venture doc so it gets re-created fresh
+      const title = titleFromFile(filePath);
+      const existing = await (storage as any).findDocByTitle(title);
+      if (existing) {
+        await storage.deleteDoc(existing.id);
+        console.log(`[obsidian-watch] 🗑  Deleted stale version of "${title}"`);
+      }
+
+      await seedVenturesKnowledge(storage);
+      console.log(`[obsidian-watch] ✅ Re-seeded ventures knowledge — agents will see changes within ~60s`);
     } else {
       console.log(`[obsidian-watch] ⚠️  No seed handler for category "${category}" — file saved to disk only`);
     }
@@ -61,6 +74,11 @@ function titleFromFile(filePath: string): string {
   const titleMap: Record<string, string> = {
     "travel-memberships": "SB Travel Memberships",
     "oneworld-strategy": "Oneworld Alliance Strategy",
+    "syntheliq": "SyntheLIQ AI — Venture Knowledge",
+    "aivant-realty": "Aivant Realty — Venture Knowledge",
+    "trading": "Trading — Venture Knowledge",
+    "sigma-mindset": "My Sigma Mindset — Venture Knowledge",
+    "personal-brand": "Personal Brand — Venture Knowledge",
   };
   return titleMap[name] ?? name;
 }
