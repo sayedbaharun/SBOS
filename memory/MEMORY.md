@@ -64,19 +64,34 @@
 
 → Full stack: `memory/context/tools-and-stack.md`
 
-## Current Focus (2026-04-11)
+## Current Focus (2026-04-17)
 
-### What shipped (2026-04-11)
-- **Model cascade bulletproofed** — 8-shot fallback: OpenRouter → Kilo → direct OpenAI → Groq. `OPENAI_API_KEY` added to Railway. Deprecated `claude-3.5-sonnet` removed. Commit `294f34b`.
-- **Personal Brand + Learning pages** — `/brand` + `/learning` routes. New `courses` + `podcasts` DB tables. Sidebar links added.
-- **Notion export imported** — 53 books, 7 Knowledge Base docs (trading strategy, command board, brand prompt, quotes, investors, trading journal, project taxonomy), 4 Qdrant memory files. Source deleted.
-- **Command Center V4** — Full 3-column CEO dashboard (Your Day | Execution | Business Health). Commits `0477abb` + `d6dc93e`.
-- **Venture OKR system** — `venture_goals` + `key_results` tables, Goals tab on venture detail, venture pack Drive staging, OKR agent tools.
-- **Daily Operating Workflow** — Scout suggestions banner, per-task agent delegation, Review Queue re-added, daily_briefing counts agent-ready tasks + pending reviews.
+### What shipped (2026-04-17) — 4 commits to SBOS
+- **Agent OS Standards** (`6dc8d6b`) — `.agent-os/product/` with 7 files: mission, tech-stack, roadmap, decisions, code-style, dev-best-practices, mission-lite. AI-Native as Pillar 0.
+- **CLAUDE.md (root) updated** (`aded847`) — Phase 13 complete, Phase 14 planned (Venture Onboarding System), hosting matrix, tech stack locked.
+- **tsc hook** (`e55d804`) — auto-runs `tsc --noEmit` after every Edit/Write in SBOS. 6-layer memory stack added to roadmap.
+- **Obsidian ventures knowledge** (`57dfda9`) — 5 files in `knowledge/ventures/`, seed script, watch script updated, startup auto-seed wired.
+
+### Tech Stack (Locked 2026-04-17)
+- Auth: Clerk (Vercel ventures) / session (SB-OS itself)
+- DB: Neon (Vercel-hosted) / Railway PG (Railway-hosted)
+- LLM: OpenRouter/Kilocode → OpenAI → Google. Never single model.
+- Hosting: Railway (always-on, WebSockets, cron) / Vercel (serverless, static, Next.js)
+
+### Phase 14: Venture Onboarding System (NEXT)
+- Phase 1: SB-OS module (type classifier, checklist filter, task creator, Drive scaffolder)
+- Phase 2: 4 skills (brand-identity-builder, legal-scaffolder, content-strategy-builder, offer-architect)
+- **Blockers**: (1) skills API service token, (2) Google Drive service account on Railway
+- **First venture to onboard**: run `/venture-audit` to decide
+
+### Obsidian Vault
+- Location: `~/Documents/SBOS/` — symlinked to `~/GitHub/SBOS/`
+- `knowledge/ventures/` — 5 venture context files, auto-indexed into Qdrant via watch script
+- `memory/` — Claude Code ↔ Cowork session bridge
+- Edit in Obsidian → saved to repo → Qdrant updated within ~60s
 
 ### Open Threads
-- [ ] Verify `db:push` on Railway — `venture_goals` + `key_results` tables may need push
-- [ ] Test venture pack end-to-end: stage → Drive docs → approve → DB records created
-- [ ] Populate DB with real ventures/projects/tasks (using real data since 2026-03-30 wipe)
-- [x] Model cascade — 8 shots, 5 providers, effectively bulletproof
-- [x] Notion export fully imported + source deleted
+- [ ] Skills API auth — service token for Phase 2 skills to call SB-OS
+- [ ] Google Drive service account env vars confirm on Railway
+- [ ] Run `/venture-audit` on SyntheLIQ → decide first onboarding candidate
+- [ ] `/create-spec` for Phase 14 Phase 1 once blockers resolved
