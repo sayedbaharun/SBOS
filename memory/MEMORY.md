@@ -61,6 +61,7 @@
 | **GitHub** | Code repo: sayedbaharun/SBOS |
 | **TickTick** | Mobile task capture → syncs to SB-OS inbox |
 | **WHOOP** | Health/fitness tracking → syncs to SB-OS |
+| **NotebookLM** | Research automation, podcast/content generation, Arabic output — `notebooklm` CLI, skill in `~/.agents/skills/notebooklm/` |
 
 → Full stack: `memory/context/tools-and-stack.md`
 
@@ -90,8 +91,19 @@
 - `memory/` — Claude Code ↔ Cowork session bridge
 - Edit in Obsidian → saved to repo → Qdrant updated within ~60s
 
+## Phase 14: Venture Lifecycle UI — COMPLETE (2026-04-18)
+
+Commit `0a6d6d1` — full pipeline from prototype to launch readiness.
+
+- `/venture-lab/build` — Build Brief Generator (3 briefs: Manus, Lovable, Eval)
+- Prototype stage in Venture Lab (optional, between Approve and Compile)
+- Launch Readiness tab on ALL venture detail pages (10-category tracker, AI audit, task creation)
+- Venture HQ cards show readiness tier badge (Pre-MVP / MVP ✓ / Soft ✓ / Full ✓)
+- `~/.claude/skills/external-build-standards/SKILL.md` — 7-checkpoint compliance validator
+
 ### Open Threads
-- [ ] Skills API auth — service token for Phase 2 skills to call SB-OS
-- [ ] Google Drive service account env vars confirm on Railway
-- [ ] Run `/venture-audit` on SyntheLIQ → decide first onboarding candidate
-- [ ] `/create-spec` for Phase 14 Phase 1 once blockers resolved
+- [ ] Run "Run AI Audit" on SyntheLIQ, AMO, Aivant via their Launch tabs
+- [ ] Skills API service token — Phase 2 skills blocker
+- [ ] Google Drive service account on Railway — Drive scaffolder blocker
+- [ ] JSON credentials cleanup session (planned)
+- [ ] Google Drive MCP for CLI (needs OAuth credentials)

@@ -60,6 +60,24 @@
 | signal-detection | Strategic change monitoring |
 | skill-creator | Create/optimize Cowork skills |
 
+## Research & Content Generation
+
+| Tool | What for | Access |
+|------|----------|--------|
+| **NotebookLM** (`notebooklm-py`) | Research automation, podcast/video/quiz/mind map generation, Arabic content for SyntheLIQ clients | CLI: `notebooklm` (pip installed) · Auth: `~/.notebooklm/storage_state.json` |
+
+**Skill:** `~/.agents/skills/notebooklm/SKILL.md` — available in Claude Code, Cowork, and all agents in `~/.agents/`.
+
+**Key workflows:**
+- Deep web research → briefing doc → SB-OS task notes
+- Arabic audio overview for SyntheLIQ clients (`notebooklm language set ar` → `generate audio`)
+- YouTube/PDF → mind map JSON + flashcards for knowledge capture
+- Notebook data can be fed into SB-OS memory via `source fulltext` → `/api/memory/store`
+
+**10 notebooks in account** (Apr 2026): Conway/Agentic Lock-in, Distribution Moat, AI Chief of Staff, AI Job Market Skills, Investment Strategy 2026, Trading, Psychology, Singularity Program, Personal Brand, Trading Guidelines.
+
+---
+
 ## How Claude Code and Cowork Connect
 
 ```
