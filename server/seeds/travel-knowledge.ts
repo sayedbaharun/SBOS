@@ -45,7 +45,13 @@ export async function seedTravelKnowledge(storageInstance: IStorage) {
 
   for (const docDef of TRAVEL_DOCS) {
     const filePath = path.join(KNOWLEDGE_DIR, docDef.file);
-    const body = fs.readFileSync(filePath, "utf-8");
+    let body: string;
+    try {
+      body = fs.readFileSync(filePath, "utf-8");
+    } catch {
+      // File not present in this environment (e.g. Railway) — skip silently
+      continue;
+    }
 
     const { doc, created } = await storageInstance.createDocIfNotExists({
       title: docDef.title,
