@@ -29,6 +29,7 @@ import BiasPanel from "@/components/trading/bias-panel";
 import DisciplineScorecard from "@/components/trading/discipline-scorecard";
 import PerformancePanel from "@/components/trading/performance-panel";
 import NewsWire from "@/components/trading/news-wire";
+import LivePositions from "@/components/trading/live-positions";
 import type { Venture } from "@shared/schema";
 
 interface QuickLink {
@@ -175,14 +176,9 @@ export default function TradingCommandCenter() {
               </CardContent>
             </Card>
 
-            {/* Broker API placeholder */}
-            <Card className="border-dashed border-border/60">
-              <CardContent className="p-4 text-center space-y-1.5">
-                <Activity className="h-7 w-7 mx-auto text-muted-foreground/40" />
-                <p className="text-sm font-medium text-muted-foreground">Live Positions</p>
-                <p className="text-xs text-muted-foreground/70">Connect broker API to see open trades, margin, and unrealized P&L here.</p>
-              </CardContent>
-            </Card>
+            <Section icon={Activity} title="Live Positions">
+              <LivePositions />
+            </Section>
           </div>
         </div>
 
