@@ -1861,6 +1861,48 @@ export const tradingRiskConfig = pgTable("trading_risk_config", {
 
 export type TradingRiskConfig = typeof tradingRiskConfig.$inferSelect;
 
+// MT5 Broker Snapshot — pushed by EA every 30s, single-row upsert per account
+export interface MT5Position {
+  ticket: number;
+  symbol: string;
+  type: "buy" | "sell";
+  volume: number;
+  openPrice: number;
+  currentPrice: number;
+  sl: number;
+  tp: number;
+  profit: number;
+  swap: number;
+  commission: number;
+  openTime: string; // ISO
+  comment: string;
+}
+
+export interface MT5AccountInfo {
+  login: number;
+  name: string;
+  server: string;
+  currency: string;
+  leverage: number;
+  balance: number;
+  equity: number;
+  margin: number;
+  freeMargin: number;
+  marginLevel: number; // percent
+  profit: number;
+}
+
+export const tradingBrokerSnapshot = pgTable("trading_broker_snapshot", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  accountLogin: integer("account_login").notNull(),
+  accountInfo: jsonb("account_info").$type<MT5AccountInfo>().notNull(),
+  positions: jsonb("positions").$type<MT5Position[]>().default([]),
+  pushedAt: timestamp("pushed_at").defaultNow().notNull(),
+  eaVersion: text("ea_version"),
+});
+
+export type TradingBrokerSnapshot = typeof tradingBrokerSnapshot.$inferSelect;
+
 // ----------------------------------------------------------------------------
 // PEOPLE / RELATIONSHIPS CRM
 // ----------------------------------------------------------------------------

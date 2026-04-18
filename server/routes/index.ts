@@ -224,7 +224,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Apply authentication middleware to all /api routes except auth and external endpoints
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     // Skip auth for auth and external endpoints (they have their own auth)
-    if (req.path.startsWith('/auth/') || req.path.startsWith('/external/')) {
+    if (req.path.startsWith('/auth/') || req.path.startsWith('/external/') || req.path === '/trading/broker-sync') {
       return next();
     }
     // Apply requireAuth
@@ -340,6 +340,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/trading-strategies', strategiesRouter);
   app.use('/api/trading-checklists', checklistsRouter);
   app.use('/api/trading/economic-calendar', calendarRouter);
+  // broker-sync has its own secret-header auth — must be mounted BEFORE requireAuth middleware wraps /api
+  app.post('/api/trading/broker-sync', (req, res, next) => tradingCcRouter(req, res, next));
   app.use('/api/trading', tradingCcRouter);
 
   // ============================================================================

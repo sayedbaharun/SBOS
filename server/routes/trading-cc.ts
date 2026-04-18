@@ -4,7 +4,7 @@
  */
 import { Router, Request, Response } from "express";
 import { db } from "../../db";
-import { dailyTradingChecklists, tradingBias, tradingRiskConfig } from "@shared/schema";
+import { dailyTradingChecklists, tradingBias, tradingRiskConfig, tradingBrokerSnapshot } from "@shared/schema";
 import { eq, desc, and, gte, sql } from "drizzle-orm";
 import { logger } from "../logger";
 
@@ -518,6 +518,93 @@ ccRouter.delete("/bias/:id", async (req: Request, res: Response) => {
   } catch (error) {
     logger.error({ error }, "Error deleting trading bias");
     res.status(500).json({ error: "Failed to delete trading bias" });
+  }
+});
+
+// ============================================================================
+// MT5 BROKER SYNC — receives push from MT5 EA every 30s
+// POST /api/trading/broker-sync  (no session auth — uses shared secret header)
+// GET  /api/trading/positions     (session auth via normal middleware)
+// GET  /api/trading/account       (session auth)
+// ============================================================================
+
+// POST — EA pushes here. Authenticated via X-Broker-Secret header.
+ccRouter.post("/broker-sync", async (req: Request, res: Response) => {
+  try {
+    const secret = req.headers["x-broker-secret"];
+    const expected = process.env.BROKER_SYNC_SECRET;
+    if (!expected || secret !== expected) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const { accountInfo, positions, eaVersion } = req.body;
+    if (!accountInfo?.login) {
+      return res.status(400).json({ error: "accountInfo.login required" });
+    }
+
+    // Upsert — keep one row per account login (replace on each push)
+    const existing = await db
+      .select({ id: tradingBrokerSnapshot.id })
+      .from(tradingBrokerSnapshot)
+      .where(eq(tradingBrokerSnapshot.accountLogin, accountInfo.login))
+      .limit(1);
+
+    if (existing.length > 0) {
+      await db.update(tradingBrokerSnapshot)
+        .set({ accountInfo, positions: positions ?? [], eaVersion: eaVersion ?? null, pushedAt: new Date() })
+        .where(eq(tradingBrokerSnapshot.id, existing[0].id));
+    } else {
+      await db.insert(tradingBrokerSnapshot)
+        .values({ accountLogin: accountInfo.login, accountInfo, positions: positions ?? [], eaVersion: eaVersion ?? null });
+    }
+
+    res.json({ ok: true, receivedAt: new Date().toISOString(), positionCount: (positions ?? []).length });
+  } catch (error) {
+    logger.error({ error }, "Error processing broker sync");
+    res.status(500).json({ error: "Failed to process broker sync" });
+  }
+});
+
+// GET latest positions
+ccRouter.get("/positions", async (_req: Request, res: Response) => {
+  try {
+    const rows = await db
+      .select()
+      .from(tradingBrokerSnapshot)
+      .orderBy(desc(tradingBrokerSnapshot.pushedAt))
+      .limit(1);
+
+    if (rows.length === 0) return res.json({ positions: [], accountInfo: null, pushedAt: null });
+    const snap = rows[0];
+    const ageMs = Date.now() - new Date(snap.pushedAt).getTime();
+    res.json({
+      positions: snap.positions ?? [],
+      accountInfo: snap.accountInfo,
+      pushedAt: snap.pushedAt,
+      stale: ageMs > 5 * 60_000, // stale if > 5 min old
+    });
+  } catch (error) {
+    logger.error({ error }, "Error fetching positions");
+    res.status(500).json({ error: "Failed to fetch positions" });
+  }
+});
+
+// GET account info only
+ccRouter.get("/account", async (_req: Request, res: Response) => {
+  try {
+    const rows = await db
+      .select()
+      .from(tradingBrokerSnapshot)
+      .orderBy(desc(tradingBrokerSnapshot.pushedAt))
+      .limit(1);
+
+    if (rows.length === 0) return res.json({ accountInfo: null, pushedAt: null });
+    const snap = rows[0];
+    const ageMs = Date.now() - new Date(snap.pushedAt).getTime();
+    res.json({ accountInfo: snap.accountInfo, pushedAt: snap.pushedAt, stale: ageMs > 5 * 60_000 });
+  } catch (error) {
+    logger.error({ error }, "Error fetching account info");
+    res.status(500).json({ error: "Failed to fetch account info" });
   }
 });
 
