@@ -69,6 +69,8 @@ import approvalPoliciesRoutes from "./approval-policies";
 import decisionsRoutes from "./decisions";
 import eventsRoutes from "./events";
 import eventSubscriptionsRoutes from "./event-subscriptions";
+import socialAuthRoutes from "./social-auth";
+import contentIngestRoutes from "./content-ingest";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
@@ -339,6 +341,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/trading-checklists', checklistsRouter);
   app.use('/api/trading/economic-calendar', calendarRouter);
   app.use('/api/trading', tradingCcRouter);
+
+  // ============================================================================
+  // SOCIAL PUBLISHING
+  // ============================================================================
+  app.use('/api/social', requireAuth, socialAuthRoutes);
+  app.use('/api/content', contentIngestRoutes);
 
   // ============================================================================
   // DECISION MAKING

@@ -27,6 +27,8 @@ schedule:
   github_actions_sha_audit: "0 6 * * 1"
   venture_digest: "0 20 * * 0"
   free_model_scout: "0 9 */5 * *"
+  drain_scheduled_posts: "*/5 * * * *"
+  post_analytics_backfill: "0 */6 * * *"
 memory_scope: isolated
 ---
 

@@ -2557,3 +2557,72 @@ registerJobHandler("proactive_morning_loop", async (_agentId: string, _agentSlug
   const { runProactiveMorningLoop } = await import("./proactive-loop");
   await runProactiveMorningLoop();
 });
+
+// ============================================================================
+// DRAIN SCHEDULED POSTS — Publishes approved posts whose scheduled_for has passed
+// Cron: every 5 minutes. Registered as a system-level job (no agent required).
+// ============================================================================
+registerJobHandler("drain_scheduled_posts", async (_agentId: string, _agentSlug: string) => {
+  try {
+    const { db: database } = await import("../../db/index");
+    const { scheduledPosts } = await import("@shared/schema");
+    const { lte, inArray } = await import("drizzle-orm");
+    const { publishPost } = await import("../publishers/index");
+
+    const due = await database
+      .select({ id: scheduledPosts.id, platform: scheduledPosts.platform })
+      .from(scheduledPosts)
+      .where(
+        inArray(scheduledPosts.status, ["approved"] as any[])
+      );
+
+    // Filter those whose scheduledFor has passed (or is null = publish immediately)
+    const now = new Date();
+    const toPublish = due.filter((p: any) => {
+      const sf = (p as any).scheduledFor;
+      return !sf || new Date(sf) <= now;
+    });
+
+    if (toPublish.length === 0) return;
+
+    logger.info({ count: toPublish.length }, "drain_scheduled_posts: publishing due posts");
+
+    const results = await Promise.allSettled(toPublish.map((p: any) => publishPost(p.id)));
+    const failed = results.filter((r) => r.status === "rejected");
+    if (failed.length > 0) {
+      logger.warn({ failed: failed.length }, "drain_scheduled_posts: some posts failed");
+    }
+  } catch (err: any) {
+    logger.error({ error: err.message }, "drain_scheduled_posts: unexpected error");
+  }
+});
+
+// ============================================================================
+// POST ANALYTICS BACKFILL — Fetches platform metrics for published posts
+// Runs every 6 hours.
+// ============================================================================
+registerJobHandler("post_analytics_backfill", async (_agentId: string, _agentSlug: string) => {
+  try {
+    const { db: database } = await import("../../db/index");
+    const { scheduledPosts } = await import("@shared/schema");
+    const { eq, and, gte } = await import("drizzle-orm");
+
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const published = await database
+      .select()
+      .from(scheduledPosts)
+      .where(
+        and(
+          eq(scheduledPosts.status, "published"),
+          gte(scheduledPosts.postedAt, cutoff)
+        )
+      )
+      .limit(50);
+
+    logger.info({ count: published.length }, "post_analytics_backfill: checking metrics for posts");
+    // Platform-specific metric fetching deferred until each publisher exposes a getMetrics() method.
+    // For now, log the count so the job runs cleanly without errors.
+  } catch (err: any) {
+    logger.error({ error: err.message }, "post_analytics_backfill: unexpected error");
+  }
+});

@@ -110,4 +110,16 @@ export const TELEGRAM_TOPICS: TopicDefinition[] = [
     iconColor: TOPIC_COLORS.PURPLE,
     eventTypes: ["brief.evening.ready", "evening.review.completed"],
   },
+  // ── Content publishing ────────────────────────────────────────────────────
+  {
+    topicKey: "content",
+    name: "📣 Content",
+    iconColor: TOPIC_COLORS.PINK,
+    eventTypes: [
+      "content.pending_review",
+      "content.published",
+      "content.failed",
+      "content.scheduled",
+    ],
+  },
 ];

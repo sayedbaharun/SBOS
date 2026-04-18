@@ -4350,3 +4350,126 @@ export const telegramTopicMap = pgTable("telegram_topic_map", {
 export const insertTelegramTopicMapSchema = createInsertSchema(telegramTopicMap).omit({ id: true, createdAt: true, updatedAt: true });
 export type TelegramTopicMap = typeof telegramTopicMap.$inferSelect;
 export type InsertTelegramTopicMap = z.infer<typeof insertTelegramTopicMapSchema>;
+
+// ----------------------------------------------------------------------------
+// SOCIAL PUBLISHING: OAuth accounts, scheduled posts, analytics
+// ----------------------------------------------------------------------------
+
+export const socialPlatformEnum = pgEnum('social_platform', [
+  'x', 'linkedin', 'youtube', 'tiktok', 'instagram',
+]);
+
+export const socialAccountStatusEnum = pgEnum('social_account_status', [
+  'active', 'expired', 'revoked', 'error',
+]);
+
+export const socialAccounts = pgTable(
+  "social_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    platform: socialPlatformEnum("platform").notNull(),
+    handle: text("handle").notNull(),
+    platformUserId: text("platform_user_id").notNull(),
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token"),
+    tokenExpiresAt: timestamp("token_expires_at"),
+    scopes: text("scopes"),
+    status: socialAccountStatusEnum("status").default("active").notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_social_accounts_platform").on(table.platform),
+    index("idx_social_accounts_status").on(table.status),
+  ]
+);
+
+export const insertSocialAccountSchema = createInsertSchema(socialAccounts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type SocialAccount = typeof socialAccounts.$inferSelect;
+export type InsertSocialAccount = z.infer<typeof insertSocialAccountSchema>;
+
+export const scheduledPostStatusEnum = pgEnum('scheduled_post_status', [
+  'draft', 'pending_review', 'approved', 'scheduled', 'publishing', 'published', 'failed', 'cancelled',
+]);
+
+export const scheduledPostSourceEnum = pgEnum('scheduled_post_source', [
+  'sbcontent', 'agent', 'manual',
+]);
+
+export const scheduledPosts = pgTable(
+  "scheduled_posts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    platform: socialPlatformEnum("platform").notNull(),
+    status: scheduledPostStatusEnum("status").default("pending_review").notNull(),
+    source: scheduledPostSourceEnum("source").default("manual").notNull(),
+    copy: text("copy").notNull(),
+    mediaUrls: jsonb("media_urls").$type<string[]>().default([]),
+    hashtags: jsonb("hashtags").$type<string[]>().default([]),
+    pillar: text("pillar"),
+    hook: text("hook"),
+    title: text("title"),
+    scheduledFor: timestamp("scheduled_for"),
+    postedAt: timestamp("posted_at"),
+    platformPostId: text("platform_post_id"),
+    platformPostUrl: text("platform_post_url"),
+    socialAccountId: uuid("social_account_id").references(() => socialAccounts.id, { onDelete: "set null" }),
+    ventureId: uuid("venture_id").references(() => ventures.id, { onDelete: "set null" }),
+    sbcontentVideoId: text("sbcontent_video_id"),
+    telegramMessageId: integer("telegram_message_id"),
+    error: text("error"),
+    retryCount: integer("retry_count").default(0),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_scheduled_posts_status").on(table.status),
+    index("idx_scheduled_posts_platform").on(table.platform),
+    index("idx_scheduled_posts_scheduled_for").on(table.scheduledFor),
+    index("idx_scheduled_posts_venture").on(table.ventureId),
+  ]
+);
+
+export const insertScheduledPostSchema = createInsertSchema(scheduledPosts).omit({
+  id: true,
+  postedAt: true,
+  platformPostId: true,
+  platformPostUrl: true,
+  error: true,
+  retryCount: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type ScheduledPost = typeof scheduledPosts.$inferSelect;
+export type InsertScheduledPost = z.infer<typeof insertScheduledPostSchema>;
+
+export const postAnalytics = pgTable(
+  "post_analytics",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id").references(() => scheduledPosts.id, { onDelete: "cascade" }).notNull(),
+    fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+    impressions: integer("impressions").default(0),
+    likes: integer("likes").default(0),
+    comments: integer("comments").default(0),
+    shares: integer("shares").default(0),
+    watchTimeSecs: integer("watch_time_secs"),
+    ctr: real("ctr"),
+    reach: integer("reach"),
+    rawMetrics: jsonb("raw_metrics").$type<Record<string, unknown>>(),
+  },
+  (table) => [
+    index("idx_post_analytics_post_id").on(table.postId),
+    index("idx_post_analytics_fetched_at").on(table.fetchedAt),
+  ]
+);
+
+export type PostAnalytics = typeof postAnalytics.$inferSelect;
