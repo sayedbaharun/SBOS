@@ -413,4 +413,137 @@ router.get("/:ventureId/staged-pack", async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// LAUNCH READINESS — Track 10-category launch checklist per venture
+// ============================================================================
+
+// GET /api/ventures/:id/launch-readiness
+router.get("/:id/launch-readiness", async (req: Request, res: Response) => {
+  try {
+    const venture = await storage.getVenture(String(req.params.id));
+    if (!venture) return res.status(404).json({ error: "Venture not found" });
+
+    const items = await storage.getVentureLaunchReadiness(venture.id);
+    const score = computeReadinessScore(items);
+    const tier = computeCurrentTier(items);
+
+    res.json({ ventureId: venture.id, score, currentTier: tier, items });
+  } catch (error) {
+    logger.error({ error }, "Error fetching launch readiness");
+    res.status(500).json({ error: "Failed to fetch launch readiness" });
+  }
+});
+
+// POST /api/ventures/:id/launch-readiness/bulk — upsert all items
+router.post("/:id/launch-readiness/bulk", async (req: Request, res: Response) => {
+  try {
+    const venture = await storage.getVenture(String(req.params.id));
+    if (!venture) return res.status(404).json({ error: "Venture not found" });
+
+    const { items } = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "items array is required" });
+    }
+
+    await storage.upsertVentureLaunchReadiness(venture.id, items);
+    const updated = await storage.getVentureLaunchReadiness(venture.id);
+
+    res.json({ success: true, count: updated.length });
+  } catch (error) {
+    logger.error({ error }, "Error bulk upserting launch readiness");
+    res.status(500).json({ error: "Failed to update launch readiness" });
+  }
+});
+
+// PATCH /api/ventures/:id/launch-readiness/:itemId — update single item
+router.patch("/:id/launch-readiness/:itemId", async (req: Request, res: Response) => {
+  try {
+    const { status, agentReady, notes } = req.body;
+    const updated = await storage.updateVentureLaunchReadinessItem(
+      String(req.params.itemId),
+      { status, agentReady, notes }
+    );
+    if (!updated) return res.status(404).json({ error: "Item not found" });
+    res.json(updated);
+  } catch (error) {
+    logger.error({ error }, "Error updating launch readiness item");
+    res.status(500).json({ error: "Failed to update item" });
+  }
+});
+
+// POST /api/ventures/:id/launch-readiness/run-audit — AI audit of venture readiness
+router.post("/:id/launch-readiness/run-audit", async (req: Request, res: Response) => {
+  try {
+    const venture = await storage.getVenture(String(req.params.id));
+    if (!venture) return res.status(404).json({ error: "Venture not found" });
+
+    const [projects, tasks, docs] = await Promise.all([
+      storage.getProjects({ ventureId: venture.id }),
+      storage.getTasks({ ventureId: venture.id }),
+      storage.getDocs({ ventureId: venture.id }),
+    ]);
+
+    const { auditVentureReadiness } = await import("../agents/launch-readiness-parser");
+    const parsed = await auditVentureReadiness({
+      name: venture.name,
+      oneLiner: venture.oneLiner,
+      domain: venture.domain,
+      notes: venture.notes,
+      projectCount: projects.length,
+      taskCount: tasks.length,
+      docCount: docs.length,
+    });
+
+    const items = parsed.categories.flatMap(cat =>
+      cat.items.map(item => ({
+        category: cat.id,
+        categoryName: cat.name,
+        item: item.item,
+        tier: item.tier,
+        status: item.status,
+        agentReady: item.agentReady,
+        notes: null as string | null,
+      }))
+    );
+
+    await storage.upsertVentureLaunchReadiness(venture.id, items);
+    const updated = await storage.getVentureLaunchReadiness(venture.id);
+    const score = computeReadinessScore(updated);
+    const tier = computeCurrentTier(updated);
+
+    res.json({ success: true, score, currentTier: tier, count: updated.length });
+  } catch (error) {
+    logger.error({ error }, "Error running launch readiness audit");
+    res.status(500).json({ error: "Failed to run audit" });
+  }
+});
+
+// Helper: compute 1-100 readiness score
+function computeReadinessScore(items: any[]): number {
+  if (items.length === 0) return 0;
+  const weights: Record<string, number> = { mvp: 3, soft: 2, full: 1 };
+  let total = 0, max = 0;
+  for (const item of items) {
+    if (item.status === 'na') continue;
+    const w = weights[item.tier] || 1;
+    max += w;
+    if (item.status === 'done') total += w;
+    else if (item.status === 'partial') total += w * 0.5;
+  }
+  return max === 0 ? 0 : Math.round((total / max) * 100);
+}
+
+// Helper: determine current tier
+function computeCurrentTier(items: any[]): string {
+  const active = items.filter(i => i.status !== 'na');
+  const mvpItems = active.filter(i => i.tier === 'mvp');
+  const softItems = active.filter(i => i.tier === 'soft');
+  const fullItems = active.filter(i => i.tier === 'full');
+  const allDone = (arr: any[]) => arr.every(i => i.status === 'done');
+  if (mvpItems.length > 0 && !allDone(mvpItems)) return 'pre-mvp';
+  if (softItems.length > 0 && !allDone(softItems)) return 'mvp';
+  if (fullItems.length > 0 && !allDone(fullItems)) return 'soft';
+  return 'full';
+}
+
 export default router;

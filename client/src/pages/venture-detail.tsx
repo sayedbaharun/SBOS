@@ -19,6 +19,7 @@ import VentureContent from "@/components/venture-hq/venture-content";
 import VentureGoals from "@/components/venture-hq/venture-goals";
 import TradingHub from "@/components/trading/trading-hub";
 import TradingAiChat from "@/components/trading/trading-ai-chat";
+import LaunchReadinessTab from "@/components/venture/launch-readiness-tab";
 
 interface Venture {
   id: string;
@@ -162,6 +163,7 @@ export default function VentureDetail() {
               <TabsTrigger value="tasks" className="text-xs sm:text-sm">Tasks</TabsTrigger>
               <TabsTrigger value="docs" className="text-xs sm:text-sm whitespace-nowrap">Knowledge</TabsTrigger>
               <TabsTrigger value="content" className="text-xs sm:text-sm whitespace-nowrap">Content</TabsTrigger>
+              <TabsTrigger value="launch" className="text-xs sm:text-sm whitespace-nowrap">Launch</TabsTrigger>
               <TabsTrigger value="ai-agent" className="text-xs sm:text-sm whitespace-nowrap">AI Agent</TabsTrigger>
             </TabsList>
           </div>
@@ -208,6 +210,10 @@ export default function VentureDetail() {
 
         <TabsContent value="content">
           <VentureContent ventureId={venture.id} />
+        </TabsContent>
+
+        <TabsContent value="launch">
+          <LaunchReadinessTab ventureId={venture.id} ventureName={venture.name} />
         </TabsContent>
 
         <TabsContent value="ai-agent" className="space-y-4">

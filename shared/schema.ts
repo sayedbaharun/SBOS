@@ -2824,6 +2824,7 @@ export const ventureIdeaStatusEnum = pgEnum('venture_idea_status', [
   'scoring',     // AI scoring in progress
   'scored',      // Scored, awaiting human decision
   'approved',    // Human approved, ready for compilation
+  'prototyped',  // External prototype built and evaluated
   'rejected',    // Human rejected (killed)
   'parked',      // Human parked for later
   'compiling',   // Compilation in progress
@@ -2919,6 +2920,42 @@ export const ventureIdeas = pgTable(
       totalTokensUsed?: number;
     }>(),
 
+    // Prototype tracking (external build in Genspark/Manus/Lovable/Replit)
+    prototypeUrl: text("prototype_url"),
+    prototypePlatform: varchar("prototype_platform", { length: 50 }), // genspark | manus | replit | lovable | v0 | other
+    prototypeEvalRaw: text("prototype_eval_raw"),
+    prototypeEvalParsed: jsonb("prototype_eval_parsed").$type<{
+      readinessScore: number;
+      ventureType: string;
+      currentTier: 'pre-mvp' | 'mvp' | 'soft' | 'full';
+      standardsCompliance: {
+        clerk: boolean | null;
+        neon: boolean | null;
+        typescript: boolean | null;
+        tailwind: boolean | null;
+        noHardcodedSecrets: boolean | null;
+      };
+      categories: Array<{
+        id: number;
+        name: string;
+        items: Array<{
+          item: string;
+          tier: 'mvp' | 'soft' | 'full';
+          status: 'done' | 'partial' | 'missing' | 'na';
+          agentReady: boolean;
+        }>;
+      }>;
+    }>(),
+    prototypeReadinessScore: integer("prototype_readiness_score"),
+    buildBriefData: jsonb("build_brief_data").$type<{
+      manusBrief: string;
+      lovableBrief: string;
+      evaluationPrompt: string;
+      generatedAt: string;
+      ventureType: string;
+      targetHosting: string;
+    }>(),
+
     // Metadata
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -2940,6 +2977,39 @@ export const insertVentureIdeaSchema = createInsertSchema(ventureIdeas).omit({
 
 export type VentureIdea = typeof ventureIdeas.$inferSelect;
 export type InsertVentureIdea = z.infer<typeof insertVentureIdeaSchema>;
+
+// ============================================================================
+// VENTURE LAUNCH READINESS
+// ============================================================================
+
+export const ventureLaunchReadiness = pgTable(
+  "venture_launch_readiness",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ventureId: uuid("venture_id").notNull().references(() => ventures.id, { onDelete: "cascade" }),
+    category: integer("category").notNull(), // 1-10 matching launch checklist
+    categoryName: varchar("category_name", { length: 50 }).notNull(), // Brand | Legal | Presence | Content | Offer | Ops | Tech | Distribution | Team | AI-Native
+    item: text("item").notNull(),
+    tier: varchar("tier", { length: 10 }).notNull(), // mvp | soft | full
+    status: varchar("status", { length: 10 }).notNull().default("missing"), // done | partial | missing | na
+    agentReady: boolean("agent_ready").default(false).notNull(),
+    notes: text("notes"),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_venture_readiness_venture").on(table.ventureId),
+    index("idx_venture_readiness_tier").on(table.tier),
+    index("idx_venture_readiness_status").on(table.status),
+  ]
+);
+
+export const insertVentureLaunchReadinessSchema = createInsertSchema(ventureLaunchReadiness).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export type VentureLaunchReadiness = typeof ventureLaunchReadiness.$inferSelect;
+export type InsertVentureLaunchReadiness = z.infer<typeof insertVentureLaunchReadinessSchema>;
 
 // ============================================================================
 // MEMORY SYSTEM TABLES

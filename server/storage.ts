@@ -187,6 +187,9 @@ import {
   type InsertKeyResult,
   keyResults,
   agentJobRuns,
+  ventureLaunchReadiness,
+  type VentureLaunchReadiness,
+  type InsertVentureLaunchReadiness,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { eq, desc, and, or, gte, lte, not, inArray, like, sql, asc, isNull } from "drizzle-orm";
@@ -4740,6 +4743,42 @@ export class DBStorage implements IStorage {
     } catch (error) {
       console.error("Error deleting venture idea (table may not exist):", error);
     }
+  }
+
+  // ============================================================================
+  // VENTURE LAUNCH READINESS
+  // ============================================================================
+
+  async getVentureLaunchReadiness(ventureId: string): Promise<VentureLaunchReadiness[]> {
+    return this.db
+      .select()
+      .from(ventureLaunchReadiness)
+      .where(eq(ventureLaunchReadiness.ventureId, ventureId))
+      .orderBy(ventureLaunchReadiness.category, ventureLaunchReadiness.tier);
+  }
+
+  async upsertVentureLaunchReadiness(
+    ventureId: string,
+    items: Omit<InsertVentureLaunchReadiness, 'ventureId'>[]
+  ): Promise<void> {
+    if (items.length === 0) return;
+    // Delete existing and replace — simpler than per-row upsert on composite key
+    await this.db.delete(ventureLaunchReadiness).where(eq(ventureLaunchReadiness.ventureId, ventureId));
+    await this.db.insert(ventureLaunchReadiness).values(
+      items.map(item => ({ ...item, ventureId }))
+    );
+  }
+
+  async updateVentureLaunchReadinessItem(
+    id: string,
+    updates: Partial<Pick<VentureLaunchReadiness, 'status' | 'agentReady' | 'notes'>>
+  ): Promise<VentureLaunchReadiness | undefined> {
+    const [updated] = await this.db
+      .update(ventureLaunchReadiness)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(ventureLaunchReadiness.id, id))
+      .returning();
+    return updated;
   }
 
   // ============================================================================

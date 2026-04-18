@@ -23,7 +23,11 @@ import {
   ExternalLink,
   Clock,
   Zap,
+  Wand2,
+  Link,
+  ClipboardPaste,
 } from "lucide-react";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -137,6 +141,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }>
   scoring: { label: "Scoring", color: "bg-purple-500", icon: Brain },
   scored: { label: "Scored", color: "bg-violet-500", icon: TrendingUp },
   approved: { label: "Approved", color: "bg-green-500", icon: CheckCircle2 },
+  prototyped: { label: "Prototyped", color: "bg-teal-500", icon: Link },
   rejected: { label: "Killed", color: "bg-red-500", icon: XCircle },
   parked: { label: "Parked", color: "bg-amber-500", icon: PauseCircle },
   compiling: { label: "Compiling", color: "bg-cyan-500", icon: Zap },
@@ -713,8 +718,13 @@ function IdeaDetail({
             </div>
           )}
 
-          {/* Step 5: Compile */}
-          {idea.status === "approved" && (
+          {/* Step 5: Prototype (optional — between Approved and Compile) */}
+          {(idea.status === "approved" || idea.status === "prototyped") && (
+            <PrototypeStage idea={idea} />
+          )}
+
+          {/* Step 6: Compile */}
+          {(idea.status === "approved" || idea.status === "prototyped") && (
             <div className="flex items-center gap-4">
               <div
                 className={`h-10 w-10 rounded-full flex items-center justify-center ${
@@ -892,6 +902,152 @@ function IdeaDetail({
             </div>
           </CardContent>
         </Card>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Prototype Stage Component
+// ============================================================================
+
+function PrototypeStage({ idea }: { idea: VentureIdea }) {
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const [prototypeUrl, setProtoUrl] = useState((idea as any).prototypeUrl || "");
+  const [prototypePlatform, setProtoPlatform] = useState((idea as any).prototypePlatform || "lovable");
+  const [evalText, setEvalText] = useState("");
+  const [showEvalInput, setShowEvalInput] = useState(false);
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      apiRequest("POST", `/api/venture-lab/ideas/${idea.id}/prototype`, { url: prototypeUrl, platform: prototypePlatform }),
+    onSuccess: () => toast({ title: "Prototype saved" }),
+    onError: () => toast({ title: "Failed to save", variant: "destructive" }),
+  });
+
+  const evalMutation = useMutation({
+    mutationFn: () =>
+      apiRequest("POST", `/api/venture-lab/ideas/${idea.id}/evaluate`, { rawText: evalText }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/venture-lab/ideas"] });
+      toast({ title: "Evaluation parsed", description: "Idea updated to Prototyped status." });
+      setShowEvalInput(false);
+    },
+    onError: () => toast({ title: "Parse failed", variant: "destructive" }),
+  });
+
+  const PLATFORM_OPTIONS = [
+    { value: "lovable", label: "Lovable" },
+    { value: "replit", label: "Replit" },
+    { value: "v0", label: "v0" },
+    { value: "genspark", label: "Genspark" },
+    { value: "manus", label: "Manus" },
+    { value: "other", label: "Other" },
+  ];
+
+  const isPrototyped = idea.status === "prototyped";
+
+  return (
+    <div className="border rounded-lg p-4 space-y-4 bg-teal-50/30 dark:bg-teal-900/10 border-teal-200 dark:border-teal-800">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="h-8 w-8 rounded-full flex items-center justify-center bg-teal-500 text-white">
+            <Link className="h-4 w-4" />
+          </div>
+          <div>
+            <div className="font-medium text-sm">5. Prototype (Optional)</div>
+            <div className="text-xs text-muted-foreground">Build in Lovable/Replit/Genspark, then evaluate</div>
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setLocation(`/venture-lab/build`)}
+          className="text-xs"
+        >
+          <Wand2 className="h-3 w-3 mr-1" />
+          Generate Briefs
+        </Button>
+      </div>
+
+      {/* URL + Platform input */}
+      <div className="flex gap-2">
+        <Select value={prototypePlatform} onValueChange={setProtoPlatform}>
+          <SelectTrigger className="w-32 h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PLATFORM_OPTIONS.map(p => (
+              <SelectItem key={p.value} value={p.value} className="text-xs">{p.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
+          placeholder="Paste prototype URL..."
+          value={prototypeUrl}
+          onChange={e => setProtoUrl(e.target.value)}
+          className="h-8 text-xs flex-1"
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          onClick={() => saveMutation.mutate()}
+          disabled={!prototypeUrl || saveMutation.isPending}
+        >
+          {saveMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+        </Button>
+      </div>
+
+      {/* Eval paste area */}
+      {!showEvalInput && !isPrototyped && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs w-full"
+          onClick={() => setShowEvalInput(true)}
+        >
+          <ClipboardPaste className="h-3 w-3 mr-1" />
+          Paste Evaluation Results
+        </Button>
+      )}
+
+      {showEvalInput && (
+        <div className="space-y-2">
+          <Textarea
+            placeholder="Paste evaluation output from Genspark/Manus here..."
+            value={evalText}
+            onChange={e => setEvalText(e.target.value)}
+            rows={6}
+            className="text-xs"
+          />
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              className="text-xs"
+              onClick={() => evalMutation.mutate()}
+              disabled={evalText.length < 100 || evalMutation.isPending}
+            >
+              {evalMutation.isPending ? (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              ) : (
+                <Brain className="mr-1 h-3 w-3" />
+              )}
+              Parse & Analyse
+            </Button>
+            <Button size="sm" variant="ghost" className="text-xs" onClick={() => setShowEvalInput(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {isPrototyped && (
+        <div className="flex items-center gap-2 text-xs text-teal-700 dark:text-teal-300">
+          <CheckCircle2 className="h-4 w-4" />
+          <span>Evaluation complete — readiness score: {(idea as any).prototypeReadinessScore ?? "–"}/100</span>
+        </div>
       )}
     </div>
   );

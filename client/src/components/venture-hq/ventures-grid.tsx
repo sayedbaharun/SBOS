@@ -2,8 +2,28 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Briefcase, FolderKanban, CheckSquare, Target } from "lucide-react";
+import { Briefcase, FolderKanban, CheckSquare, Target, Gauge } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiRequest } from "@/lib/queryClient";
+
+interface ReadinessSummary {
+  ventureId: string;
+  score: number;
+  currentTier: string;
+}
+
+async function fetchReadinessSummary(ventureId: string): Promise<ReadinessSummary> {
+  const res = await apiRequest("GET", `/api/ventures/${ventureId}/launch-readiness`);
+  const data = await res.json();
+  return { ventureId, score: data.score || 0, currentTier: data.currentTier || 'pre-mvp' };
+}
+
+const TIER_BADGE: Record<string, { label: string; className: string }> = {
+  'pre-mvp': { label: 'Pre-MVP', className: 'text-slate-600 border-slate-300' },
+  mvp: { label: 'MVP ✓', className: 'text-amber-600 border-amber-300' },
+  soft: { label: 'Soft ✓', className: 'text-blue-600 border-blue-300' },
+  full: { label: 'Full ✓', className: 'text-green-600 border-green-300' },
+};
 
 interface Venture {
   id: string;
@@ -155,64 +175,106 @@ export default function VenturesGrid({ viewMode, statusFilters }: VenturesGridPr
       {filteredVentures.map((venture) => {
         const stats = getVentureStats(venture.id);
         return (
-          <Card
+          <VentureCard
             key={venture.id}
-            className="cursor-pointer hover:shadow-lg transition-all hover:scale-[1.02] border-l-4"
-            style={{ borderLeftColor: venture.color || "#6366f1" }}
+            venture={venture}
+            stats={stats}
+            getStatusColor={getStatusColor}
+            getDomainColor={getDomainColor}
             onClick={() => setLocation(`/ventures/${venture.slug || venture.id}`)}
-          >
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2">
-                  {venture.icon && <span className="text-2xl">{venture.icon}</span>}
-                  <CardTitle className="text-xl">{venture.name}</CardTitle>
-                </div>
-              </div>
-              {venture.oneLiner && (
-                <CardDescription className="line-clamp-2">
-                  {venture.oneLiner}
-                </CardDescription>
-              )}
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div className="flex gap-2 flex-wrap">
-                  <Badge className={getStatusColor(venture.status)} variant="secondary">
-                    {venture.status}
-                  </Badge>
-                  <Badge className={getDomainColor(venture.domain)} variant="secondary">
-                    {venture.domain}
-                  </Badge>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    <FolderKanban className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">{stats.activeProjects}</span>
-                    <span className="text-muted-foreground">projects</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckSquare className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">{stats.openTasks}</span>
-                    <span className="text-muted-foreground">tasks</span>
-                  </div>
-                </div>
-
-                {venture.primaryFocus && (
-                  <div className="pt-2 border-t">
-                    <div className="flex items-start gap-2 text-sm">
-                      <Target className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                      <p className="text-muted-foreground line-clamp-2">
-                        {venture.primaryFocus}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+          />
         );
       })}
     </div>
+  );
+}
+
+// Separate component so each card can independently fetch its readiness score
+function VentureCard({
+  venture,
+  stats,
+  getStatusColor,
+  getDomainColor,
+  onClick,
+}: {
+  venture: Venture;
+  stats: { activeProjects: number; openTasks: number };
+  getStatusColor: (s: string) => string;
+  getDomainColor: (d: string) => string;
+  onClick: () => void;
+}) {
+  const { data: readiness } = useQuery<ReadinessSummary>({
+    queryKey: [`launch-readiness-${venture.id}`],
+    queryFn: () => fetchReadinessSummary(venture.id),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const tierBadge = readiness && readiness.score > 0
+    ? TIER_BADGE[readiness.currentTier]
+    : null;
+
+  return (
+    <Card
+      className="cursor-pointer hover:shadow-lg transition-all hover:scale-[1.02] border-l-4"
+      style={{ borderLeftColor: venture.color || "#6366f1" }}
+      onClick={onClick}
+    >
+      <CardHeader>
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-2">
+            {venture.icon && <span className="text-2xl">{venture.icon}</span>}
+            <CardTitle className="text-xl">{venture.name}</CardTitle>
+          </div>
+          {tierBadge && (
+            <Badge variant="outline" className={`text-xs ${tierBadge.className} flex-shrink-0`}>
+              <Gauge className="h-3 w-3 mr-1" />
+              {tierBadge.label}
+            </Badge>
+          )}
+        </div>
+        {venture.oneLiner && (
+          <CardDescription className="line-clamp-2">{venture.oneLiner}</CardDescription>
+        )}
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          <div className="flex gap-2 flex-wrap">
+            <Badge className={getStatusColor(venture.status)} variant="secondary">
+              {venture.status}
+            </Badge>
+            <Badge className={getDomainColor(venture.domain)} variant="secondary">
+              {venture.domain}
+            </Badge>
+            {readiness && readiness.score > 0 && (
+              <Badge variant="outline" className="text-xs text-muted-foreground">
+                {readiness.score}/100
+              </Badge>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div className="flex items-center gap-2">
+              <FolderKanban className="h-4 w-4 text-muted-foreground" />
+              <span className="font-medium">{stats.activeProjects}</span>
+              <span className="text-muted-foreground">projects</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <CheckSquare className="h-4 w-4 text-muted-foreground" />
+              <span className="font-medium">{stats.openTasks}</span>
+              <span className="text-muted-foreground">tasks</span>
+            </div>
+          </div>
+
+          {venture.primaryFocus && (
+            <div className="pt-2 border-t">
+              <div className="flex items-start gap-2 text-sm">
+                <Target className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                <p className="text-muted-foreground line-clamp-2">{venture.primaryFocus}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

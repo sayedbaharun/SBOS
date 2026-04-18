@@ -50,6 +50,7 @@ const AgentDetailPage = lazy(() => import("@/pages/agent-detail"));
 const DelegationLogPage = lazy(() => import("@/pages/delegation-log"));
 const PeoplePage = lazy(() => import("@/pages/people"));
 const VentureLab = lazy(() => import("@/pages/venture-lab"));
+const VentureLabBuild = lazy(() => import("@/pages/venture-lab-build"));
 const ResearchInbox = lazy(() => import("@/pages/research-inbox"));
 const ReviewQueue = lazy(() => import("@/pages/review-queue"));
 const LiveTasks = lazy(() => import("@/pages/live-tasks"));
@@ -78,6 +79,7 @@ function Router() {
             <Route path="/dashboard" component={CommandCenterV2} />
             <Route path="/ventures" component={VentureHQ} />
             <Route path="/ventures/:id" component={VentureDetail} />
+            <Route path="/venture-lab/build" component={VentureLabBuild} />
             <Route path="/venture-lab" component={VentureLab} />
             <Route path="/health-hub" component={HealthHub} />
             <Route path="/knowledge" component={KnowledgeHub} />

@@ -988,4 +988,114 @@ ${idea.targetCustomer ? `**Target Customer:** ${idea.targetCustomer}` : ""}
 **Next Steps:** If GO, what to do first`;
 }
 
+// ============================================================================
+// BUILD BRIEF — Generate prompts for Manus/Lovable/Eval
+// ============================================================================
+
+router.post("/ideas/:id/generate-brief", aiRateLimiter, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { ventureType, targetHosting, primaryGoal } = req.body;
+
+    if (!ventureType || !targetHosting || !primaryGoal) {
+      return res.status(400).json({ error: "ventureType, targetHosting, and primaryGoal are required" });
+    }
+
+    const idea = await storage.getVentureIdea(id);
+    if (!idea) return res.status(404).json({ error: "Idea not found" });
+
+    const { generateBuildBrief } = await import("../agents/build-brief-generator");
+    const brief = await generateBuildBrief({
+      name: idea.name,
+      description: idea.description,
+      ventureType,
+      targetHosting,
+      primaryGoal,
+    });
+
+    await storage.updateVentureIdea(id, { buildBriefData: brief as any });
+
+    res.json({ success: true, brief });
+  } catch (err: any) {
+    logger.error("build-brief error", { error: err.message });
+    res.status(500).json({ error: err.message || "Failed to generate brief" });
+  }
+});
+
+// ============================================================================
+// PROTOTYPE — Save external prototype URL + platform
+// ============================================================================
+
+router.post("/ideas/:id/prototype", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { url, platform } = req.body;
+
+    if (!url) return res.status(400).json({ error: "url is required" });
+
+    const idea = await storage.getVentureIdea(id);
+    if (!idea) return res.status(404).json({ error: "Idea not found" });
+
+    await storage.updateVentureIdea(id, {
+      prototypeUrl: url,
+      prototypePlatform: platform || "other",
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to save prototype" });
+  }
+});
+
+// ============================================================================
+// EVALUATE — Parse pasted evaluation text → structured 10-category JSON
+// ============================================================================
+
+router.post("/ideas/:id/evaluate", aiRateLimiter, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { rawText } = req.body;
+
+    if (!rawText || rawText.length < 100) {
+      return res.status(400).json({ error: "rawText is required (minimum 100 characters)" });
+    }
+
+    const idea = await storage.getVentureIdea(id);
+    if (!idea) return res.status(404).json({ error: "Idea not found" });
+
+    const { parseReadinessEvaluation } = await import("../agents/launch-readiness-parser");
+    const parsed = await parseReadinessEvaluation(rawText);
+
+    await storage.updateVentureIdea(id, {
+      prototypeEvalRaw: rawText,
+      prototypeEvalParsed: parsed as any,
+      prototypeReadinessScore: parsed.readinessScore,
+      status: "prototyped",
+    });
+
+    res.json({ success: true, parsed });
+  } catch (err: any) {
+    logger.error("evaluate prototype error", { error: err.message });
+    res.status(500).json({ error: err.message || "Failed to parse evaluation" });
+  }
+});
+
+router.get("/ideas/:id/evaluation", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const idea = await storage.getVentureIdea(id);
+    if (!idea) return res.status(404).json({ error: "Idea not found" });
+
+    res.json({
+      prototypeUrl: idea.prototypeUrl,
+      prototypePlatform: idea.prototypePlatform,
+      prototypeReadinessScore: idea.prototypeReadinessScore,
+      prototypeEvalParsed: idea.prototypeEvalParsed,
+      buildBriefData: idea.buildBriefData,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to get evaluation" });
+  }
+});
+
 export default router;
