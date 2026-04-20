@@ -5,7 +5,7 @@
  * can find them via search_knowledge_base.
  * Also patches the chief-of-staff agent's contextMemory with a ventures reference note.
  *
- * Run standalone:  npx tsx server/seeds/ventures-knowledge.ts
+ * Run standalone:  SEED_STANDALONE=true npx tsx server/seeds/ventures-knowledge.ts
  * Or call:         seedVenturesKnowledge(storage) from an API route / obsidian-watch
  */
 
@@ -113,8 +113,11 @@ export async function seedVenturesKnowledge(storageInstance: IStorage) {
   return results;
 }
 
-// Standalone entrypoint
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+// Standalone entrypoint — only runs when invoked directly with tsx (not when bundled by esbuild).
+// esbuild sets import.meta.url to the bundle file path, making it equal to process.argv[1],
+// which caused process.exit(0) to fire inside the production server and kill it silently.
+// Use SEED_STANDALONE=true instead of the import.meta.url check.
+if (process.env.SEED_STANDALONE === 'true') {
   (async () => {
     const { storage } = await import("../storage");
     await seedVenturesKnowledge(storage);
