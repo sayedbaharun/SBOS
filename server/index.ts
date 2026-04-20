@@ -3,6 +3,7 @@ import 'dotenv/config';
 // Build: 2026-02-20T16:00
 
 import { writeSync } from 'fs';
+import http from 'node:http';
 import crypto from "crypto";
 import express, { type Request, Response, NextFunction } from "express";
 import helmet from "helmet";
@@ -37,8 +38,36 @@ process.on("unhandledRejection", (reason, promise) => {
 process.on("uncaughtException", (err: Error) => {
   _crashLog(`[UNCAUGHT EXCEPTION] ${err.stack || err.message}`);
 });
+process.on('beforeExit', (code) => {
+  _crashLog(`[BEFORE EXIT] code=${code} — event loop empty, process about to exit`);
+});
+process.on('exit', (code) => {
+  _crashLog(`[EXIT] code=${code}`);
+});
+(['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGQUIT'] as NodeJS.Signals[]).forEach(sig => {
+  process.on(sig, () => _crashLog(`[SIGNAL] ${sig} received`));
+});
 
 const app = express();
+
+// Early health sidecar — binds on :8081 before any heavy init.
+// Gives an independent signal: if :8081 responds but :8080/health hangs,
+// the problem is inside Express. If :8081 also stops responding, the whole process is gone.
+let _booting = true;
+const _earlyHealth = http.createServer((req, res) => {
+  if (req.url === '/healthz') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      booting: _booting,
+      pid: process.pid,
+      uptime: Math.round(process.uptime()),
+      rssMB: (process.memoryUsage().rss / 1e6) | 0,
+    }));
+    return;
+  }
+  res.writeHead(404); res.end();
+});
+_earlyHealth.listen(8081, '0.0.0.0', () => _crashLog('[EARLY HEALTH] :8081 bound'));
 
 // Trust proxy for Railway/production deployments
 if (process.env.NODE_ENV === 'production') {
@@ -547,6 +576,7 @@ app.get('/healthz', (_req, res) => {
 
     mem('post-memory');
     appReady = true;
+    _booting = false;
     log('✓ Server ready — all async inits deferred to prevent boot OOM');
 
     // Diagnostic heartbeat: 1-second tick using fs.writeSync (synchronous write to fd=1).
@@ -565,7 +595,8 @@ app.get('/healthz', (_req, res) => {
 
     // Channel adapters (Telegram, WhatsApp) — delayed 30s after boot.
     // Telegraf initialization spikes memory; deferring prevents concurrent OOM with memory systems.
-    setTimeout(() => {
+    // Set DISABLE_DEFERRED=true on Railway to skip all three deferred blocks for diagnostic isolation.
+    if (process.env.DISABLE_DEFERRED !== 'true') setTimeout(() => {
       (async () => {
         try {
           const { registerAdapter, startAllAdapters } = await import('./channels/channel-manager');
@@ -587,7 +618,7 @@ app.get('/healthz', (_req, res) => {
 
     // Memory systems — delayed 90s so channel adapters settle before we fire 5 concurrent imports.
     // These are all non-critical at boot; cron jobs and lazy loaders handle them on demand.
-    setTimeout(() => {
+    if (process.env.DISABLE_DEFERRED !== 'true') setTimeout(() => {
       try {
         import('./memory/qdrant-store').then(({ initCollections, ensurePayloadIndexes }) =>
           initCollections()
@@ -645,7 +676,7 @@ app.get('/healthz', (_req, res) => {
 
     // LLM health monitor + message queue — delayed 60s (after channel adapters settle).
     // processQueue() immediately imports channel-manager → agent-runtime which is expensive.
-    setTimeout(() => {
+    if (process.env.DISABLE_DEFERRED !== 'true') setTimeout(() => {
       try {
         import('./model-manager').then(({ probeProviderHealth }) => {
           probeProviderHealth().catch(() => {});
