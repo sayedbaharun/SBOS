@@ -22,16 +22,20 @@ const { Pool } = pkg;
 validateEnvironmentOrExit();
 
 // Diagnostic handlers — surface silent crashes in Railway logs.
-// Use process.stderr.write (synchronous, unbuffered) so the message appears
-// in Railway logs even if the process exits before stdout is flushed.
-process.on("unhandledRejection", (reason) => {
-  const msg = `[UNHANDLED REJECTION] ${String(reason)}\n`;
-  process.stderr.write(msg);
-  // Node.js v15+ exits after this handler — the write above ensures we see it.
+// Write to BOTH stderr (synchronous) and stdout (via JSON so Railway captures it).
+const _crashLog = (msg: string) => {
+  process.stderr.write(msg + '\n');
+  // Also write structured JSON to stdout so Railway log collector captures it.
+  // Use synchronous write trick: process.stdout._handle?.writeSync is not public,
+  // so we rely on both channels and hope Railway captures at least one.
+  process.stdout.write(JSON.stringify({ level: 'fatal', msg, time: new Date().toISOString() }) + '\n');
+};
+process.on("unhandledRejection", (reason, promise) => {
+  _crashLog(`[UNHANDLED REJECTION] ${String(reason)}`);
+  // Node.js v15+ exits after this handler.
 });
 process.on("uncaughtException", (err: Error) => {
-  const msg = `[UNCAUGHT EXCEPTION] ${err.stack || err.message}\n`;
-  process.stderr.write(msg);
+  _crashLog(`[UNCAUGHT EXCEPTION] ${err.stack || err.message}`);
 });
 
 const app = express();
@@ -544,6 +548,14 @@ app.get('/healthz', (_req, res) => {
     mem('post-memory');
     appReady = true;
     log('✓ Server ready — all async inits deferred to prevent boot OOM');
+
+    // Diagnostic heartbeat: write to stdout every 10s to confirm process is alive.
+    // Raw process.stdout.write bypasses pino buffering for more reliable Railway capture.
+    const _hb = setInterval(() => {
+      const { rss, heapUsed } = process.memoryUsage();
+      process.stdout.write(JSON.stringify({ level: 'info', msg: 'heartbeat', rssMB: (rss/1e6)|0, heapUsedMB: (heapUsed/1e6)|0, time: new Date().toISOString() }) + '\n');
+    }, 10_000);
+    _hb.unref();
 
     // ALL post-boot async work is deferred. Nothing heavy runs at t=0.
     // Order: channel adapters (t+30s) → LLM health + message queue (t+60s) → memory systems (t+120s)
