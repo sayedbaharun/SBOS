@@ -541,43 +541,17 @@ app.get('/healthz', (_req, res) => {
       log('SB-OS automations setup skipped:', String(error));
     }
 
-    // Initialize channel adapters (Telegram, WhatsApp, etc.) — runs independently of DISABLE_CRONS.
-    // Fire-and-forget: adapter startup (especially Telegram setWebhook) can spike memory
-    // transiently. We don't await it so a crash here doesn't block appReady or kill the server.
-    (async () => {
-      try {
-        const { registerAdapter, startAllAdapters } = await import('./channels/channel-manager');
-        const { telegramAdapter } = await import('./channels/adapters/telegram-adapter');
-        registerAdapter(telegramAdapter);
-
-        // Register WhatsApp adapter if configured
-        try {
-          const { whatsappAdapter } = await import('./channels/adapters/whatsapp-adapter');
-          registerAdapter(whatsappAdapter);
-        } catch (waErr) {
-          log('WhatsApp adapter skipped:', String(waErr));
-        }
-
-        await startAllAdapters();
-        log('✓ Channel adapters initialized');
-      } catch (channelError) {
-        log('Channel adapters setup skipped:', String(channelError));
-      }
-    })();
-
-    // Start LLM provider health probing (every 60s)
+    // Start LLM provider health probing (every 60s) — lightweight, immediate
     try {
       const { probeProviderHealth } = await import('./model-manager');
-      // Initial probe
       probeProviderHealth().catch(() => {});
-      // Periodic probe every 60s
       setInterval(() => probeProviderHealth().catch(() => {}), 60_000);
       log('✓ LLM provider health monitor started');
     } catch (healthError) {
       log('Provider health monitor skipped:', String(healthError));
     }
 
-    // Start outbound message queue processor (Project Ironclad) — runs independently of DISABLE_CRONS
+    // Start outbound message queue processor — lightweight, immediate
     try {
       const { startMessageQueueProcessor } = await import('./infra/message-queue');
       startMessageQueueProcessor();
@@ -586,69 +560,88 @@ app.get('/healthz', (_req, res) => {
       log('Message queue processor setup skipped:', String(mqError));
     }
 
-    // Initialize memory systems (non-blocking)
-    try {
-      // Qdrant: create collections if they don't exist, then ensure indexes + KB sync
-      import('./memory/qdrant-store').then(({ initCollections, ensurePayloadIndexes }) =>
-        initCollections()
-          .then(() => ensurePayloadIndexes())
-          .then(() => log('✓ Qdrant memory collections + indexes initialized'))
-          .catch((err: any) => log('⚠ Qdrant init deferred:', err.message))
-      );
-
-      // Qdrant KB: init collection + bulk sync docs
-      // SKIP_QDRANT_BULK_SYNC=true disables sync without a code redeploy (kill switch)
-      if (process.env.SKIP_QDRANT_BULK_SYNC !== 'true') {
-        import('./memory/kb-qdrant').then(({ initKBCollection, bulkSyncDocsToQdrant }) =>
-          initKBCollection()
-            .then(() => bulkSyncDocsToQdrant())
-            .then(({ synced, skipped }) => log(`✓ Qdrant KB: ${synced} docs synced, ${skipped} skipped`))
-            .catch((err: any) => log('⚠ Qdrant KB sync deferred:', err.message))
-        );
-      }
-
-      // Memory indexes: ensure GIN FTS index on agent_memory (idempotent)
-      import('./memory/ensure-indexes').then(({ ensureMemoryIndexes }) =>
-        ensureMemoryIndexes()
-          .catch((err: any) => log('⚠ Memory index init deferred:', err.message))
-      );
-
-      // FalkorDB: init graph schema (if configured)
-      if (process.env.FALKORDB_URL) {
-        import('./memory/graph-store').then(({ initGraphSchema }) =>
-          initGraphSchema()
-            .then(() => log('✓ FalkorDB graph schema initialized'))
-            .catch((err: any) => log('⚠ FalkorDB init deferred:', err.message))
-        );
-      }
-
-      // Pinecone: validate connection + trigger backfill if empty
-      import('./memory/pinecone-store').then(({ getPineconeStatus }) =>
-        getPineconeStatus()
-          .then((status) => {
-            if (status.available) {
-              const count = status.stats?.totalRecordCount || 0;
-              log(`✓ Pinecone connected (${status.indexName}, ${count} records)`);
-              if (count === 0) {
-                log('⚡ Pinecone has 0 records — triggering backfill');
-                import('./agents/scheduled-jobs').then(({ executeScheduledJob }) =>
-                  executeScheduledJob('_system', '_system', 'pinecone_backfill')
-                    .then(() => log('✓ Pinecone backfill complete'))
-                    .catch((err: any) => log('⚠ Pinecone backfill failed:', err.message))
-                ).catch(() => {});
-              }
-            } else {
-              log(`⚠ Pinecone unavailable: ${status.error}`);
-            }
-          })
-          .catch((err: any) => log('⚠ Pinecone check deferred:', err.message))
-      );
-    } catch (error) {
-      log('Memory systems init skipped:', String(error));
-    }
-
     mem('post-memory');
     appReady = true;
+
+    // Channel adapters (Telegram, WhatsApp) — delayed 30s after boot.
+    // Telegraf initialization spikes memory; deferring prevents concurrent OOM with memory systems.
+    setTimeout(() => {
+      (async () => {
+        try {
+          const { registerAdapter, startAllAdapters } = await import('./channels/channel-manager');
+          const { telegramAdapter } = await import('./channels/adapters/telegram-adapter');
+          registerAdapter(telegramAdapter);
+          try {
+            const { whatsappAdapter } = await import('./channels/adapters/whatsapp-adapter');
+            registerAdapter(whatsappAdapter);
+          } catch (waErr) {
+            log('WhatsApp adapter skipped:', String(waErr));
+          }
+          await startAllAdapters();
+          log('✓ Channel adapters initialized');
+        } catch (channelError) {
+          log('Channel adapters setup skipped:', String(channelError));
+        }
+      })();
+    }, 30_000);
+
+    // Memory systems — delayed 90s so channel adapters settle before we fire 5 concurrent imports.
+    // These are all non-critical at boot; cron jobs and lazy loaders handle them on demand.
+    setTimeout(() => {
+      try {
+        import('./memory/qdrant-store').then(({ initCollections, ensurePayloadIndexes }) =>
+          initCollections()
+            .then(() => ensurePayloadIndexes())
+            .then(() => log('✓ Qdrant memory collections + indexes initialized'))
+            .catch((err: any) => log('⚠ Qdrant init deferred:', err.message))
+        );
+
+        if (process.env.SKIP_QDRANT_BULK_SYNC !== 'true') {
+          import('./memory/kb-qdrant').then(({ initKBCollection, bulkSyncDocsToQdrant }) =>
+            initKBCollection()
+              .then(() => bulkSyncDocsToQdrant())
+              .then(({ synced, skipped }) => log(`✓ Qdrant KB: ${synced} docs synced, ${skipped} skipped`))
+              .catch((err: any) => log('⚠ Qdrant KB sync deferred:', err.message))
+          );
+        }
+
+        import('./memory/ensure-indexes').then(({ ensureMemoryIndexes }) =>
+          ensureMemoryIndexes()
+            .catch((err: any) => log('⚠ Memory index init deferred:', err.message))
+        );
+
+        if (process.env.FALKORDB_URL) {
+          import('./memory/graph-store').then(({ initGraphSchema }) =>
+            initGraphSchema()
+              .then(() => log('✓ FalkorDB graph schema initialized'))
+              .catch((err: any) => log('⚠ FalkorDB init deferred:', err.message))
+          );
+        }
+
+        import('./memory/pinecone-store').then(({ getPineconeStatus }) =>
+          getPineconeStatus()
+            .then((status) => {
+              if (status.available) {
+                const count = status.stats?.totalRecordCount || 0;
+                log(`✓ Pinecone connected (${status.indexName}, ${count} records)`);
+                if (count === 0) {
+                  log('⚡ Pinecone has 0 records — triggering backfill');
+                  import('./agents/scheduled-jobs').then(({ executeScheduledJob }) =>
+                    executeScheduledJob('_system', '_system', 'pinecone_backfill')
+                      .then(() => log('✓ Pinecone backfill complete'))
+                      .catch((err: any) => log('⚠ Pinecone backfill failed:', err.message))
+                  ).catch(() => {});
+                }
+              } else {
+                log(`⚠ Pinecone unavailable: ${status.error}`);
+              }
+            })
+            .catch((err: any) => log('⚠ Pinecone check deferred:', err.message))
+        );
+      } catch (error) {
+        log('Memory systems init skipped:', String(error));
+      }
+    }, 90_000);
 
     // Graceful shutdown
     const gracefulShutdown = async () => {
