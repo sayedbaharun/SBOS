@@ -12,10 +12,7 @@ max_delegation_depth: 0
 model_tier: fast
 temperature: 0.2
 schedule:
-  scan_backlog:
-    cron: "0 8,13,18 * * *"
-    timezone: Asia/Dubai
-    task: "Scan all venture task backlogs. For each todo/in_progress task, evaluate if an existing AI agent could carry it out. Tag matching tasks with 'agent-ready' and note which agent in the task notes."
+  scan_backlog: "0 8,13,18 * * *"
 memory_scope: isolated
 ---
 

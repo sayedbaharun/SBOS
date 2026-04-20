@@ -64,29 +64,45 @@ export async function initializeScheduler(): Promise<void> {
   logger.info("Initializing agent scheduler...");
 
   try {
+    logger.info("Scheduler: acquiring DB connection");
     const database = await getDb();
-    const allAgents: Agent[] = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.isActive, true));
+
+    logger.info("Scheduler: querying agents table");
+    const allAgents: Agent[] = await Promise.race([
+      database.select().from(agents).where(eq(agents.isActive, true)),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Scheduler DB query timed out after 15s")), 15000)
+      ),
+    ]);
+    logger.info({ count: allAgents.length }, "Scheduler: agents fetched");
 
     let jobCount = 0;
 
     for (const agent of allAgents) {
-      const schedule = agent.schedule as Record<string, string> | null;
+      const schedule = agent.schedule as Record<string, unknown> | null;
       if (!schedule || Object.keys(schedule).length === 0) continue;
 
       for (const [jobName, cronExpr] of Object.entries(schedule)) {
-        if (!cron.validate(cronExpr)) {
-          logger.warn(
-            { agentSlug: agent.slug, jobName, cronExpr },
-            "Invalid cron expression, skipping"
-          );
-          continue;
+        try {
+          if (typeof cronExpr !== "string") {
+            logger.warn(
+              { agentSlug: agent.slug, jobName },
+              "Schedule value is not a string, skipping"
+            );
+            continue;
+          }
+          if (!cron.validate(cronExpr)) {
+            logger.warn(
+              { agentSlug: agent.slug, jobName, cronExpr },
+              "Invalid cron expression, skipping"
+            );
+            continue;
+          }
+          registerJob(agent, jobName, cronExpr);
+          jobCount++;
+        } catch (jobErr: any) {
+          logger.warn({ agentSlug: agent.slug, jobName, error: jobErr.message }, "registerJob failed, skipping");
         }
-
-        registerJob(agent, jobName, cronExpr);
-        jobCount++;
       }
     }
 
@@ -105,8 +121,11 @@ export async function initializeScheduler(): Promise<void> {
 
 // Jobs that fire too frequently to be worth catching up on restart
 const SKIP_CATCHUP_JOBS = new Set([
-  "embedding_backfill",  // runs every 30 min — next tick handles it
-  "check_credit_balance", // runs every 6h — minor, not worth double-firing
+  "embedding_backfill",        // runs every 30 min — next tick handles it
+  "check_credit_balance",      // runs every 6h — minor, not worth double-firing
+  "drain_scheduled_posts",     // runs every 5 min — 288 missed runs on restart is pointless
+  "post_analytics_backfill",   // runs every 6h — next tick handles it
+  "proactive_morning_loop",    // daily — don't fire hours late
 ]);
 
 /**

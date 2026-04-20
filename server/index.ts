@@ -21,6 +21,14 @@ const { Pool } = pkg;
 // Validate environment variables before starting the application
 validateEnvironmentOrExit();
 
+// Diagnostic handlers — surface silent crashes in Railway logs
+process.on("unhandledRejection", (reason) => {
+  log(`[UNHANDLED REJECTION] ${String(reason)}`);
+});
+process.on("uncaughtException", (err: Error) => {
+  log(`[UNCAUGHT EXCEPTION] ${err.stack || err.message}`);
+});
+
 const app = express();
 
 // Trust proxy for Railway/production deployments
