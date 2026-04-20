@@ -541,25 +541,29 @@ app.get('/healthz', (_req, res) => {
       log('SB-OS automations setup skipped:', String(error));
     }
 
-    // Initialize channel adapters (Telegram, WhatsApp, etc.) — runs independently of DISABLE_CRONS
-    try {
-      const { registerAdapter, startAllAdapters } = await import('./channels/channel-manager');
-      const { telegramAdapter } = await import('./channels/adapters/telegram-adapter');
-      registerAdapter(telegramAdapter);
-
-      // Register WhatsApp adapter if configured
+    // Initialize channel adapters (Telegram, WhatsApp, etc.) — runs independently of DISABLE_CRONS.
+    // Fire-and-forget: adapter startup (especially Telegram setWebhook) can spike memory
+    // transiently. We don't await it so a crash here doesn't block appReady or kill the server.
+    (async () => {
       try {
-        const { whatsappAdapter } = await import('./channels/adapters/whatsapp-adapter');
-        registerAdapter(whatsappAdapter);
-      } catch (waErr) {
-        log('WhatsApp adapter skipped:', String(waErr));
-      }
+        const { registerAdapter, startAllAdapters } = await import('./channels/channel-manager');
+        const { telegramAdapter } = await import('./channels/adapters/telegram-adapter');
+        registerAdapter(telegramAdapter);
 
-      await startAllAdapters();
-      log('✓ Channel adapters initialized');
-    } catch (channelError) {
-      log('Channel adapters setup skipped:', String(channelError));
-    }
+        // Register WhatsApp adapter if configured
+        try {
+          const { whatsappAdapter } = await import('./channels/adapters/whatsapp-adapter');
+          registerAdapter(whatsappAdapter);
+        } catch (waErr) {
+          log('WhatsApp adapter skipped:', String(waErr));
+        }
+
+        await startAllAdapters();
+        log('✓ Channel adapters initialized');
+      } catch (channelError) {
+        log('Channel adapters setup skipped:', String(channelError));
+      }
+    })();
 
     // Start LLM provider health probing (every 60s)
     try {
