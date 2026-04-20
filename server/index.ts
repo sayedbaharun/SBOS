@@ -465,13 +465,6 @@ app.use((req, res, next) => {
       const { scheduleEmbeddingJobs } = await import('./embedding-jobs');
       scheduleEmbeddingJobs();
 
-      // Build BM25 index (async, non-blocking)
-      import('./bm25').then(({ getOrBuildIndex }) =>
-        getOrBuildIndex().catch((err: any) =>
-          log('BM25 index build deferred:', err.message)
-        )
-      );
-
       // Sync agent templates to DB on startup (ensures new schedule entries, tools, permissions are applied)
       try {
         const agentPath = await import('path');
@@ -483,20 +476,31 @@ app.use((req, res, next) => {
         log('Agent template sync skipped: ' + String(syncError));
       }
 
-      // Seed default event subscriptions (fire-and-forget — non-blocking)
-      import('./events/seed-subscriptions').then(({ seedDefaultEventSubscriptions }) => {
-        seedDefaultEventSubscriptions();
-      }).catch(() => {});
+      // Seed default event subscriptions — awaited so it completes before scheduler starts
+      try {
+        const { seedDefaultEventSubscriptions } = await import('./events/seed-subscriptions');
+        await seedDefaultEventSubscriptions();
+      } catch (seedErr) {
+        log('Event subscriptions seed skipped:', String(seedErr));
+      }
 
-      // Seed Obsidian knowledge files (travel + ventures) — fire-and-forget, createDocIfNotExists is idempotent
-      import('./seeds/travel-knowledge').then(({ seedTravelKnowledge }) => {
-        seedTravelKnowledge(storage).catch(() => {});
-      }).catch(() => {});
-      import('./seeds/ventures-knowledge').then(({ seedVenturesKnowledge }) => {
-        seedVenturesKnowledge(storage).catch(() => {});
-      }).catch(() => {});
+      // Seed Obsidian knowledge files — sequential to avoid competing for pg pool + heap with scheduler
+      try {
+        const { seedTravelKnowledge } = await import('./seeds/travel-knowledge');
+        await seedTravelKnowledge(storage);
+      } catch (seedErr) {
+        log('Travel knowledge seed skipped:', String(seedErr));
+      }
+      try {
+        const { seedVenturesKnowledge } = await import('./seeds/ventures-knowledge');
+        await seedVenturesKnowledge(storage);
+      } catch (seedErr) {
+        log('Ventures knowledge seed skipped:', String(seedErr));
+      }
 
       // Initialize agent scheduler (proactive agent execution — reads schedules from DB)
+      // BM25 index is intentionally NOT pre-built here — it builds lazily on first search.
+      // Pre-building at boot caused event-loop blocking / OOM when concurrent with seeds + Qdrant sync.
       const { initializeScheduler } = await import('./agents/agent-scheduler');
       await initializeScheduler();
 
@@ -566,12 +570,15 @@ app.use((req, res, next) => {
       );
 
       // Qdrant KB: init collection + bulk sync docs
-      import('./memory/kb-qdrant').then(({ initKBCollection, bulkSyncDocsToQdrant }) =>
-        initKBCollection()
-          .then(() => bulkSyncDocsToQdrant())
-          .then(({ synced, skipped }) => log(`✓ Qdrant KB: ${synced} docs synced, ${skipped} skipped`))
-          .catch((err: any) => log('⚠ Qdrant KB sync deferred:', err.message))
-      );
+      // SKIP_QDRANT_BULK_SYNC=true disables sync without a code redeploy (kill switch)
+      if (process.env.SKIP_QDRANT_BULK_SYNC !== 'true') {
+        import('./memory/kb-qdrant').then(({ initKBCollection, bulkSyncDocsToQdrant }) =>
+          initKBCollection()
+            .then(() => bulkSyncDocsToQdrant())
+            .then(({ synced, skipped }) => log(`✓ Qdrant KB: ${synced} docs synced, ${skipped} skipped`))
+            .catch((err: any) => log('⚠ Qdrant KB sync deferred:', err.message))
+        );
+      }
 
       // Memory indexes: ensure GIN FTS index on agent_memory (idempotent)
       import('./memory/ensure-indexes').then(({ ensureMemoryIndexes }) =>

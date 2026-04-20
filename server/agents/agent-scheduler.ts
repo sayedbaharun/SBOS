@@ -68,6 +68,8 @@ export async function initializeScheduler(): Promise<void> {
     const database = await getDb();
 
     logger.info("Scheduler: querying agents table");
+    // Protects against a hung pg query (network stall etc.).
+    // Does NOT help with OOM/SIGKILL — kernel kills the event loop before this timer can fire.
     const allAgents: Agent[] = await Promise.race([
       database.select().from(agents).where(eq(agents.isActive, true)),
       new Promise<never>((_, reject) =>

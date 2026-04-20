@@ -190,18 +190,19 @@ export async function searchKB(
 export async function bulkSyncDocsToQdrant(): Promise<{ synced: number; skipped: number }> {
   try {
     const { storage } = await import("../storage");
-    const docs = await storage.getDocs({ status: "active" });
 
     let synced = 0;
     let skipped = 0;
 
-    // Batch in groups of 50
-    const BATCH_SIZE = 50;
-    for (let i = 0; i < docs.length; i += BATCH_SIZE) {
-      const batch = docs.slice(i, i + BATCH_SIZE);
+    // Paginate DB reads — avoids holding the full result set + all embeddings in memory at once
+    const PAGE = 50;
+    for (let offset = 0; ; offset += PAGE) {
+      const docs = await storage.getDocs({ status: "active", limit: PAGE, offset });
+      if (docs.length === 0) break;
+
       const points: Array<{ id: string; vector: number[]; payload: Record<string, unknown> }> = [];
 
-      for (const doc of batch) {
+      for (const doc of docs) {
         if (!doc.embedding) {
           skipped++;
           continue;
@@ -225,8 +226,8 @@ export async function bulkSyncDocsToQdrant(): Promise<{ synced: number; skipped:
             ventureId: doc.ventureId || "none",
             docType: doc.type || "page",
             status: doc.status || "active",
-            keyPoints: doc.keyPoints || [],
-            tags: doc.tags || [],
+            keyPoints: Array.isArray(doc.keyPoints) ? doc.keyPoints : [],
+            tags: Array.isArray(doc.tags) ? doc.tags : [],
             aiReady: doc.aiReady || false,
             qualityScore: doc.qualityScore || 0,
           },
@@ -238,6 +239,8 @@ export async function bulkSyncDocsToQdrant(): Promise<{ synced: number; skipped:
         await qdrant.upsert(COLLECTION, { wait: true, points });
         synced += points.length;
       }
+
+      if (docs.length < PAGE) break;
     }
 
     logger.info({ synced, skipped }, "Bulk synced docs to Qdrant KB");

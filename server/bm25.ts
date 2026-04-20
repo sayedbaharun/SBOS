@@ -243,24 +243,39 @@ export function requestIndexRebuild(): void {
 }
 
 /**
- * Rebuild index from storage
+ * Rebuild index from storage — paginated to avoid holding all docs in memory at once.
+ * Guards keyPoints/tags against non-array JSONB values (fixes "(doc.tags || []).join is not a function").
  */
 async function rebuildFromStorage(): Promise<void> {
   try {
     const { storage } = await import("./storage");
     const { extractTextFromBlocks } = await import("./chunking");
 
-    const docs = await storage.getDocs({ status: "active" });
-    const indexDocs = docs.map((doc: any) => ({
-      id: doc.id,
-      title: doc.title,
-      summary: doc.summary,
-      keyPoints: doc.keyPoints as string[] | null,
-      tags: doc.tags as string[] | null,
-      body:
-        doc.body ||
-        (doc.content ? extractTextFromBlocks(doc.content) : ""),
-    }));
+    const PAGE = 100;
+    const indexDocs: Array<{
+      id: string;
+      title: string;
+      summary?: string | null;
+      keyPoints?: string[] | null;
+      tags?: string[] | null;
+      body?: string | null;
+    }> = [];
+
+    for (let offset = 0; ; offset += PAGE) {
+      const batch = await storage.getDocs({ status: "active", limit: PAGE, offset });
+      if (batch.length === 0) break;
+      for (const doc of batch) {
+        indexDocs.push({
+          id: doc.id,
+          title: doc.title,
+          summary: doc.summary,
+          keyPoints: Array.isArray(doc.keyPoints) ? (doc.keyPoints as string[]) : null,
+          tags: Array.isArray(doc.tags) ? (doc.tags as string[]) : null,
+          body: doc.body || (doc.content ? extractTextFromBlocks(doc.content) : ""),
+        });
+      }
+      if (batch.length < PAGE) break;
+    }
 
     buildBM25Index(indexDocs);
   } catch (error: any) {
