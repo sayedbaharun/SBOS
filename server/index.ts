@@ -541,27 +541,12 @@ app.get('/healthz', (_req, res) => {
       log('SB-OS automations setup skipped:', String(error));
     }
 
-    // Start LLM provider health probing (every 60s) — lightweight, immediate
-    try {
-      const { probeProviderHealth } = await import('./model-manager');
-      probeProviderHealth().catch(() => {});
-      setInterval(() => probeProviderHealth().catch(() => {}), 60_000);
-      log('✓ LLM provider health monitor started');
-    } catch (healthError) {
-      log('Provider health monitor skipped:', String(healthError));
-    }
-
-    // Start outbound message queue processor — lightweight, immediate
-    try {
-      const { startMessageQueueProcessor } = await import('./infra/message-queue');
-      startMessageQueueProcessor();
-      log('✓ Outbound message queue processor started');
-    } catch (mqError) {
-      log('Message queue processor setup skipped:', String(mqError));
-    }
-
     mem('post-memory');
     appReady = true;
+    log('✓ Server ready — all async inits deferred to prevent boot OOM');
+
+    // ALL post-boot async work is deferred. Nothing heavy runs at t=0.
+    // Order: channel adapters (t+30s) → LLM health + message queue (t+60s) → memory systems (t+120s)
 
     // Channel adapters (Telegram, WhatsApp) — delayed 30s after boot.
     // Telegraf initialization spikes memory; deferring prevents concurrent OOM with memory systems.
@@ -641,7 +626,26 @@ app.get('/healthz', (_req, res) => {
       } catch (error) {
         log('Memory systems init skipped:', String(error));
       }
-    }, 90_000);
+    }, 120_000);
+
+    // LLM health monitor + message queue — delayed 60s (after channel adapters settle).
+    // processQueue() immediately imports channel-manager → agent-runtime which is expensive.
+    setTimeout(() => {
+      try {
+        import('./model-manager').then(({ probeProviderHealth }) => {
+          probeProviderHealth().catch(() => {});
+          setInterval(() => probeProviderHealth().catch(() => {}), 60_000);
+          log('✓ LLM provider health monitor started');
+        }).catch(() => {});
+      } catch {}
+
+      try {
+        import('./infra/message-queue').then(({ startMessageQueueProcessor }) => {
+          startMessageQueueProcessor();
+          log('✓ Outbound message queue processor started');
+        }).catch(() => {});
+      } catch {}
+    }, 60_000);
 
     // Graceful shutdown
     const gracefulShutdown = async () => {
