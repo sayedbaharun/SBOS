@@ -21,12 +21,17 @@ const { Pool } = pkg;
 // Validate environment variables before starting the application
 validateEnvironmentOrExit();
 
-// Diagnostic handlers — surface silent crashes in Railway logs
+// Diagnostic handlers — surface silent crashes in Railway logs.
+// Use process.stderr.write (synchronous, unbuffered) so the message appears
+// in Railway logs even if the process exits before stdout is flushed.
 process.on("unhandledRejection", (reason) => {
-  log(`[UNHANDLED REJECTION] ${String(reason)}`);
+  const msg = `[UNHANDLED REJECTION] ${String(reason)}\n`;
+  process.stderr.write(msg);
+  // Node.js v15+ exits after this handler — the write above ensures we see it.
 });
 process.on("uncaughtException", (err: Error) => {
-  log(`[UNCAUGHT EXCEPTION] ${err.stack || err.message}`);
+  const msg = `[UNCAUGHT EXCEPTION] ${err.stack || err.message}\n`;
+  process.stderr.write(msg);
 });
 
 const app = express();

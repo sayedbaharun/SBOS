@@ -128,6 +128,7 @@ const SKIP_CATCHUP_JOBS = new Set([
   "drain_scheduled_posts",     // runs every 5 min — 288 missed runs on restart is pointless
   "post_analytics_backfill",   // runs every 6h — next tick handles it
   "proactive_morning_loop",    // daily — don't fire hours late
+  "email_triage",              // crashing at boot before recording completion → perpetual restart loop
 ]);
 
 /**
