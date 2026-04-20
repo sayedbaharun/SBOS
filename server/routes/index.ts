@@ -83,8 +83,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       timestamp: string;
       checks: {
         database: boolean;
+        memoryUsageMB?: { rss: number; heapUsed: number };
         telegram?: { connected: boolean; lastActivity: string | null; queuePending: number };
         scheduler?: { errorCount: number };
+        qdrantReachable?: boolean;
+        falkordbReachable?: boolean;
+        pineconeReachable?: boolean;
       };
     } = {
       status: 'healthy',
@@ -104,6 +108,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       logger.error({ error }, 'Health check: Database connectivity failed');
       health.status = 'degraded';
     }
+
+    // Current memory usage
+    try {
+      const { rss, heapUsed } = process.memoryUsage();
+      health.checks.memoryUsageMB = { rss: (rss / 1e6) | 0, heapUsed: (heapUsed / 1e6) | 0 };
+    } catch {}
 
     // Telegram adapter status
     try {
@@ -131,6 +141,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const errorCount = schedules.reduce((sum, s) => sum + s.errorCount, 0);
       health.checks.scheduler = { errorCount };
     } catch {}
+
+    // Qdrant reachability (fast — uses existing client)
+    try {
+      const { QdrantClient } = await import("@qdrant/js-client-rest");
+      const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
+      const opts: any = { url: qdrantUrl };
+      if (process.env.QDRANT_API_KEY) opts.apiKey = process.env.QDRANT_API_KEY;
+      const qdrant = new QdrantClient(opts);
+      await qdrant.getCollections();
+      health.checks.qdrantReachable = true;
+    } catch {
+      health.checks.qdrantReachable = false;
+    }
+
+    // FalkorDB reachability
+    try {
+      const { isGraphAvailable } = await import("../memory/graph-store");
+      health.checks.falkordbReachable = await isGraphAvailable();
+    } catch {
+      health.checks.falkordbReachable = false;
+    }
+
+    // Pinecone reachability (fast — non-blocking check)
+    try {
+      const { getPineconeStatus } = await import("../memory/pinecone-store");
+      const pStatus = await getPineconeStatus();
+      health.checks.pineconeReachable = pStatus.available;
+    } catch {
+      health.checks.pineconeReachable = false;
+    }
 
     const statusCode = health.status === 'healthy' ? 200 : 503;
     res.status(statusCode).json(health);

@@ -139,7 +139,7 @@ export async function buildSystemOverview(): Promise<SystemOverview> {
       storage.getShoppingItems(),
       storage.getBooks(),
       storage.getDay(today).catch(() => null),
-      storage.getDocs({}),
+      storage.getDocs({ limit: 200 }),
     ]);
 
     // Calculate venture stats with project/task counts

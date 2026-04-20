@@ -1,0 +1,82 @@
+name: Smoke Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://smoke:smoke@localhost:5432/smoke
+      SESSION_SECRET: smoke-ci-secret-not-real
+      PORT: 8080
+      DISABLE_CRONS: "true"
+      SKIP_QDRANT_BULK_SYNC: "true"
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: smoke
+          POSTGRES_PASSWORD: smoke
+          POSTGRES_DB: smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      - name: Boot smoke test (512 MB cap)
+        run: |
+          # Boot under 512 MB — 16× headroom below Railway Hobby 8 GB limit.
+          # If boot OOMs here it would definitely OOM in prod.
+          node --max-old-space-size=512 dist/index.js &
+          SERVER_PID=$!
+
+          # Wait up to 30s for /healthz to respond
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/healthz 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "✓ /healthz returned 200 after ${i}s"
+              break
+            fi
+            if [ "$i" = "30" ]; then
+              echo "✗ /healthz never returned 200 within 30s (last status: $STATUS)"
+              kill $SERVER_PID 2>/dev/null || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # Check response body contains expected field
+          BODY=$(curl -sf http://localhost:8080/healthz)
+          echo "healthz response: $BODY"
+          echo "$BODY" | grep -q '"status"' || (echo "✗ Missing status field" && exit 1)
+
+          kill $SERVER_PID 2>/dev/null || true
+          echo "✓ Boot smoke test passed"

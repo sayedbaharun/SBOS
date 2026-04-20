@@ -149,8 +149,14 @@ export async function vectorSearchDocs(
     const docsFilter: { ventureId?: string; status?: string } = { status: 'active' };
     if (ventureId) docsFilter.ventureId = ventureId;
 
-    const docs = await storage.getDocs(docsFilter);
-    const docsWithEmbeddings = docs.filter(d => d.embedding);
+    const PAGE_VS = 100;
+    const docsWithEmbeddings: Awaited<ReturnType<typeof storage.getDocs>> = [];
+    for (let offset = 0; ; offset += PAGE_VS) {
+      const batch = await storage.getDocs({ ...docsFilter, limit: PAGE_VS, offset } as any);
+      if (batch.length === 0) break;
+      docsWithEmbeddings.push(...batch.filter(d => d.embedding));
+      if (batch.length < PAGE_VS) break;
+    }
 
     for (const doc of docsWithEmbeddings) {
       const docEmbedding = parseEmbedding(doc.embedding as string);
@@ -300,15 +306,21 @@ export async function keywordSearchDocs(
       score: maxScore > 0 ? r.score / maxScore : 0,
     }));
 
-    // Fetch doc details for top results
+    // Fetch doc details for top results — paginated so we don't hold full result set in memory
     const docsFilter: { ventureId?: string; status?: string } = { status: 'active' };
     if (ventureId) docsFilter.ventureId = ventureId;
-    const docs = await storage.getDocs(docsFilter);
-    const docMap = new Map(docs.map((d) => [d.id, d]));
+    const docMap = new Map<string, Awaited<ReturnType<typeof storage.getDocs>>[number]>();
+    const PAGE_KW = 100;
+    for (let offset = 0; ; offset += PAGE_KW) {
+      const batch = await storage.getDocs({ ...docsFilter, limit: PAGE_KW, offset } as any);
+      if (batch.length === 0) break;
+      for (const d of batch) docMap.set(d.id, d);
+      if (batch.length < PAGE_KW) break;
+    }
 
-    // Filter by venture if needed
+    // Filter by venture if needed — derived from docMap (already contains only matching venture if filter applied)
     const ventureFilteredIds = ventureId
-      ? new Set(docs.filter((d) => String(d.ventureId) === ventureId).map((d) => d.id))
+      ? new Set(Array.from(docMap.values()).filter((d) => String(d.ventureId) === ventureId).map((d) => d.id))
       : null;
 
     const results: VectorSearchResult[] = [];
@@ -487,35 +499,39 @@ export async function findSimilarDocs(
       throw new Error('Invalid embedding for source document');
     }
 
-    // Get all other docs with embeddings
-    const docs = await storage.getDocs({ status: 'active' });
+    // Get all other docs with embeddings — paginated
     const results: VectorSearchResult[] = [];
+    const PAGE_SIM = 100;
+    for (let offset = 0; ; offset += PAGE_SIM) {
+      const batch = await storage.getDocs({ status: 'active', limit: PAGE_SIM, offset } as any);
+      if (batch.length === 0) break;
+      for (const doc of batch) {
+        if (doc.id === docId) continue; // Skip self
+        if (!doc.embedding) continue;
 
-    for (const doc of docs) {
-      if (doc.id === docId) continue; // Skip self
-      if (!doc.embedding) continue;
+        const docEmbedding = parseEmbedding(doc.embedding as string);
+        if (!docEmbedding) continue;
 
-      const docEmbedding = parseEmbedding(doc.embedding as string);
-      if (!docEmbedding) continue;
+        const similarity = cosineSimilarity(sourceEmbedding, docEmbedding);
+        if (similarity < minSimilarity) continue;
 
-      const similarity = cosineSimilarity(sourceEmbedding, docEmbedding);
-      if (similarity < minSimilarity) continue;
+        const summary = doc.summary || '';
+        const bodyText = doc.body || (doc.content ? extractTextFromBlocks(doc.content) : '');
+        const excerpt = summary || bodyText.slice(0, 300);
 
-      const summary = doc.summary || '';
-      const bodyText = doc.body || (doc.content ? extractTextFromBlocks(doc.content) : '');
-      const excerpt = summary || bodyText.slice(0, 300);
-
-      results.push({
-        type: 'doc',
-        id: doc.id,
-        title: doc.title,
-        content: excerpt,
-        similarity,
-        metadata: {
-          docType: doc.type,
-          keyPoints: doc.keyPoints,
-        },
-      });
+        results.push({
+          type: 'doc',
+          id: doc.id,
+          title: doc.title,
+          content: excerpt,
+          similarity,
+          metadata: {
+            docType: doc.type,
+            keyPoints: doc.keyPoints,
+          },
+        });
+      }
+      if (batch.length < PAGE_SIM) break;
     }
 
     // Sort by similarity and limit
@@ -536,13 +552,21 @@ export async function isVectorSearchAvailable(): Promise<{
   totalDocsCount: number;
 }> {
   try {
-    const docs = await storage.getDocs({ status: 'active' });
-    const embeddedCount = docs.filter(d => d.embedding).length;
+    let embeddedCount = 0;
+    let totalDocsCount = 0;
+    const PAGE_VA = 100;
+    for (let offset = 0; ; offset += PAGE_VA) {
+      const batch = await storage.getDocs({ status: 'active', limit: PAGE_VA, offset } as any);
+      if (batch.length === 0) break;
+      totalDocsCount += batch.length;
+      embeddedCount += batch.filter(d => d.embedding).length;
+      if (batch.length < PAGE_VA) break;
+    }
 
     return {
       available: embeddedCount > 0,
       embeddedDocsCount: embeddedCount,
-      totalDocsCount: docs.length,
+      totalDocsCount,
     };
   } catch (error) {
     logger.error({ error }, 'Failed to check vector search availability');

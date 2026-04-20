@@ -1659,8 +1659,15 @@ Process these conversations now. Extract what's valuable, discard what's noise. 
 registerJobHandler("knowledge_audit", async (_agentId: string, _agentSlug: string) => {
   const { storage } = await import("../storage");
 
-  // 1. Get all docs
-  const allDocs = await storage.getDocs({ status: "active" });
+  // 1. Get all docs — paginated to avoid holding full result set in memory
+  const PAGE = 100;
+  const allDocs: Awaited<ReturnType<typeof storage.getDocs>> = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const batch = await storage.getDocs({ status: "active", limit: PAGE, offset });
+    if (batch.length === 0) break;
+    allDocs.push(...batch);
+    if (batch.length < PAGE) break;
+  }
 
   if (allDocs.length === 0) {
     logger.info("Knowledge audit: no active docs found, skipping");

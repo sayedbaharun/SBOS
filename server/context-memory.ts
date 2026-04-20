@@ -99,10 +99,17 @@ async function searchDocsEnhanced(
   if (queryTerms.length === 0) return sources;
 
   try {
-    // Get docs - filter by venture if provided
-    const allDocs = options.ventureId
-      ? await storage.getDocs({ ventureId: options.ventureId, status: 'active' })
-      : await storage.getDocs({ status: 'active' });
+    // Get docs - filter by venture if provided — paginated to avoid holding full result set in memory
+    const PAGE = 100;
+    const allDocs: Awaited<ReturnType<typeof storage.getDocs>> = [];
+    const baseFilter: Record<string, unknown> = { status: 'active' };
+    if (options.ventureId) baseFilter.ventureId = options.ventureId;
+    for (let offset = 0; ; offset += PAGE) {
+      const batch = await storage.getDocs({ ...baseFilter, limit: PAGE, offset } as any);
+      if (batch.length === 0) break;
+      allDocs.push(...batch);
+      if (batch.length < PAGE) break;
+    }
 
     // Score each doc
     const scoredDocs = allDocs.map(doc => {

@@ -267,6 +267,13 @@ app.use((req, res, next) => {
   next();
 });
 
+// Early boot probe — responds before any heavy init completes.
+// Railway health check should point here so a hung startup doesn't cause restart loops.
+let appReady = false;
+app.get('/healthz', (_req, res) => {
+  res.json({ status: appReady ? 'ready' : 'booting', timestamp: new Date().toISOString() });
+});
+
 (async () => {
   // Ensure database schema is up to date (auto-migration for critical fixes)
   await storage.ensureSchema();
@@ -424,6 +431,14 @@ app.use((req, res, next) => {
   }, async () => {
     log(`serving on port ${port}`);
 
+    // Boot memory telemetry — track heap growth across startup phases
+    const mem = (label: string) => {
+      const { rss, heapUsed } = process.memoryUsage();
+      appLogger.info({ rssMB: (rss / 1e6) | 0, heapUsedMB: (heapUsed / 1e6) | 0 }, `mem:${label}`);
+    };
+
+    mem('boot-start');
+
     // Seed default categories if needed
     try {
       const { seedCategories } = await import('./seed-categories');
@@ -432,6 +447,8 @@ app.use((req, res, next) => {
     } catch (error) {
       log('Categories seeding skipped:', String(error));
     }
+
+    mem('post-db-seed');
 
     // Clear stale Telegram webhook ONLY if we're using polling mode
     // If TELEGRAM_WEBHOOK_URL is set, the adapter will set its own webhook
@@ -513,6 +530,7 @@ app.use((req, res, next) => {
         log('Automations setup skipped:', String(automationError));
       }
 
+      mem('post-scheduler');
       log('✓ SB-OS automations initialized (day creation, weekly planning, RAG embeddings, agent scheduler)');
     } catch (error) {
       log('SB-OS automations setup skipped:', String(error));
@@ -619,6 +637,9 @@ app.use((req, res, next) => {
     } catch (error) {
       log('Memory systems init skipped:', String(error));
     }
+
+    mem('post-memory');
+    appReady = true;
 
     // Graceful shutdown
     const gracefulShutdown = async () => {
