@@ -121,14 +121,56 @@ export async function initializeScheduler(): Promise<void> {
   }
 }
 
-// Jobs that fire too frequently to be worth catching up on restart
+// Jobs to skip on catch-up restart.
+// Rule: any job that makes LLM calls, external API calls, or loads large datasets
+// must skip catch-up. These jobs fire at boot BEFORE memory systems are warm,
+// causing OOM or unhandled rejections that crash the container before completion
+// is recorded — creating a perpetual restart loop.
+// Let them run on their next scheduled tick instead.
 const SKIP_CATCHUP_JOBS = new Set([
-  "embedding_backfill",        // runs every 30 min — next tick handles it
-  "check_credit_balance",      // runs every 6h — minor, not worth double-firing
-  "drain_scheduled_posts",     // runs every 5 min — 288 missed runs on restart is pointless
-  "post_analytics_backfill",   // runs every 6h — next tick handles it
-  "proactive_morning_loop",    // daily — don't fire hours late
-  "email_triage",              // crashing at boot before recording completion → perpetual restart loop
+  // High-frequency — next tick handles it
+  "embedding_backfill",
+  "drain_scheduled_posts",
+  "post_analytics_backfill",
+  "proactive_morning_loop",
+  // LLM/external API — crash boot if run before memory is warm
+  "daily_briefing",
+  "weekly_report",
+  "weekly_report_cos",
+  "campaign_review",
+  "tech_review",
+  "venture_status_report",
+  "morning_checkin",
+  "evening_review",
+  "email_triage",
+  "newsletter_digest",
+  "meeting_prep",
+  "inbox_triage",
+  "project_health",
+  "venture_health",
+  "agent_performance",
+  "model_cost_review",
+  "knowledge_extraction",
+  "knowledge_audit",
+  "wiki_generation",
+  "entity_dedup",
+  "content_queue",
+  "github_actions_sha_audit",
+  "venture_digest",
+  "free_model_scout",
+  "scan_backlog",
+  "session_log_extraction",
+  "graph_deepening",
+  "importance_enrichment",
+  "memory_prune",
+  "memory_cleanup",
+  "memory_consolidation",
+  "pinecone_nightly_sync",
+  "qdrant_archive_stale",
+  "syntheliq_reconcile",
+  "check_credit_balance",
+  "pipeline_health_check",
+  "pinecone_backfill",
 ]);
 
 /**
