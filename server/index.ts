@@ -2,6 +2,7 @@
 import 'dotenv/config';
 // Build: 2026-02-20T16:00
 
+import { writeSync } from 'fs';
 import crypto from "crypto";
 import express, { type Request, Response, NextFunction } from "express";
 import helmet from "helmet";
@@ -22,13 +23,12 @@ const { Pool } = pkg;
 validateEnvironmentOrExit();
 
 // Diagnostic handlers — surface silent crashes in Railway logs.
-// Write to BOTH stderr (synchronous) and stdout (via JSON so Railway captures it).
+// writeSync(fd) writes directly into the OS pipe buffer synchronously.
+// The data survives even a SIGKILL because it's already in the kernel buffer.
 const _crashLog = (msg: string) => {
-  process.stderr.write(msg + '\n');
-  // Also write structured JSON to stdout so Railway log collector captures it.
-  // Use synchronous write trick: process.stdout._handle?.writeSync is not public,
-  // so we rely on both channels and hope Railway captures at least one.
-  process.stdout.write(JSON.stringify({ level: 'fatal', msg, time: new Date().toISOString() }) + '\n');
+  const line = JSON.stringify({ level: 'fatal', msg, time: new Date().toISOString() }) + '\n';
+  writeSync(2, msg + '\n');   // stderr
+  writeSync(1, line);          // stdout (captured by Railway log collector)
 };
 process.on("unhandledRejection", (reason, promise) => {
   _crashLog(`[UNHANDLED REJECTION] ${String(reason)}`);
@@ -549,13 +549,16 @@ app.get('/healthz', (_req, res) => {
     appReady = true;
     log('✓ Server ready — all async inits deferred to prevent boot OOM');
 
-    // Diagnostic heartbeat: write to stdout every 10s to confirm process is alive.
-    // Raw process.stdout.write bypasses pino buffering for more reliable Railway capture.
+    // Diagnostic heartbeat: 1-second tick using fs.writeSync (synchronous write to fd=1).
+    // writeSync bypasses Node.js stream buffering and writes directly into the OS pipe buffer.
+    // The kernel pipe buffer survives even if the process OOMs immediately after — Railway reads it.
+    // Last visible tick number = crash time in seconds after appReady.
+    let _hbTick = 0;
     const _hb = setInterval(() => {
+      _hbTick++;
       const { rss, heapUsed } = process.memoryUsage();
-      process.stdout.write(JSON.stringify({ level: 'info', msg: 'heartbeat', rssMB: (rss/1e6)|0, heapUsedMB: (heapUsed/1e6)|0, time: new Date().toISOString() }) + '\n');
-    }, 10_000);
-    _hb.unref();
+      writeSync(1, `{"level":"info","msg":"heartbeat","tick":${_hbTick},"rssMB":${(rss/1e6)|0},"heapMB":${(heapUsed/1e6)|0}}\n`);
+    }, 1000);
 
     // ALL post-boot async work is deferred. Nothing heavy runs at t=0.
     // Order: channel adapters (t+30s) → LLM health + message queue (t+60s) → memory systems (t+120s)
