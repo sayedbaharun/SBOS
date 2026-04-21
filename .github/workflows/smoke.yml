@@ -14,7 +14,7 @@ jobs:
     env:
       NODE_ENV: production
       DATABASE_URL: postgresql://smoke:smoke@localhost:5432/smoke
-      SESSION_SECRET: smoke-ci-secret-not-real
+      SESSION_SECRET: smoke-ci-secret-not-real-padding-x
       PORT: 8080
       DISABLE_CRONS: "true"
       SKIP_QDRANT_BULK_SYNC: "true"
