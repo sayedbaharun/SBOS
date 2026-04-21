@@ -73,6 +73,28 @@ import eventSubscriptionsRoutes from "./event-subscriptions";
 import socialAuthRoutes from "./social-auth";
 import contentIngestRoutes from "./content-ingest";
 
+// Per-downstream probe cache — mirrors model-manager.ts localAvailableCache pattern.
+// Avoids hammering Qdrant / FalkorDB / Pinecone on every /health poll.
+type ProbeCache = { reachable: boolean; lastCheckedAt: string; lastError?: string; checkedAtMs: number };
+const PROBE_TTL_MS = 30_000;
+let qdrantProbeCache: ProbeCache | null = null;
+let falkordbProbeCache: ProbeCache | null = null;
+let pineconeProbeCache: ProbeCache | null = null;
+
+async function getOrProbe(
+  current: ProbeCache | null,
+  probe: () => Promise<{ reachable: boolean; lastError?: string }>
+): Promise<ProbeCache> {
+  if (current && Date.now() - current.checkedAtMs < PROBE_TTL_MS) return current;
+  const nowMs = Date.now();
+  try {
+    const result = await probe();
+    return { reachable: result.reachable, lastError: result.lastError, lastCheckedAt: new Date(nowMs).toISOString(), checkedAtMs: nowMs };
+  } catch (err) {
+    return { reachable: false, lastError: String(err), lastCheckedAt: new Date(nowMs).toISOString(), checkedAtMs: nowMs };
+  }
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
   // HEALTH CHECK (No auth required)
@@ -148,41 +170,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       health.checks.scheduler = { errorCount };
     } catch {}
 
-    // Qdrant reachability (fast — uses existing client)
-    const qdrantProbe: DownstreamProbe = { reachable: false, lastCheckedAt: new Date().toISOString() };
-    try {
-      const { QdrantClient } = await import("@qdrant/js-client-rest");
-      const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
-      const opts: any = { url: qdrantUrl };
-      if (process.env.QDRANT_API_KEY) opts.apiKey = process.env.QDRANT_API_KEY;
-      const qdrant = new QdrantClient(opts);
-      await qdrant.getCollections();
-      qdrantProbe.reachable = true;
-    } catch (err) {
-      qdrantProbe.lastError = String(err);
-    }
-    health.checks.qdrantReachable = qdrantProbe;
+    // Downstream probes — each cached for PROBE_TTL_MS (30s) to avoid hammering external services.
+    const { getQdrantStatus } = await import("../memory/qdrant-store");
+    qdrantProbeCache = await getOrProbe(qdrantProbeCache, async () => {
+      const s = await getQdrantStatus();
+      return { reachable: s.available, lastError: s.error };
+    });
+    health.checks.qdrantReachable = { reachable: qdrantProbeCache.reachable, lastCheckedAt: qdrantProbeCache.lastCheckedAt, lastError: qdrantProbeCache.lastError };
 
-    // FalkorDB reachability
-    const falkorProbe: DownstreamProbe = { reachable: false, lastCheckedAt: new Date().toISOString() };
-    try {
-      const { isGraphAvailable } = await import("../memory/graph-store");
-      falkorProbe.reachable = await isGraphAvailable();
-    } catch (err) {
-      falkorProbe.lastError = String(err);
-    }
-    health.checks.falkordbReachable = falkorProbe;
+    const { isGraphAvailable } = await import("../memory/graph-store");
+    falkordbProbeCache = await getOrProbe(falkordbProbeCache, async () => {
+      const ok = await isGraphAvailable();
+      return { reachable: ok };
+    });
+    health.checks.falkordbReachable = { reachable: falkordbProbeCache.reachable, lastCheckedAt: falkordbProbeCache.lastCheckedAt, lastError: falkordbProbeCache.lastError };
 
-    // Pinecone reachability (fast — non-blocking check)
-    const pineconeProbe: DownstreamProbe = { reachable: false, lastCheckedAt: new Date().toISOString() };
-    try {
-      const { getPineconeStatus } = await import("../memory/pinecone-store");
-      const pStatus = await getPineconeStatus();
-      pineconeProbe.reachable = pStatus.available;
-    } catch (err) {
-      pineconeProbe.lastError = String(err);
-    }
-    health.checks.pineconeReachable = pineconeProbe;
+    const { getPineconeStatus } = await import("../memory/pinecone-store");
+    pineconeProbeCache = await getOrProbe(pineconeProbeCache, async () => {
+      const s = await getPineconeStatus();
+      return { reachable: s.available, lastError: s.error };
+    });
+    health.checks.pineconeReachable = { reachable: pineconeProbeCache.reachable, lastCheckedAt: pineconeProbeCache.lastCheckedAt, lastError: pineconeProbeCache.lastError };
 
     const statusCode = health.status === 'healthy' ? 200 : 503;
     res.status(statusCode).json(health);
