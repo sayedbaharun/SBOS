@@ -266,6 +266,27 @@ export function buildCoreTools(agent: Agent, permissions: string[]): OpenAI.Chat
     });
   }
 
+  // Update existing document
+  if (availableTools.includes("update_doc") && (permissions.includes("create_doc") || permissions.includes("write"))) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "update_doc",
+        description: "Update an existing knowledge base document. Use search_knowledge_base first to get the docId. Provide either body (full replacement) or appendText (appends to existing content).",
+        parameters: {
+          type: "object",
+          properties: {
+            docId: { type: "string", description: "ID of the document to update (get this from search_knowledge_base)" },
+            body: { type: "string", description: "Full replacement content (markdown). Use this to rewrite the document." },
+            appendText: { type: "string", description: "Text to append to the existing document body. Use this to add a new line/entry without rewriting everything." },
+            title: { type: "string", description: "Optional new title" },
+          },
+          required: ["docId"],
+        },
+      },
+    });
+  }
+
   // Submit deliverable (for review before going live)
   if (availableTools.includes("submit_deliverable") && (permissions.includes("create_doc") || permissions.includes("write"))) {
     tools.push({

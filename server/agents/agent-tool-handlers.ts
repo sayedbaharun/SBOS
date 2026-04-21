@@ -318,6 +318,37 @@ export async function executeTool(
         };
       }
 
+      case "update_doc": {
+        const existing = await storage.getDoc(args.docId);
+        if (!existing) {
+          return { result: `Document not found: ${args.docId}`, action: null };
+        }
+
+        const updates: Record<string, any> = {};
+        if (args.title) updates.title = args.title;
+        if (args.body !== undefined) {
+          updates.body = args.body;
+        } else if (args.appendText) {
+          updates.body = `${existing.body || ""}\n${args.appendText}`.trim();
+        }
+
+        if (Object.keys(updates).length === 0) {
+          return { result: "No changes specified — provide body or appendText.", action: null };
+        }
+
+        await storage.updateDoc(existing.id, updates);
+        return {
+          result: `Updated document: "${existing.title}" (ID: ${existing.id})`,
+          action: {
+            actionType: "update_doc",
+            entityType: "doc",
+            entityId: existing.id,
+            parameters: { title: existing.title },
+            status: "success",
+          },
+        };
+      }
+
       case "submit_deliverable": {
         const database = await getDb();
         // Build structured result based on type
