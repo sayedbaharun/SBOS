@@ -19,6 +19,7 @@ jobs:
       DISABLE_CRONS: "true"
       SKIP_QDRANT_BULK_SYNC: "true"
       DISABLE_DEFERRED: "true"
+      OPENROUTER_API_KEY: "sk-smoke-not-real"
 
     services:
       postgres:
