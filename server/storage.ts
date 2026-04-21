@@ -192,7 +192,7 @@ import {
   type InsertVentureLaunchReadiness,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
-import { eq, desc, and, or, gte, lte, not, inArray, like, sql, asc, isNull } from "drizzle-orm";
+import { eq, desc, and, or, gte, lte, not, inArray, like, ilike, sql, asc, isNull } from "drizzle-orm";
 import { db as database } from "../db";
 import { calculateDocQuality } from "./doc-quality";
 
@@ -2110,18 +2110,18 @@ export class DBStorage implements IStorage {
     // Escape LIKE wildcards to prevent wildcard injection attacks
     const escapedQuery = escapeLikeWildcards(query);
 
-    // Search in title and body
+    // ilike = case-insensitive LIKE — "travel" matches "Travel Memberships"
     return await this.db
       .select()
       .from(docs)
       .where(
         or(
-          like(docs.title, `%${escapedQuery}%`),
-          like(docs.body, `%${escapedQuery}%`)
+          ilike(docs.title, `%${escapedQuery}%`),
+          ilike(docs.body, `%${escapedQuery}%`)
         )
       )
       .orderBy(desc(docs.updatedAt))
-      .limit(50); // Reasonable limit for search results
+      .limit(50);
   }
 
   async getDocChildren(parentId: string | null, ventureId?: string): Promise<Doc[]> {
