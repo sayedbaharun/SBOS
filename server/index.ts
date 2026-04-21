@@ -17,6 +17,8 @@ import { setupVite, serveStatic, log } from "./vite";
 import { logger as appLogger } from "./logger";
 import { storage } from "./storage";
 import { validateEnvironmentOrExit } from "./env-validator";
+import { setAppReady } from "./app-state";
+import * as appState from "./app-state";
 
 const { Pool } = pkg;
 
@@ -307,9 +309,8 @@ app.use((req, res, next) => {
 
 // Early boot probe — responds before any heavy init completes.
 // Railway health check should point here so a hung startup doesn't cause restart loops.
-let appReady = false;
 app.get('/healthz', (_req, res) => {
-  res.json({ status: appReady ? 'ready' : 'booting', timestamp: new Date().toISOString() });
+  res.json({ status: appState.appReady ? 'ready' : 'booting', uptimeSec: Math.floor(process.uptime()), timestamp: new Date().toISOString() });
 });
 
 (async () => {
@@ -575,7 +576,7 @@ app.get('/healthz', (_req, res) => {
     }
 
     mem('post-memory');
-    appReady = true;
+    setAppReady();
     _booting = false;
     log('✓ Server ready — all async inits deferred to prevent boot OOM');
 

@@ -77,3 +77,9 @@
 
 - Always pass explicit IANA timezone — default `Asia/Dubai`
 - node-cron v4 + cron-parser v5
+
+## esbuild Bundle Guards
+
+- Files that can run as both a library import AND a standalone script must use `process.env.X_STANDALONE === 'true'` as the guard — never `import.meta.url === process.argv[1]`
+- Reason: esbuild `--bundle` collapses all module URLs to the single bundle entry path, so `import.meta.url === process.argv[1]` is always `true` for every module in the bundle, causing all `process.exit()` guards to fire on boot
+- The CI `R1` grep gate enforces this: any match of `import\.meta\.url.*process\.argv` in `server/` will fail the build

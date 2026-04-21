@@ -113,7 +113,17 @@ export async function buildSystemOverview(): Promise<SystemOverview> {
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
   try {
-    // Fetch all data in parallel for performance
+    // Paginate docs separately to avoid unbounded memory usage
+    const docs: Awaited<ReturnType<typeof storage.getDocs>> = [];
+    const PAGE_DOCS = 100;
+    for (let offset = 0; ; offset += PAGE_DOCS) {
+      const batch = await storage.getDocs({ status: 'active', limit: PAGE_DOCS, offset } as any);
+      if (batch.length === 0) break;
+      docs.push(...batch);
+      if (batch.length < PAGE_DOCS) break;
+    }
+
+    // Fetch remaining data in parallel for performance
     const [
       ventures,
       projects,
@@ -126,7 +136,6 @@ export async function buildSystemOverview(): Promise<SystemOverview> {
       shoppingItems,
       books,
       dayData,
-      docs,
     ] = await Promise.all([
       storage.getVentures(),
       storage.getProjects(),
@@ -139,7 +148,6 @@ export async function buildSystemOverview(): Promise<SystemOverview> {
       storage.getShoppingItems(),
       storage.getBooks(),
       storage.getDay(today).catch(() => null),
-      storage.getDocs({ limit: 200 }),
     ]);
 
     // Calculate venture stats with project/task counts

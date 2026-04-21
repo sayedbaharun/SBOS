@@ -8,6 +8,7 @@ import { storage } from "../storage";
 import { logger } from "../logger";
 import { requireAuth } from "../auth";
 import uploadRoutes from "../upload-routes";
+import * as appState from "../app-state";
 
 // Import all route modules
 import authRoutes from "./auth";
@@ -78,21 +79,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
 
   app.get('/health', async (req, res) => {
+    type DownstreamProbe = { reachable: boolean; lastCheckedAt: string; lastError?: string };
     const health: {
       status: 'healthy' | 'degraded';
       timestamp: string;
+      uptimeSec: number;
+      appReady: boolean;
       checks: {
         database: boolean;
         memoryUsageMB?: { rss: number; heapUsed: number };
         telegram?: { connected: boolean; lastActivity: string | null; queuePending: number };
         scheduler?: { errorCount: number };
-        qdrantReachable?: boolean;
-        falkordbReachable?: boolean;
-        pineconeReachable?: boolean;
+        qdrantReachable?: DownstreamProbe;
+        falkordbReachable?: DownstreamProbe;
+        pineconeReachable?: DownstreamProbe;
       };
     } = {
       status: 'healthy',
       timestamp: new Date().toISOString(),
+      uptimeSec: Math.floor(process.uptime()),
+      appReady: appState.appReady,
       checks: {
         database: false,
       }
@@ -143,6 +149,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch {}
 
     // Qdrant reachability (fast — uses existing client)
+    const qdrantProbe: DownstreamProbe = { reachable: false, lastCheckedAt: new Date().toISOString() };
     try {
       const { QdrantClient } = await import("@qdrant/js-client-rest");
       const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
@@ -150,27 +157,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (process.env.QDRANT_API_KEY) opts.apiKey = process.env.QDRANT_API_KEY;
       const qdrant = new QdrantClient(opts);
       await qdrant.getCollections();
-      health.checks.qdrantReachable = true;
-    } catch {
-      health.checks.qdrantReachable = false;
+      qdrantProbe.reachable = true;
+    } catch (err) {
+      qdrantProbe.lastError = String(err);
     }
+    health.checks.qdrantReachable = qdrantProbe;
 
     // FalkorDB reachability
+    const falkorProbe: DownstreamProbe = { reachable: false, lastCheckedAt: new Date().toISOString() };
     try {
       const { isGraphAvailable } = await import("../memory/graph-store");
-      health.checks.falkordbReachable = await isGraphAvailable();
-    } catch {
-      health.checks.falkordbReachable = false;
+      falkorProbe.reachable = await isGraphAvailable();
+    } catch (err) {
+      falkorProbe.lastError = String(err);
     }
+    health.checks.falkordbReachable = falkorProbe;
 
     // Pinecone reachability (fast — non-blocking check)
+    const pineconeProbe: DownstreamProbe = { reachable: false, lastCheckedAt: new Date().toISOString() };
     try {
       const { getPineconeStatus } = await import("../memory/pinecone-store");
       const pStatus = await getPineconeStatus();
-      health.checks.pineconeReachable = pStatus.available;
-    } catch {
-      health.checks.pineconeReachable = false;
+      pineconeProbe.reachable = pStatus.available;
+    } catch (err) {
+      pineconeProbe.lastError = String(err);
     }
+    health.checks.pineconeReachable = pineconeProbe;
 
     const statusCode = health.status === 'healthy' ? 200 : 503;
     res.status(statusCode).json(health);
