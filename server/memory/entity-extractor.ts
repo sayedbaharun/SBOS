@@ -77,7 +77,7 @@ Rules:
         "X-Title": "SB-OS Entity Extraction",
       },
       body: JSON.stringify({
-        model: "meta-llama/llama-4-scout:free",
+        model: "google/gemini-2.0-flash-exp:free",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: conversationText },

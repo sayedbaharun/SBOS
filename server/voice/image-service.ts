@@ -71,7 +71,7 @@ Return ONLY valid JSON, no markdown.`;
         "X-Title": "SB-OS Vision",
       },
       body: JSON.stringify({
-        model: "meta-llama/llama-4-scout:free",
+        model: "google/gemini-2.0-flash-exp:free",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userContent },

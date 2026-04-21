@@ -369,7 +369,7 @@ ${truncatedText}`;
 
   // Fallback: GPT-4o-mini via OpenRouter
   const response = await openai.chat.completions.create({
-    model: "meta-llama/llama-4-scout:free",
+    model: "google/gemini-2.0-flash-exp:free",
     messages: [
       {
         role: "system",
@@ -403,7 +403,7 @@ Respond in JSON format with this structure:
       hasActionItems: result.hasActionItems || false,
       keyTopics: result.keyTopics || [],
       entities: result.entities || [],
-      processingModel: "meta-llama/llama-4-scout:free",
+      processingModel: "google/gemini-2.0-flash-exp:free",
     },
   };
 }
@@ -540,7 +540,7 @@ Respond in JSON format with this structure:
 
   // Fallback: GPT-4o / GPT-4o-mini via OpenRouter
   const response = await openai.chat.completions.create({
-    model: options.detailed ? "openai/gpt-4o" : "meta-llama/llama-4-scout:free",
+    model: options.detailed ? "openai/gpt-4o" : "google/gemini-2.0-flash-exp:free",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: `Analyze this document:\n\n${truncatedText}` },
@@ -565,7 +565,7 @@ Respond in JSON format with this structure:
       hasActionItems: result.hasActionItems || false,
       keyTopics: result.keyTopics || [],
       entities: result.entities || [],
-      processingModel: options.detailed ? "openai/gpt-4o" : "meta-llama/llama-4-scout:free",
+      processingModel: options.detailed ? "openai/gpt-4o" : "google/gemini-2.0-flash-exp:free",
       processingTime: Date.now() - startTime,
     },
   };

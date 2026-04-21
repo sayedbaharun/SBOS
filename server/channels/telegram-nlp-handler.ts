@@ -171,7 +171,7 @@ async function extractStructured(text: string): Promise<{ intents: any[] }> {
   });
 
   const completion = await openai.chat.completions.create({
-    model: "meta-llama/llama-4-scout:free",
+    model: "google/gemini-2.0-flash-exp:free",
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: text },

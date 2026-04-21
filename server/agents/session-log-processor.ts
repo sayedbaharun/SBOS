@@ -16,7 +16,7 @@ import { sessionLogs, agentMemory, agents } from "@shared/schema";
 import { generateEmbedding, serializeEmbedding } from "../embeddings";
 
 const CLAUDE_CODE_AGENT_ID = "11111111-1111-1111-1111-111111111111";
-const EXTRACTION_MODEL = "meta-llama/llama-4-scout:free";
+const EXTRACTION_MODEL = "google/gemini-2.0-flash-exp:free";
 const BATCH_SIZE = 20;
 
 // Lazy DB

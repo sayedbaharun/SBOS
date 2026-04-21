@@ -2414,17 +2414,17 @@ registerJobHandler("venture_digest", async (_agentId: string, _agentSlug: string
 
 /**
  * Checks OpenRouter's free model list every 5 days.
- * Compares against the current FREE_MINI_MODEL (meta-llama/llama-4-scout:free).
+ * Compares against the current FREE_MINI_MODEL (google/gemini-2.0-flash-exp:free).
  * Only sends a Telegram message to Chief of Staff if a better option is found.
  * Silent if nothing actionable — no spam.
  */
 registerJobHandler("free_model_scout", async (_agentId: string, _agentSlug: string) => {
-  const CURRENT_FREE_MODEL = "meta-llama/llama-4-scout:free";
+  const CURRENT_FREE_MODEL = "google/gemini-2.0-flash-exp:free";
 
   // Known benchmark scores (MMLU / Arena Elo proxy) for comparison
   // Updated manually when this job finds something better
   const KNOWN_BENCHMARKS: Record<string, number> = {
-    "meta-llama/llama-4-scout:free": 78,
+    "google/gemini-2.0-flash-exp:free": 78,
     "meta-llama/llama-4-maverick:free": 82,
     "qwen/qwen3-235b:free": 85,
     "deepseek/deepseek-v3:free": 84,

@@ -94,7 +94,7 @@ async function extractContextSignals(
         "X-Title": "SB-OS Proactive Memory",
       },
       body: JSON.stringify({
-        model: "meta-llama/llama-4-scout:free",
+        model: "google/gemini-2.0-flash-exp:free",
         messages: [
           {
             role: "system",

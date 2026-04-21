@@ -56,7 +56,7 @@ Return a JSON object with these fields:
 Respond with only valid JSON, no markdown.`;
 
     const response = await openai.chat.completions.create({
-      model: "meta-llama/llama-4-scout:free", // Use fast, cheap model for metadata
+      model: "google/gemini-2.0-flash-exp:free", // Use fast, cheap model for metadata
       messages: [{ role: "user", content: prompt }],
       temperature: 0.3,
       max_tokens: 500,

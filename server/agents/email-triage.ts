@@ -145,7 +145,7 @@ async function classifyEmails(emails: any[]): Promise<TriagedEmail[]> {
   }));
 
   const completion = await openai.chat.completions.create({
-    model: "meta-llama/llama-4-scout:free",
+    model: "google/gemini-2.0-flash-exp:free",
     messages: [
       {
         role: "system",

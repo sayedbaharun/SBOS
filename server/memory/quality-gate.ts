@@ -125,7 +125,7 @@ Return ONLY valid JSON: {"relevance": 0.0, "novelty": 0.0, "specificity": 0.0}`;
         "X-Title": "SB-OS Quality Gate",
       },
       body: JSON.stringify({
-        model: "meta-llama/llama-4-scout:free",
+        model: "google/gemini-2.0-flash-exp:free",
         messages: [{ role: "user", content: prompt }],
         max_tokens: 80,
         temperature: 0.0,

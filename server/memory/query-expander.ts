@@ -56,7 +56,7 @@ async function llmExpand(query: string): Promise<ExpandedQueries> {
       "X-Title": "SB-OS Query Expansion",
     },
     body: JSON.stringify({
-      model: "meta-llama/llama-4-scout:free",
+      model: "google/gemini-2.0-flash-exp:free",
       messages: [
         {
           role: "system",

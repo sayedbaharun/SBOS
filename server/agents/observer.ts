@@ -169,7 +169,7 @@ async function tryObserveWithOpenRouter(
       response_format: { type: "json_object" },
     },
     "simple",
-    "meta-llama/llama-4-scout:free",
+    "google/gemini-2.0-flash-exp:free",
   );
 
   const content = response.choices[0]?.message?.content;

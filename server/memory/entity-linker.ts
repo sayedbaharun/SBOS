@@ -12,7 +12,7 @@ import { logger } from "../logger";
 import * as modelManager from "../model-manager";
 import { entityRelations } from "@shared/schema";
 
-const EXTRACTION_MODEL = "meta-llama/llama-4-scout:free";
+const EXTRACTION_MODEL = "google/gemini-2.0-flash-exp:free";
 
 // Lazy DB
 let db: any = null;

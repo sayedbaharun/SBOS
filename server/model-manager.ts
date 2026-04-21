@@ -288,7 +288,7 @@ export async function probeProviderHealth(): Promise<Record<string, "ok" | "erro
  * Benchmarks equal or better than gpt-4o-mini at $0 cost.
  * Updated by free_model_scout cron job every 5 days.
  */
-export const FREE_MINI_MODEL = "meta-llama/llama-4-scout:free";
+export const FREE_MINI_MODEL = "google/gemini-2.0-flash-exp:free";
 
 // ============================================================================
 // LOCAL MODEL (LM Studio / Qwen 3.5)
@@ -408,7 +408,7 @@ const MODEL_COST_PER_MILLION: Record<string, { input: number; output: number }> 
   "anthropic/claude-sonnet-4": { input: 300, output: 1500 },
   "anthropic/claude-3.5-haiku": { input: 80, output: 400 },
   "openai/gpt-4o": { input: 250, output: 1000 },
-  "meta-llama/llama-4-scout:free": { input: 15, output: 60 },
+  "google/gemini-2.0-flash-exp:free": { input: 15, output: 60 },
   "google/gemini-2.5-pro-preview-06-05": { input: 125, output: 1000 },
   "google/gemini-2.5-flash-preview-05-20": { input: 15, output: 60 },
   "google/gemini-2.5-flash-lite": { input: 10, output: 40 },
@@ -465,7 +465,7 @@ export function logTokenUsage(
 // Free-tier models at the end mean we survive even if OpenRouter credits run out
 export const MODEL_CASCADE = [
   { name: "openai/gpt-4o", maxRetries: 2, description: "Primary - Best quality" },
-  { name: "meta-llama/llama-4-scout:free", maxRetries: 2, description: "Fallback 1 - Free fast model" },
+  { name: "google/gemini-2.0-flash-exp:free", maxRetries: 2, description: "Fallback 1 - Free fast model" },
   { name: "anthropic/claude-sonnet-4", maxRetries: 1, description: "Fallback 2 - Reliable Anthropic" },
   { name: "google/gemini-2.0-flash-exp:free", maxRetries: 1, description: "Fallback 3 - Free Gemini catch-all" },
 ] as const;
@@ -483,7 +483,7 @@ export const AVAILABLE_MODELS = [
   { id: "openai/o1", name: "o1", provider: "OpenAI", description: "Advanced reasoning model for complex tasks" },
   { id: "openai/o1-mini", name: "o1-mini", provider: "OpenAI", description: "Faster reasoning model" },
   { id: "openai/gpt-4o", name: "GPT-4o", provider: "OpenAI", description: "Fast, multimodal flagship model" },
-  { id: "meta-llama/llama-4-scout:free", name: "GPT-4o Mini", provider: "OpenAI", description: "Fast and efficient, good for most tasks" },
+  { id: "google/gemini-2.0-flash-exp:free", name: "GPT-4o Mini", provider: "OpenAI", description: "Fast and efficient, good for most tasks" },
   // Google models
   { id: "google/gemini-2.5-pro-preview-06-05", name: "Gemini 2.5 Pro", provider: "Google", description: "Latest Gemini, most capable" },
   { id: "google/gemini-2.5-flash-preview-05-20", name: "Gemini 2.5 Flash", provider: "Google", description: "Fast latest-gen Gemini" },
@@ -531,11 +531,11 @@ export function selectModelForTask(complexity: TaskComplexity): string {
     case "simple":
       // $0-first: use local model for simple tasks when available
       if (localReady) return `local/${LOCAL_MODEL_NAME}`;
-      return "meta-llama/llama-4-scout:free";
+      return "google/gemini-2.0-flash-exp:free";
     case "moderate":
       // $0-first: use local model for moderate tasks when available
       if (localReady) return `local/${LOCAL_MODEL_NAME}`;
-      return "meta-llama/llama-4-scout:free";
+      return "google/gemini-2.0-flash-exp:free";
     case "complex":
       // Complex tasks always use cloud for quality
       return "openai/gpt-4o";

@@ -17,7 +17,7 @@ import { storage } from "../storage";
 const MAX_ROUNDS = 8;
 const TARGET_CHUNKS = 15;
 const SYNTHESIS_MODEL = "google/gemini-flash-1.5-8b";
-const SEARCH_MODEL = "meta-llama/llama-4-scout:free";
+const SEARCH_MODEL = "google/gemini-2.0-flash-exp:free";
 
 interface MemoryChunk {
   id: string;
